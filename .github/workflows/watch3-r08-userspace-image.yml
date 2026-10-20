@@ -123,6 +123,15 @@ jobs:
           set -u
           bitbake -c populate_lic linux-noblesse 2>&1 | tee "$GITHUB_WORKSPACE/image-logs/00-kernel-license-qa.log"
 
+      - name: Validate kernel package QA before rootfs dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -c package_qa linux-noblesse 2>&1 | tee "$GITHUB_WORKSPACE/image-logs/00b-kernel-package-qa.log"
+
       - name: Deploy experimental reference kernel through BitBake
         shell: bash
         run: |
@@ -172,6 +181,7 @@ jobs:
             image-logs/abi-check.txt
             image-logs/image-formats.txt
             image-logs/00-kernel-license-qa.log
+            image-logs/00b-kernel-package-qa.log
             image-logs/01-kernel-deploy.log
             image-logs/02-rootfs-build.log
             image-logs/deployed-files.txt

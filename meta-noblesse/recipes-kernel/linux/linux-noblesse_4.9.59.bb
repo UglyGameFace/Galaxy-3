@@ -43,6 +43,18 @@ do_compile:prepend() {
     ln -sf "${S}/init/uh.elf" "${B}/init/uh.elf"
 }
 
+# Vendor scripts/conmakehash writes its absolute input path into a C comment.
+# Normalize ONLY that generated comment after compilation, before the debug
+# source package is assembled. Preserve BitBake buildpaths QA for all packages.
+do_compile:append() {
+    generated="${B}/drivers/tty/vt/consolemap_deftbl.c"
+    test -f "${generated}" || bbfatal "Missing generated consolemap_deftbl.c; cannot verify path hygiene"
+    sed -i "s#${TMPDIR}#<build-tmpdir>#g" "${generated}"
+    if grep -Fq "${TMPDIR}" "${generated}"; then
+        bbfatal "Vendor consolemap generator leaked TMPDIR into C source"
+    fi
+}
+
 # GCC11 warning compatibility for historical 4.9 tree, for exploratory builds.
 # Real compiler/linker errors remain fatal. Needs review before production use.
 EXTRA_OEMAKE:append = " KCFLAGS=-Wno-error"

@@ -47,6 +47,7 @@ def main() -> int:
         "Broadcom sensor fragment": "tizen_noblesse_brcm_defconfig" in data["kernel"],
         "checks large watch selection": 'grep -qx "CONFIG_NOBLESSE_LARGE=y"' in data["kernel"],
         "vendor ELF build path explicit": '"${B}/init/uh.elf"' in data["kernel"],
+        "generated Unicode mapping path normalized": 'do_compile:append() {' in data["kernel"] and 'consolemap_deftbl.c' in data["kernel"] and 's#${TMPDIR}#<build-tmpdir>#g' in data["kernel"],
         "research image uses minimal OE-Core image": "recipes-core/images/core-image-minimal.bb" in data["image"],
         "research image ext4": 'IMAGE_FSTYPES = "ext4"' in data["image"],
         "documentation records untested boot": "Not yet tested" in data["readme"] and "On-watch boot" in data["readme"],
