@@ -1,0 +1,65 @@
+name: Galaxy Watch3 R08 BitBake metadata parse
+
+# Research-only. This does NOT compile images or flash a device.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'meta-noblesse/**'
+      - '.github/workflows/watch3-r08-bitbake-parse.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bitbake-metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout experimental R08 layer
+        uses: actions/checkout@v4
+      - name: Install minimal OpenEmbedded parse dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git python3 python3-packaging python3-setuptools gawk diffstat
+      - name: Checkout pinned OE-Core and BitBake versions used by AsteroidOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-tags --depth=1 -b whinlatter https://github.com/openembedded/openembedded-core.git oe-core
+          git -C oe-core fetch --no-tags --depth=1 origin 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C oe-core checkout --detach 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git clone --no-tags --depth=1 -b 2.16 https://github.com/openembedded/bitbake.git oe-core/bitbake
+          git -C oe-core/bitbake fetch --no-tags --depth=1 origin 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          git -C oe-core/bitbake checkout --detach 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          test "$(git -C oe-core rev-parse HEAD)" = 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          test "$(git -C oe-core/bitbake rev-parse HEAD)" = 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+      - name: Parse R08 machine and kernel recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/conf parse-logs
+          cat > build/conf/bblayers.conf <<'EOF'
+          BBPATH = "${TOPDIR}"
+          BBLAYERS = "${TOPDIR}/../oe-core/meta ${TOPDIR}/../meta-noblesse"
+          EOF
+          cat > build/conf/local.conf <<'EOF'
+          MACHINE = "noblesse-r08"
+          DISTRO = "nodistro"
+          PACKAGE_CLASSES = "package_ipk"
+          EOF
+          source oe-core/oe-init-build-env build >/dev/null
+          bitbake -p 2>&1 | tee parse-logs/01-parse.log
+          bitbake -e linux-noblesse > parse-logs/02-recipe-env.txt
+          grep -Eq '^SRCREV="ec258e12887d37362b59e3291c1d3e5363c24bff"' parse-logs/02-recipe-env.txt
+          grep -Eq '^MACHINE="noblesse-r08"' parse-logs/02-recipe-env.txt
+          echo 'BitBake metadata parsed. NOT a kernel compilation or working AsteroidOS build.'
+      - name: Archive parse diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: watch3-r08-bitbake-parse-${{ github.run_number }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: parse-logs/
