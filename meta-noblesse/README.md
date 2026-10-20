@@ -92,3 +92,9 @@ authorization to install files on the watch.
 - The minimal Linux `.ext4` baseline **has already built successfully** in [GitHub Actions #5](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39505517130): `do_rootfs`, `do_image_ext4` and all 2,141 BitBake tasks passed.
 - The display driver exposes `tgm-drm`, not a verified standard atomic DRM/KMS interface. No presumed framebuffer name, KMS output, GPU backend, button keycode or bezel mapping is being copied from another watch.
 - The next real implementation tasks after dependency resolution are compositor/display compatibility and input drivers. Until boot/recovery is independently verified, all work stays off-device.
+
+## Verified AsteroidOS recipe-resolution stage
+
+- [AsteroidOS preflight #2](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39514362687) passed full image dependency dry-run, 7,584 tasks, without compilation or flashing.
+- [AsteroidOS R08 machine-package smoke test](https://github.com/UglyGameFace/Galaxy-3/actions/workflows/watch3-r08-asteroidos-machine-package.yml) builds upstream `asteroid-machine-config` for `noblesse-r08` and inspects its installed `machine.conf`. Passing this is **not** a working GUI or display test.
+- No KMS output name, GPU rendering backend, bezel keycode, or boot method has yet been validated on this watch. The Qt6 launcher and display integration remain future work.
