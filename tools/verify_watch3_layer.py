@@ -17,6 +17,7 @@ FILES = {
     "machine": LAYER / "conf" / "machine" / "noblesse-r08.conf",
     "kernel": LAYER / "recipes-kernel" / "linux" / "linux-noblesse_4.9.59.bb",
     "readme": LAYER / "README.md",
+    "image": LAYER / "recipes-core" / "images" / "noblesse-research-image.bb",
 }
 
 def main() -> int:
@@ -36,6 +37,7 @@ def main() -> int:
         "AArch64 default tune": 'DEFAULTTUNE = "cortexa53-nocrypto"' in data["machine"],
         "kernel provider selection": 'PREFERRED_PROVIDER_virtual/kernel = "linux-noblesse"' in data["machine"],
         "ARM64 kernel Image": 'KERNEL_IMAGETYPE = "Image"' in data["machine"],
+        "4.9.59 glibc ABI target": 'OLDEST_KERNEL = "4.9.59"' in data["machine"],
         "correct R08 device tree": EXPECTED_DTB in data["machine"],
         "kernel pinned to audited SHA": f'SRCREV = "{EXPECTED_SHA}"' in data["kernel"],
         "correct reference repository": "UsrBinLuna/kernel_samsung_galileo.git" in data["kernel"],
@@ -45,10 +47,12 @@ def main() -> int:
         "Broadcom sensor fragment": "tizen_noblesse_brcm_defconfig" in data["kernel"],
         "checks large watch selection": 'grep -qx "CONFIG_NOBLESSE_LARGE=y"' in data["kernel"],
         "vendor ELF build path explicit": '"${B}/init/uh.elf"' in data["kernel"],
-        "honest build status note": "BitBake parsing" in data["readme"] and "Not yet tested" in data["readme"],
+        "research image uses minimal OE-Core image": "recipes-core/images/core-image-minimal.bb" in data["image"],
+        "research image ext4": 'IMAGE_FSTYPES = "ext4"' in data["image"],
+        "documentation records untested boot": "Not yet tested" in data["readme"] and "On-watch boot" in data["readme"],
         "no direct flashing or recovery modification commands": not bool(re.search(
             r"(?m)^\s*(?:sdb\s+root|heimdall\s+flash|fastboot\s+flash|dd\s+if=.*\s+of=/dev/)",
-            data["kernel"] + data["machine"]
+            data["kernel"] + data["machine"] + data["image"]
         )),
     }
     for name, ok in checks.items():
@@ -59,7 +63,7 @@ def main() -> int:
     if errors:
         print("Layer metadata is not ready for a BitBake experiment:", ", ".join(errors))
         return 1
-    print("Static metadata checks passed. BitBake and device operation remain UNTESTED.")
+    print("Static metadata checks passed. CI verifies BitBake build; watch boot remains UNTESTED.")
     return 0
 
 

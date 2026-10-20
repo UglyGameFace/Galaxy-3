@@ -47,13 +47,22 @@ proven compatible with standard Wayland/GBM/atomic KMS.
 
 **Already tested**
 - Public reference source audit: 18/18 checks on Termux.
-- R08 reference DTS: successfully compiled in GitHub Actions.
-- R08 kernel `Image`: successfully compiled in GitHub Actions #6.
+- R08 device-tree and Linux 4.9.59 reference `Image` compiled in Actions #6.
+- BitBake metadata parse and source fetch/unpack passed in Actions recipe validation #6.
+- Actual OpenEmbedded kernel configuration/compilation passed in
+  [BitBake build #1](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39474346231).
+- OpenEmbedded compiled `Image` and R08 `dtb` were uploaded as CI artifacts.
+- `noblesse-r08` now targets glibc `OLDEST_KERNEL = "4.9.59"`.
 - Repository uses only `main`.
 
+**In progress**
+- The [off-device rootfs research workflow](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39481244746)
+  tests BitBake kernel deployment and a **minimal Linux** `ext4` userspace
+  image using the corrected minimum kernel ABI.
+
 **Not yet tested**
-- BitBake parsing, resolution, or compilation of this new recipe.
-- Full AsteroidOS root filesystem construction for this machine.
+- Full AsteroidOS UI/root filesystem integration or boot.
+- Compatibility of modern glibc with the watch's actual firmware and kernel.
 - Qt/Wayland compositing, Mali GPU/DRM integration, touch, bezel,
   audio, connectivity, battery and power management under AsteroidOS.
 - On-watch boot, firmware parity, signed boot acceptance, backup and
@@ -66,12 +75,12 @@ proven compatible with standard Wayland/GBM/atomic KMS.
 2. Ensure the selected AsteroidOS/OpenEmbedded branch supports
    `LAYERSERIES_COMPAT = "whinlatter"`, or update the metadata
    after checking the actual project's compatibility.
-3. Configure `MACHINE = "noblesse-r08"`. Then use `bitbake -p`,
-   `bitbake -e linux-noblesse`, and `bitbake linux-noblesse`
-   to establish real BitBake compatibility. These checks **have not**
-   been performed by the current CI.
-4. If the kernel can be built with BitBake, the next engineering task is
-   a real compositor/display and input integration, *not* flashing.
+3. Configure `MACHINE = "noblesse-r08"`. BitBake parsing, kernel
+   source fetch/unpack, configuration and compilation were already verified by
+   Actions. These tests should be rerun if the kernel recipe changes.
+4. The next gates are kernel deployment and minimum userspace image creation,
+   followed by real AsteroidOS graphics/display and input integration,
+   *not* flashing.
 
 Never interpret a green static-validation or kernel-build status as an
 authorization to install files on the watch.

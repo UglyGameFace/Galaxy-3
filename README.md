@@ -33,11 +33,18 @@ The [`meta-noblesse` layer](meta-noblesse/README.md) contains an experimental
 
 - [Static layer checks](https://github.com/UglyGameFace/Galaxy-3/actions/workflows/watch3-r08-layer-static-check.yml)
   passed. This checks metadata structure and provenance, not BitBake.
-- [BitBake metadata parsing](https://github.com/UglyGameFace/Galaxy-3/actions/workflows/watch3-r08-bitbake-parse.yml)
-  is a separate compatibility test against pinned OE-Core `whinlatter` and
-  BitBake `2.16`; see the actual run results for status.
-- Full AsteroidOS root filesystem generation, compositor integration,
-  kernel boot, backup and recovery have **not** been validated.
+- [BitBake metadata parsing and source unpack](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39473830377)
+  passed with pinned OE-Core `whinlatter` and BitBake `2.16`.
+- [BitBake kernel configuration and compilation](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39474346231)
+  passed and produced an ARM64 `Image` and R08 `dtb`.
+- The experimental machine now sets `OLDEST_KERNEL = "4.9.59"` to target
+  the older kernel ABI for prospective glibc userspace. Runtime compatibility
+  is untested.
+- [Experimental minimum userspace build](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39481244746)
+  tests kernel deployment plus a minimal Linux `ext4` filesystem.
+  It is **not** the AsteroidOS UI, and no boot is authorized.
+- Full AsteroidOS userspace, Wayland/Mali compositor integration, on-watch
+  boot, backups and recovery remain unvalidated.
 
 No device connection, signing or flashing steps are present.
 
