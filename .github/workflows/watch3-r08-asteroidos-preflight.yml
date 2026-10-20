@@ -1,0 +1,126 @@
+name: Galaxy Watch3 R08 AsteroidOS integration preflight
+
+# Parse and resolve the real AsteroidOS userspace for R08, WITHOUT compiling packages.
+# Never produces signed, bootable or flashable firmware.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-asteroidos-preflight.yml'
+      - 'meta-noblesse/conf/**'
+      - 'meta-noblesse/recipes-asteroid/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: galaxy3-asteroidos-preflight
+  cancel-in-progress: false
+
+jobs:
+  asteroid-metadata:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Galaxy-3
+        uses: actions/checkout@v4
+      - name: Install metadata parsing prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git python3 python3-packaging python3-setuptools gawk diffstat chrpath
+      - name: Fetch the upstream AsteroidOS metadata layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src preflight-logs
+          get_layer() {
+            local dest="$1" url="$2" branch="$3"
+            git clone --depth=1 --single-branch --branch "$branch" "$url" "src/$dest"
+            printf '%s %s %s\n' "$dest" "$branch" "$(git -C "src/$dest" rev-parse HEAD)" | tee -a preflight-logs/upstream-commits.txt
+          }
+          get_layer oe-core https://github.com/openembedded/openembedded-core.git whinlatter
+          get_layer oe-core/bitbake https://github.com/openembedded/bitbake.git 2.16
+          # Reuse the same known-good core revisions as the successful R08 Linux rootfs.
+          git -C src/oe-core fetch --depth=1 origin 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core checkout --detach 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core/bitbake fetch --depth=1 origin 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          git -C src/oe-core/bitbake checkout --detach 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          get_layer meta-openembedded https://github.com/openembedded/meta-openembedded.git whinlatter
+          get_layer meta-qt6 https://code.qt.io/yocto/meta-qt6.git 6.11
+          get_layer meta-smartphone https://github.com/shr-distribution/meta-smartphone.git whinlatter
+          get_layer meta-clang https://github.com/kraj/meta-clang.git whinlatter
+          get_layer meta-asteroid https://github.com/AsteroidOS/meta-asteroid.git master
+          get_layer meta-asteroid-community https://github.com/AsteroidOS/meta-asteroid-community.git master
+          get_layer meta-virtualization https://git.yoctoproject.org/meta-virtualization whinlatter
+          { echo 'PINNED CORE:'; git -C src/oe-core rev-parse HEAD; git -C src/oe-core/bitbake rev-parse HEAD; } | tee -a preflight-logs/upstream-commits.txt
+          echo 'AsteroidOS source layers downloaded; no kernel or operating system built.'
+      - name: Configure actual AsteroidOS distro with R08 machine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/conf preflight-logs
+          cat > build/conf/bblayers.conf <<'EOF'
+          BBPATH = "${TOPDIR}"
+          BBLAYERS = " \
+            ${TOPDIR}/../src/oe-core/meta \
+            ${TOPDIR}/../src/meta-qt6 \
+            ${TOPDIR}/../src/meta-asteroid \
+            ${TOPDIR}/../src/meta-asteroid-community \
+            ${TOPDIR}/../src/meta-openembedded/meta-oe \
+            ${TOPDIR}/../src/meta-openembedded/meta-multimedia \
+            ${TOPDIR}/../src/meta-openembedded/meta-gnome \
+            ${TOPDIR}/../src/meta-openembedded/meta-networking \
+            ${TOPDIR}/../src/meta-smartphone/meta-android \
+            ${TOPDIR}/../src/meta-openembedded/meta-python \
+            ${TOPDIR}/../src/meta-openembedded/meta-filesystems \
+            ${TOPDIR}/../src/meta-clang \
+            ${TOPDIR}/../src/meta-virtualization \
+            ${TOPDIR}/../meta-noblesse \
+          "
+          EOF
+          cat > build/conf/local.conf <<'EOF'
+          MACHINE = "noblesse-r08"
+          DISTRO = "asteroid"
+          PACKAGE_CLASSES = "package_ipk"
+          BB_NUMBER_THREADS = "3"
+          PARALLEL_MAKE = "-j3"
+          EOF
+      - name: Check actual AsteroidOS recipe and runtime dependency metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -p 2>&1 | tee "$GITHUB_WORKSPACE/preflight-logs/01-layer-parse.txt"
+          bitbake -e asteroid-image > "$GITHUB_WORKSPACE/preflight-logs/image-full-environment.tmp"
+          env_file="$GITHUB_WORKSPACE/preflight-logs/image-full-environment.tmp"
+          grep -Fxq 'MACHINE="noblesse-r08"' "$env_file"
+          grep -Fxq 'DISTRO="asteroid"' "$env_file"
+          grep -Fxq 'PREFERRED_PROVIDER_virtual/kernel="linux-noblesse"' "$env_file"
+          grep -Fxq 'OLDEST_KERNEL="4.9.59"' "$env_file"
+          grep '^IMAGE_INSTALL=' "$env_file" | grep -q 'asteroid-launcher' 
+          grep -E '^(MACHINE|DISTRO|OLDEST_KERNEL|IMAGE_INSTALL|KERNEL_DEVICETREE|PREFERRED_PROVIDER_virtual/kernel)=' "$env_file" > "$GITHUB_WORKSPACE/preflight-logs/02-effective-settings.txt"
+          rm -f "$env_file"
+          echo 'Real AsteroidOS distro and image recipe resolved for R08. No compile yet.'
+      - name: Resolve AsteroidOS image dependencies without building
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -n asteroid-image 2>&1 | tee "$GITHUB_WORKSPACE/preflight-logs/03-image-dry-run.txt"
+          echo 'AsteroidOS dependency dry-run passed. Graphics and on-watch boot NOT validated.'
+      - name: Archive source versions and parsing failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-asteroidos-preflight-${{ github.run_number }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: preflight-logs/

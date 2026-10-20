@@ -84,3 +84,11 @@ proven compatible with standard Wayland/GBM/atomic KMS.
 
 Never interpret a green static-validation or kernel-build status as an
 authorization to install files on the watch.
+
+## Actual AsteroidOS integration preflight
+
+- [Metadata-only AsteroidOS preflight](https://github.com/UglyGameFace/Galaxy-3/actions/workflows/watch3-r08-asteroidos-preflight.yml) checks upstream `meta-asteroid`, Qt6, OpenEmbedded and the local `noblesse-r08` machine together.
+- It parses the `asteroid-image` recipe, checks the effective kernel and glibc ABI, and performs a **dry-run** dependency resolution. It does **not** build the real AsteroidOS image or install anything.
+- The minimal Linux `.ext4` baseline **has already built successfully** in [GitHub Actions #5](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39505517130): `do_rootfs`, `do_image_ext4` and all 2,141 BitBake tasks passed.
+- The display driver exposes `tgm-drm`, not a verified standard atomic DRM/KMS interface. No presumed framebuffer name, KMS output, GPU backend, button keycode or bezel mapping is being copied from another watch.
+- The next real implementation tasks after dependency resolution are compositor/display compatibility and input drivers. Until boot/recovery is independently verified, all work stays off-device.

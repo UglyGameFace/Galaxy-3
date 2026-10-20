@@ -48,4 +48,8 @@ The [`meta-noblesse` layer](meta-noblesse/README.md) contains an experimental
 
 No device connection, signing or flashing steps are present.
 
+## AsteroidOS integration
+
+The [AsteroidOS integration preflight workflow](.github/workflows/watch3-r08-asteroidos-preflight.yml) now attempts to parse and resolve the **real** AsteroidOS `asteroid-image` metadata for `MACHINE=noblesse-r08` without compiling a flashable image. See the live workflow for actual results. Display, input, secure boot and recovery remain unverified.
+
 **Do not flash artifacts from this repository to the watch.**
