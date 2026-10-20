@@ -18,11 +18,27 @@ to match the production firmware.
 
 These are historical *reference* files, not proven firmware-matched replacements.
 
-## Building
+## Verified reference compilation
 
-See the `Galaxy Watch3 R08 reference kernel build` GitHub Actions workflow.
-It cross-compiles the reference device tree and kernel on an Ubuntu runner, saves
-build logs and (if compilation succeeds) experimental build outputs. No device connection,
-signing or flashing steps are present.
+GitHub Actions run [#6](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39468714090)
+successfully cross-compiled the pinned Samsung Linux 4.9.59 reference kernel
+`Image` and `exynos9110-tizen_noblesse_large_bt-r08.dtb`.
+The original source needed modern GCC warning compatibility at build time.
+These are **unverified experimental reference binaries**.
+
+## AsteroidOS / OpenEmbedded adaptation (in progress)
+
+The [`meta-noblesse` layer](meta-noblesse/README.md) contains an experimental
+`noblesse-r08` machine configuration and pinned reference kernel recipe.
+
+- [Static layer checks](https://github.com/UglyGameFace/Galaxy-3/actions/workflows/watch3-r08-layer-static-check.yml)
+  passed. This checks metadata structure and provenance, not BitBake.
+- [BitBake metadata parsing](https://github.com/UglyGameFace/Galaxy-3/actions/workflows/watch3-r08-bitbake-parse.yml)
+  is a separate compatibility test against pinned OE-Core `whinlatter` and
+  BitBake `2.16`; see the actual run results for status.
+- Full AsteroidOS root filesystem generation, compositor integration,
+  kernel boot, backup and recovery have **not** been validated.
+
+No device connection, signing or flashing steps are present.
 
 **Do not flash artifacts from this repository to the watch.**
