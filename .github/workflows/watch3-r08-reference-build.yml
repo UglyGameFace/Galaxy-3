@@ -52,8 +52,8 @@ jobs:
             echo "Kernel reference: $KERNEL_REPO"
             echo "Pinned revision: $KERNEL_SHA"
             date -u '+Build UTC: %Y-%m-%dT%H:%M:%SZ'
-            aarch64-linux-gnu-gcc --version | head -1
-            make --version | head -1
+            aarch64-linux-gnu-gcc --version | sed -n '1p'
+            make --version | sed -n '1p'
           } | tee build-logs/build-context.txt
           test -f kernel/arch/arm64/boot/dts/exynos/exynos9110-tizen_noblesse_large_bt-r08.dts
           test -f kernel/arch/arm64/configs/tizen_noblesse_defconfig
@@ -119,6 +119,7 @@ jobs:
         with:
           name: watch3-r08-reference-build-${{ github.run_number }}
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 14
           path: |
             build-logs/
