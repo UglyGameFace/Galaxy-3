@@ -38,6 +38,7 @@ def main() -> int:
         "kernel provider selection": 'PREFERRED_PROVIDER_virtual/kernel = "linux-noblesse"' in data["machine"],
         "ARM64 kernel Image": 'KERNEL_IMAGETYPE = "Image"' in data["machine"],
         "4.9.59 glibc ABI target": 'OLDEST_KERNEL = "4.9.59"' in data["machine"],
+        "AsteroidOS glibc ABI override": 'OLDEST_KERNEL:noblesse-r08 = "4.9.59"' in data["machine"],
         "correct R08 device tree": EXPECTED_DTB in data["machine"],
         "kernel pinned to audited SHA": f'SRCREV = "{EXPECTED_SHA}"' in data["kernel"],
         "correct reference repository": "UsrBinLuna/kernel_samsung_galileo.git" in data["kernel"],

@@ -99,11 +99,23 @@ jobs:
           bitbake -p 2>&1 | tee "$GITHUB_WORKSPACE/preflight-logs/01-layer-parse.txt"
           bitbake -e asteroid-image > "$GITHUB_WORKSPACE/preflight-logs/image-full-environment.tmp"
           env_file="$GITHUB_WORKSPACE/preflight-logs/image-full-environment.tmp"
-          grep -Fxq 'MACHINE="noblesse-r08"' "$env_file"
-          grep -Fxq 'DISTRO="asteroid"' "$env_file"
-          grep -Fxq 'PREFERRED_PROVIDER_virtual/kernel="linux-noblesse"' "$env_file"
-          grep -Fxq 'OLDEST_KERNEL="4.9.59"' "$env_file"
-          grep '^IMAGE_INSTALL=' "$env_file" | grep -q 'asteroid-launcher' 
+          check_setting() {
+            local key="$1" expected="$2" found
+            found="$(grep -m1 "^${key}=" "$env_file" || true)"
+            echo "CHECK ${key}: ${found:-MISSING}"
+            if [ "$found" != "${key}=\"${expected}\"" ]; then
+              echo "::error title=AsteroidOS metadata mismatch::${key} expected ${expected}, found ${found:-MISSING}"
+              return 1
+            fi
+          }
+          check_setting MACHINE noblesse-r08
+          check_setting DISTRO asteroid
+          check_setting PREFERRED_PROVIDER_virtual/kernel linux-noblesse
+          check_setting OLDEST_KERNEL 4.9.59
+          if ! grep -Eq '^IMAGE_INSTALL=.*asteroid-launcher' "$env_file"; then
+            echo "::error title=AsteroidOS launcher missing::IMAGE_INSTALL does not contain asteroid-launcher"
+            exit 1
+          fi
           grep -E '^(MACHINE|DISTRO|OLDEST_KERNEL|IMAGE_INSTALL|KERNEL_DEVICETREE|PREFERRED_PROVIDER_virtual/kernel)=' "$env_file" > "$GITHUB_WORKSPACE/preflight-logs/02-effective-settings.txt"
           rm -f "$env_file"
           echo 'Real AsteroidOS distro and image recipe resolved for R08. No compile yet.'
