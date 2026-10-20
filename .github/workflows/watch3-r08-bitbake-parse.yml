@@ -1,6 +1,6 @@
-name: Galaxy Watch3 R08 BitBake metadata parse
+name: Galaxy Watch3 R08 BitBake recipe validation
 
-# Research-only. This does NOT compile images or flash a device.
+# Research-only. Metadata parse plus source fetch/unpack. No flashing or compilation.
 on:
   push:
     branches: [main]
@@ -35,7 +35,7 @@ jobs:
           git -C oe-core/bitbake checkout --detach 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
           test "$(git -C oe-core rev-parse HEAD)" = 8751ec83421192fc0f8495fb95798f9eb7be77a0
           test "$(git -C oe-core/bitbake rev-parse HEAD)" = 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
-      - name: Parse R08 machine and kernel recipe
+      - name: Parse R08 recipe and fetch pinned kernel source
         shell: bash
         run: |
           set -euo pipefail
@@ -57,7 +57,9 @@ jobs:
           bitbake -e linux-noblesse > "$GITHUB_WORKSPACE/parse-logs/02-recipe-env.txt"
           grep -Eq '^SRCREV="ec258e12887d37362b59e3291c1d3e5363c24bff"' "$GITHUB_WORKSPACE/parse-logs/02-recipe-env.txt"
           grep -Eq '^MACHINE="noblesse-r08"' "$GITHUB_WORKSPACE/parse-logs/02-recipe-env.txt"
-          echo 'BitBake metadata parsed. NOT a kernel compilation or working AsteroidOS build.'
+          echo 'BitBake metadata parsed. Now verifying pinned source fetch/unpack.'
+          bitbake -c unpack linux-noblesse 2>&1 | tee "$GITHUB_WORKSPACE/parse-logs/03-fetch-unpack.log"
+          echo 'BitBake fetch/unpack succeeded. NOT a kernel compilation or working AsteroidOS build.'
       - name: Archive parse diagnostics
         if: always()
         uses: actions/upload-artifact@v4
