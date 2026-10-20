@@ -1,0 +1,112 @@
+name: Galaxy Watch3 R08 BitBake kernel research build
+
+# Experimental, off-device build. NEVER flash the outputs to a watch.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-bitbake-kernel.yml'
+      - 'meta-noblesse/recipes-kernel/linux/**'
+      - 'meta-noblesse/conf/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: galaxy3-r08-bitbake-kernel
+  cancel-in-progress: false
+
+jobs:
+  kernel-bitbake:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 110
+    steps:
+      - name: Check out experimental meta-noblesse layer
+        uses: actions/checkout@v4
+      - name: Install OpenEmbedded host prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git chrpath build-essential cpio diffstat gawk file \
+            libssl-dev texinfo python3 python3-packaging python3-setuptools \
+            wget zstd liblz4-tool bc bison flex xz-utils unzip zip locales
+          df -h .
+      - name: Fetch verified OE-Core and BitBake references
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-tags --depth=1 -b whinlatter https://github.com/openembedded/openembedded-core.git oe-core
+          git -C oe-core fetch --no-tags --depth=1 origin 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C oe-core checkout --detach 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git clone --no-tags --depth=1 -b 2.16 https://github.com/openembedded/bitbake.git oe-core/bitbake
+          git -C oe-core/bitbake fetch --no-tags --depth=1 origin 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          git -C oe-core/bitbake checkout --detach 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          test "$(git -C oe-core rev-parse HEAD)" = 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          test "$(git -C oe-core/bitbake rev-parse HEAD)" = 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+      - name: Configure build with correct R08 machine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/conf build-logs
+          cat > build/conf/bblayers.conf <<'EOF'
+          BBPATH = "${TOPDIR}"
+          BBLAYERS = "${TOPDIR}/../oe-core/meta ${TOPDIR}/../meta-noblesse"
+          EOF
+          cat > build/conf/local.conf <<'EOF'
+          MACHINE = "noblesse-r08"
+          DISTRO = "nodistro"
+          PACKAGE_CLASSES = "package_ipk"
+          BB_NUMBER_THREADS = "3"
+          PARALLEL_MAKE = "-j3"
+          EOF
+          {
+            echo 'EXPERIMENTAL REFERENCE BUILD ONLY, NOT FOR FLASHING'
+            echo 'Device: Galaxy Watch3 SM-R840X, NOBLESSE-LARGE-BT R08'
+            echo 'Watch firmware: R840XXXU1AUA2, source not firmware-verified'
+            echo 'Kernel source SHA: ec258e12887d37362b59e3291c1d3e5363c24bff'
+            echo 'OE-Core SHA: 8751ec83421192fc0f8495fb95798f9eb7be77a0'
+            echo 'BitBake SHA: 713fbbdb9ecc195ceb2216a2345e0d79dbee2135'
+            df -h .
+          } | tee build-logs/context.txt
+      - name: Configure Samsung kernel via BitBake
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -c configure linux-noblesse 2>&1 | tee "$GITHUB_WORKSPACE/build-logs/01-bitbake-configure.log"
+          echo 'BitBake configure passed. This does not prove the kernel image is bootable.'
+      - name: Compile Samsung kernel via BitBake
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -c compile linux-noblesse 2>&1 | tee "$GITHUB_WORKSPACE/build-logs/02-bitbake-compile.log"
+          echo 'BitBake compile task passed. Boot and recovery are NOT verified.'
+      - name: Collect diagnostic logs and successful reference binaries
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-logs/task-logs build-logs/outputs
+          for kind in configure compile fetch unpack patch; do
+            while IFS= read -r -d '' p; do
+              cp "$p" "build-logs/task-logs/$(basename "$(dirname "$p")")-$(basename "$p")" || true
+            done < <(find build/tmp/work -type f -name "log.do_${kind}.*" -path '*/linux-noblesse/*' -print0 2>/dev/null || true)
+          done
+          find build/tmp/work -type f \( -name 'Image' -o -name 'exynos9110-tizen_noblesse_large_bt-r08.dtb' \) -path '*/linux-noblesse/*' -print -exec cp -n '{}' build-logs/outputs/ \; 2>/dev/null || true
+          df -h . || true
+      - name: Upload build diagnostics and experimental files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-bitbake-kernel-${{ github.run_number }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: build-logs/
