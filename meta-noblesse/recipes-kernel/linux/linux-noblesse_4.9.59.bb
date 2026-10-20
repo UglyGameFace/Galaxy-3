@@ -3,7 +3,7 @@ DESCRIPTION = "Off-device kernel research only; no Watch3 flash or recovery vali
 HOMEPAGE = "https://github.com/UsrBinLuna/kernel_samsung_galileo"
 SECTION = "kernel"
 LICENSE = "GPL-2.0-only"
-LIC_FILES_CHKSUM = "file://COPYING;md5=6bc538ed5bd9a7fc9398086aedcd7e46"
+LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
 COMPATIBLE_MACHINE = "^noblesse-r08$"
 
 inherit kernel

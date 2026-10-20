@@ -7,6 +7,8 @@ on:
     paths:
       - '.github/workflows/watch3-r08-userspace-image.yml'
       - 'meta-noblesse/recipes-core/images/noblesse-research-image.bb'
+      - 'meta-noblesse/recipes-kernel/linux/linux-noblesse_4.9.59.bb'
+      - 'tools/check_watch3_kernel_license.py'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +25,9 @@ jobs:
     steps:
       - name: Check out Galaxy-3 research source
         uses: actions/checkout@v4
+
+      - name: Fail fast on pinned source license checksum
+        run: python3 tools/check_watch3_kernel_license.py
 
       - name: Install OpenEmbedded host prerequisites
         shell: bash
@@ -49,12 +54,12 @@ jobs:
           test "$(git -C oe-core/bitbake rev-parse HEAD)" = 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
 
       - name: Restore shared downloads and build state
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             build/downloads
             build/sstate-cache
-          key: galaxy3-r08-oe-whinlatter-${{ runner.os }}-${{ github.sha }}
+          key: galaxy3-r08-oe-whinlatter-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             galaxy3-r08-oe-whinlatter-${{ runner.os }}-
 
@@ -109,6 +114,15 @@ jobs:
           }
           echo 'R08 machine, 4.9.59 ABI, and ext4 metadata validated' | tee "$GITHUB_WORKSPACE/image-logs/abi-check.txt"
 
+      - name: Run BitBake license QA before userspace dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -c populate_lic linux-noblesse 2>&1 | tee "$GITHUB_WORKSPACE/image-logs/00-kernel-license-qa.log"
+
       - name: Deploy experimental reference kernel through BitBake
         shell: bash
         run: |
@@ -157,8 +171,18 @@ jobs:
             image-logs/context.txt
             image-logs/abi-check.txt
             image-logs/image-formats.txt
+            image-logs/00-kernel-license-qa.log
             image-logs/01-kernel-deploy.log
             image-logs/02-rootfs-build.log
             image-logs/deployed-files.txt
             image-logs/task-logs/
             image-logs/outputs/
+
+      - name: Save reusable source and build cache even after failure
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/downloads
+            build/sstate-cache
+          key: galaxy3-r08-oe-whinlatter-${{ runner.os }}-${{ github.run_id }}
