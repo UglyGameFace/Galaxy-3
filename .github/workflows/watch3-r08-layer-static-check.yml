@@ -1,0 +1,27 @@
+name: Galaxy Watch3 R08 OpenEmbedded layer static checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'meta-noblesse/**'
+      - 'tools/verify_watch3_layer.py'
+      - '.github/workflows/watch3-r08-layer-static-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-r08-metadata:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout research repository
+        uses: actions/checkout@v4
+      - name: Validate R08 metadata safety and provenance
+        run: python3 tools/verify_watch3_layer.py
+      - name: Explain scope
+        run: |
+          echo 'Metadata checks only. NOT a BitBake parse, kernel build, or hardware test.'
+          echo 'No watch connected; no flash or recovery operations.'
