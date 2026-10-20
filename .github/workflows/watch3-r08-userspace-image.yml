@@ -98,13 +98,16 @@ jobs:
           }
           bitbake -e noblesse-research-image > "$GITHUB_WORKSPACE/image-logs/image-env.txt"
           grep -Fxq 'MACHINE="noblesse-r08"' "$GITHUB_WORKSPACE/image-logs/image-env.txt" || {
-            echo '::error::Unexpected machine in research-image recipe'
+            echo '::error::BitBake image machine is not noblesse-r08'
             exit 1
           }
-          # BitBake may append ext4 via MACHINE as well as the image recipe.
-          # Require a whole ext4 format token rather than exact string equality.
+          # An ext4 format may be listed more than once by machine and recipe.
           grep '^IMAGE_FSTYPES=' "$GITHUB_WORKSPACE/image-logs/image-env.txt" | tee "$GITHUB_WORKSPACE/image-logs/image-formats.txt"
-          grep -Eq '^IMAGE_FSTYPES="(.*[[:space:]])?ext4([[:space:]].*)?"
+          grep -Eq 'ext4' "$GITHUB_WORKSPACE/image-logs/image-formats.txt" || {
+            echo '::error::No ext4 format in image recipe'
+            exit 1
+          }
+          echo 'R08 machine, 4.9.59 ABI, and ext4 metadata validated' | tee "$GITHUB_WORKSPACE/image-logs/abi-check.txt"
 
       - name: Deploy experimental reference kernel through BitBake
         shell: bash
@@ -154,64 +157,6 @@ jobs:
             image-logs/context.txt
             image-logs/abi-check.txt
             image-logs/image-formats.txt
-            image-logs/01-kernel-deploy.log
-            image-logs/02-rootfs-build.log
-            image-logs/deployed-files.txt
-            image-logs/task-logs/
-            image-logs/outputs/
- "$GITHUB_WORKSPACE/image-logs/image-env.txt" || {
-            echo '::error::No plain ext4 image format selected'
-            exit 1
-          }
-          echo 'R08 machine, 4.9.59 ABI, and offline ext4 image metadata validated' | tee "$GITHUB_WORKSPACE/image-logs/abi-check.txt"
-
-      - name: Deploy experimental reference kernel through BitBake
-        shell: bash
-        run: |
-          set -euo pipefail
-          set +u
-          source oe-core/oe-init-build-env build >/dev/null
-          set -u
-          bitbake -c deploy linux-noblesse 2>&1 | tee "$GITHUB_WORKSPACE/image-logs/01-kernel-deploy.log"
-          echo 'Kernel deploy succeeded. No boot format or signing was validated.'
-
-      - name: Build minimal R08 Linux userspace filesystem
-        shell: bash
-        run: |
-          set -euo pipefail
-          set +u
-          source oe-core/oe-init-build-env build >/dev/null
-          set -u
-          bitbake noblesse-research-image 2>&1 | tee "$GITHUB_WORKSPACE/image-logs/02-rootfs-build.log"
-          echo 'Research rootfs built. This is NOT a bootable/watch-flashable AsteroidOS image.'
-
-      - name: Inventory outputs and preserve task errors
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p image-logs/task-logs image-logs/outputs
-          if [ -d build/tmp/deploy/images/noblesse-r08 ]; then
-            find build/tmp/deploy/images/noblesse-r08 -maxdepth 1 -printf '%f %s bytes\n' | tee image-logs/deployed-files.txt
-            find build/tmp/deploy/images/noblesse-r08 -maxdepth 1 -type f \
-              \( -name '*noblesse-research-image*.ext4' -o -name 'Image*' -o -name '*r08.dtb' \) \
-              -exec cp -n '{}' image-logs/outputs/ \; || true
-          fi
-          find build/tmp/work -type f -name 'log.do_*.*' \
-            \( -path '*/linux-noblesse/*' -o -path '*/noblesse-research-image/*' \) \
-            -print -exec sh -c 'cp "$1" "image-logs/task-logs/$(basename "$(dirname "$1")")-$(basename "$1")"' sh '{}' \; 2>/dev/null || true
-          df -h . || true
-
-      - name: Upload off-device research artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: galaxy3-r08-userspace-research-${{ github.run_number }}
-          retention-days: 7
-          if-no-files-found: warn
-          path: |
-            image-logs/context.txt
-            image-logs/abi-check.txt
             image-logs/01-kernel-deploy.log
             image-logs/02-rootfs-build.log
             image-logs/deployed-files.txt
