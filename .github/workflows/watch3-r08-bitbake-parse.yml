@@ -49,11 +49,14 @@ jobs:
           DISTRO = "nodistro"
           PACKAGE_CLASSES = "package_ipk"
           EOF
+          # oe-init-build-env expects optional legacy env vars to be unset safely.
+          set +u
           source oe-core/oe-init-build-env build >/dev/null
-          bitbake -p 2>&1 | tee parse-logs/01-parse.log
-          bitbake -e linux-noblesse > parse-logs/02-recipe-env.txt
-          grep -Eq '^SRCREV="ec258e12887d37362b59e3291c1d3e5363c24bff"' parse-logs/02-recipe-env.txt
-          grep -Eq '^MACHINE="noblesse-r08"' parse-logs/02-recipe-env.txt
+          set -u
+          bitbake -p 2>&1 | tee "$GITHUB_WORKSPACE/parse-logs/01-parse.log"
+          bitbake -e linux-noblesse > "$GITHUB_WORKSPACE/parse-logs/02-recipe-env.txt"
+          grep -Eq '^SRCREV="ec258e12887d37362b59e3291c1d3e5363c24bff"' "$GITHUB_WORKSPACE/parse-logs/02-recipe-env.txt"
+          grep -Eq '^MACHINE="noblesse-r08"' "$GITHUB_WORKSPACE/parse-logs/02-recipe-env.txt"
           echo 'BitBake metadata parsed. NOT a kernel compilation or working AsteroidOS build.'
       - name: Archive parse diagnostics
         if: always()
