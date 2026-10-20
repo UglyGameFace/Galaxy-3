@@ -1,0 +1,127 @@
+name: Galaxy Watch3 R08 reference kernel build
+
+# OFF-DEVICE RESEARCH ONLY. No SDB access, recovery writes, signing, or flashing.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-reference-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: watch3-r08-reference-build
+  cancel-in-progress: false
+
+jobs:
+  reference-build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      KERNEL_REPO: https://github.com/UsrBinLuna/kernel_samsung_galileo.git
+      KERNEL_SHA: ec258e12887d37362b59e3291c1d3e5363c24bff
+      ARCH: arm64
+      CROSS_COMPILE: aarch64-linux-gnu-
+    steps:
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            bc binutils-aarch64-linux-gnu bison build-essential cpio \
+            device-tree-compiler flex gcc-aarch64-linux-gnu git \
+            libelf-dev libssl-dev python3 xz-utils
+
+      - name: Fetch and pin public reference source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-logs kernel out
+          git -C kernel init
+          git -C kernel remote add origin "$KERNEL_REPO"
+          git -C kernel fetch --depth=1 origin "$KERNEL_SHA"
+          git -C kernel checkout --detach FETCH_HEAD
+          test "$(git -C kernel rev-parse HEAD)" = "$KERNEL_SHA"
+          {
+            echo "PUBLIC REFERENCE ONLY: not validated as SM-R840X firmware-matched source"
+            echo "Device: SM-R840X, NOBLESSE-LARGE-BT, Exynos 9110, board R08"
+            echo "Watch firmware: R840XXXU1AUA2"
+            echo "Kernel reference: $KERNEL_REPO"
+            echo "Pinned revision: $KERNEL_SHA"
+            date -u '+Build UTC: %Y-%m-%dT%H:%M:%SZ'
+            aarch64-linux-gnu-gcc --version | head -1
+            make --version | head -1
+          } | tee build-logs/build-context.txt
+          test -f kernel/arch/arm64/boot/dts/exynos/exynos9110-tizen_noblesse_large_bt-r08.dts
+          test -f kernel/arch/arm64/configs/tizen_noblesse_defconfig
+          test -f kernel/arch/arm64/configs/tizen_noblesse_large_defconfig
+          test -f kernel/arch/arm64/configs/tizen_noblesse_brcm_defconfig
+
+      - name: Configure R08 kernel from upstream fragments
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/out"
+          make -C kernel O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            tizen_noblesse_defconfig 2>&1 | tee build-logs/01-defconfig.log
+          (
+            cd kernel
+            ARCH=arm64 scripts/kconfig/merge_config.sh -m -O "$OUT" \
+              "$OUT/.config" \
+              arch/arm64/configs/tizen_noblesse_large_defconfig \
+              arch/arm64/configs/tizen_noblesse_brcm_defconfig
+          ) 2>&1 | tee build-logs/02-merge.log
+          make -C kernel O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            olddefconfig 2>&1 | tee build-logs/03-olddefconfig.log
+          for setting in \
+            'CONFIG_SOC_EXYNOS9110=y' \
+            'CONFIG_NOBLESSE=y' \
+            'CONFIG_NOBLESSE_LARGE=y' \
+            'CONFIG_DRM_TGM=y' \
+            'CONFIG_INPUT_EVDEV=y'; do
+            grep -Fxq "$setting" "$OUT/.config" || {
+              echo "::error::Required kernel setting absent: $setting"
+              exit 1
+            }
+          done
+          if grep -Eq '^CONFIG_(NOBLESSE_SMALL|NOBLESSE_LTE)=y$' "$OUT/.config"; then
+            echo '::error::Wrong board size or radio variant selected'
+            exit 1
+          fi
+          echo 'Verified base, large-watch, and Broadcom configuration'
+
+      - name: Compile R08 device tree (no flashing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          make -C kernel O="$GITHUB_WORKSPACE/out" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- -j2 dtbs \
+            2>&1 | tee build-logs/04-dtbs.log
+          test -s out/arch/arm64/boot/dts/exynos/exynos9110-tizen_noblesse_large_bt-r08.dtb
+          echo 'R08 DTB compiled: NOT A FLASHABLE OR VERIFIED BOOT IMAGE'
+
+      - name: Compile reference kernel Image (no flashing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          make -C kernel O="$GITHUB_WORKSPACE/out" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- -j2 Image \
+            2>&1 | tee build-logs/05-image.log
+          test -s out/arch/arm64/boot/Image
+          echo 'Reference Image compiled: NOT CONFIRMED COMPATIBLE WITH WATCH FIRMWARE'
+
+      - name: Archive logs and experimental outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: watch3-r08-reference-build-${{ github.run_number }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            build-logs/
+            out/.config
+            out/arch/arm64/boot/dts/exynos/exynos9110-tizen_noblesse_large_bt-r08.dtb
+            out/arch/arm64/boot/Image
