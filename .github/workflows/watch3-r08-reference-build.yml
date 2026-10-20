@@ -107,9 +107,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Upstream init/_uh.S uses .incbin "init/uh.elf" relative to O=.
+          # The source provides this blob; use it unmodified, research-only.
+          test -s kernel/init/uh.elf
+          mkdir -p out/init
+          ln -s "$GITHUB_WORKSPACE/kernel/init/uh.elf" out/init/uh.elf
+          sha256sum kernel/init/uh.elf | tee build-logs/vendor-uh-elf.sha256
+          # GCC 11 diagnoses an old arm64 syscall alias as an error.
+          # Limit the compatibility workaround to that warning.
           make -C kernel O="$GITHUB_WORKSPACE/out" ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- -j2 Image \
-            2>&1 | tee build-logs/05-image.log
+            CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS=-Wno-error=attribute-alias \
+            -j2 Image 2>&1 | tee build-logs/05-image.log
           test -s out/arch/arm64/boot/Image
           echo 'Reference Image compiled: NOT CONFIRMED COMPATIBLE WITH WATCH FIRMWARE'
 
