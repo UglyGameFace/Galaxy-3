@@ -14,7 +14,8 @@ SRCREV = "ec258e12887d37362b59e3291c1d3e5363c24bff"
 LINUX_VERSION = "4.9.59"
 PV = "${LINUX_VERSION}+git${SRCPV}"
 KERNEL_VERSION_SANITY_SKIP = "1"
-S = "${UNPACKDIR}/git"
+# Use modern OE-Core default unpack path; kernel.bbclass stages this into STAGING_KERNEL_DIR.
+S = "${UNPACKDIR}/${BP}"
 B = "${WORKDIR}/build"
 
 # Match the successful stand-alone R08 reference configuration.
