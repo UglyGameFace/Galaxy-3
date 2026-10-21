@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "device": "Samsung Galaxy Watch3 SM-R840X",
+  "board": "NOBLESSE-LARGE-BT",
+  "board_revision": "R08",
+  "firmware": "R840XXXU1AUA2",
+  "reference_source": "https://github.com/UsrBinLuna/kernel_samsung_galileo",
+  "reference_commit": "ec258e12887d37362b59e3291c1d3e5363c24bff",
+  "status": "Source references only. No binary provenance, licensing, compatibility or boot verification.",
+  "files": [
+    {
+      "name": "calliope_sram.bin",
+      "role": "core_abox",
+      "source": "sound/soc/samsung/abox/abox.c",
+      "source_api": "request_firmware_nowait",
+      "significance": "ABOX driver asynchronously requests boot firmware; absence blocks successful ABOX firmware initialization."
+    },
+    {
+      "name": "calliope_dram.bin",
+      "role": "core_abox",
+      "source": "sound/soc/samsung/abox/abox.c",
+      "source_api": "abox_request_firmware",
+      "significance": "ABOX driver requests DRAM image after SRAM firmware load."
+    },
+    {
+      "name": "APDV_AUDIO_SLSI.bin",
+      "role": "enabled_auxiliary",
+      "source": "arch/arm64/boot/dts/exynos/exynos9110.dtsi",
+      "dt_node": "ext_bin@0",
+      "dt_status": "okay",
+      "dt_area": 1,
+      "dt_offset": "0x502000",
+      "significance": "Exynos9110 base DT enables a supplementary ABOX firmware request; the driver logs a missing file and continues."
+    },
+    {
+      "name": "APSV_AUDIO_SLSI.bin",
+      "role": "enabled_auxiliary",
+      "source": "arch/arm64/boot/dts/exynos/exynos9110.dtsi",
+      "dt_node": "ext_bin@1",
+      "dt_status": "okay",
+      "dt_area": 1,
+      "dt_offset": "0x50C000",
+      "significance": "Exynos9110 base DT enables a supplementary ABOX firmware request; the driver logs a missing file and continues."
+    }
+  ],
+  "explicitly_disabled_dt_examples": [
+    "AP_AUDIO_SLSI.bin",
+    "SoundBoosterParam.bin"
+  ],
+  "important_caveats": [
+    "Other Samsung/Android devices may use the same filenames with incompatible bytes.",
+    "No known device-matched hashes or redistribution grants have been established.",
+    "File presence and hashes cannot prove codec functionality, firmware match or right to redistribute.",
+    "Do not flash, sign, write device partitions or copy binaries into GitHub Actions."
+  ]
+}
