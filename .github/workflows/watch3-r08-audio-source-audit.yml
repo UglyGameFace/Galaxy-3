@@ -1,0 +1,34 @@
+name: Galaxy Watch3 R08 audio source audit
+
+# Lightweight public source checks only, no firmware blobs, no watch changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/audit_watch3_audio.py'
+      - 'meta-noblesse/conf/machine/noblesse-r08.conf'
+      - '.github/workflows/watch3-r08-audio-source-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-audit:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect pinned R08 codec ABOX I2S and firmware references
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/audit_watch3_audio.py | tee watch3-r08-audio-audit.txt
+      - name: Archive read-only source evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-audio-source-audit-${{ github.run_number }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: watch3-r08-audio-audit.txt
