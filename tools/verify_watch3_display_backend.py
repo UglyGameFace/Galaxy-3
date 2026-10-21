@@ -6,11 +6,13 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / "meta-noblesse/recipes-asteroid/asteroid-launcher"
 BBAPPEND = BASE / "asteroid-launcher-configs_%.bbappend"
+LAUNCHER_BBAPPEND = BASE / "asteroid-launcher_%.bbappend"
 ENV = BASE / "asteroid-launcher-configs/10-platform.conf"
 
 def main():
     recipe = BBAPPEND.read_text(encoding="utf-8")
     env = ENV.read_text(encoding="utf-8")
+    launcher_recipe = LAUNCHER_BBAPPEND.read_text(encoding="utf-8")
     values = {}
     for line in env.splitlines():
         line = line.strip()
@@ -25,6 +27,7 @@ def main():
         "recipe only applies to R08": "FILESEXTRAPATHS:prepend:noblesse-r08 :=" in recipe,
         "extends upstream installation without replacement": "SRC_URI =" not in recipe and "do_install()" not in recipe and "do_install:append:noblesse-r08()" in recipe,
         "upstream 10-platform.conf path overridden": "${THISDIR}/asteroid-launcher-configs:" in recipe,
+        "R08 launcher installs QtBase platform plugins": 'RDEPENDS:${PN}:append:noblesse-r08 = " qtbase-plugins "' in launcher_recipe,
         "Qt6 uses Linux framebuffer": values.get("QT_QPA_PLATFORM") == "linuxfb",
         "Qt Quick software scenegraph": values.get("QT_QUICK_BACKEND") == "software",
         "Qt LinuxFB not DRM fallback": values.get("QT_QPA_FB_DRM") == "0",
