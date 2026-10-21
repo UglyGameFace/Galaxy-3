@@ -53,6 +53,55 @@ It never copies, uploads, modifies, signs, installs or flashes anything.
 No authoritative SM-R840X firmware hashes or redistribution grants have
 been verified. Firmware from unrelated Exynos phones is not a safe substitute.
 
+## Verified speaker signal path and read-only evidence probe
+
+The pinned COD9005X codec source defines the following DAPM route:
+
+```text
+Exynos9110-Sound ALSA card (expected name from kernel driver)
+    ABOX UAIF0 Playback -> cod9005x-aif
+    AIF Playback -> DAC -> SPKDRV -> SPK [SPK On] -> SPKOUTLN
+```
+
+This chain comes from the Samsung [Exynos9110 machine driver](https://github.com/UsrBinLuna/kernel_samsung_galileo/blob/ec258e12887d37362b59e3291c1d3e5363c24bff/sound/soc/samsung/exynos9110_sound.c#L319-L328)
+and the [COD9005X DAPM routes](https://github.com/UsrBinLuna/kernel_samsung_galileo/blob/ec258e12887d37362b59e3291c1d3e5363c24bff/sound/soc/codecs/cod9005x.c#L992-L1000).
+The exact source route is checked by `tools/audit_watch3_audio.py`.
+
+**Do not hardcode an ALSA/UCM2 mixer configuration from these DAPM labels.**
+The running card and user-visible ALSA control names have not been observed
+under AsteroidOS. We must confirm them before any sound-unmute commands.
+
+### Optional read-only SDB diagnostic (no firmware extraction)
+
+For an *already authorized* SDB connection, a one-command probe is available
+from the repository. On a host with Python 3 and `sdb` installed:
+
+```bash
+python3 tools/probe_watch3_audio_readonly.py --live
+```
+
+If multiple SDB devices are attached, pass `--serial YOUR_SDB_SERIAL` as well.
+The script only checks whether the four **known filenames** are visible in
+five common firmware folders and reads `/proc/asound/cards` and
+`/proc/asound/pcm` when permissions allow. It does not use root, change
+volume, probe hardware registers, execute firmware, copy any files, or alter
+watch partitions. An inaccessible/undetected path is reported as
+`NOT_OBSERVED_IN_TESTED_PATHS`, **not** as proof the firmware is missing.
+
+Running with no arguments prints a no-connect explanation. Tests exercise
+the output parser with **synthetic strings**; passing CI does not mean we
+have run this command on the physical watch or verified speaker playback.
+Device access and any output sharing remain optional; the repository does
+not include sensitive hardware logs or binary firmware.
+
+### Next integration gate
+
+Identify a legitimate, device-matched firmware source and, once a safe
+recoverable test environment exists, confirm that ABOX initializes, ALSA
+enumerates the expected card, and the actual mixer controls match the
+source-backed DAPM route. Only then can we design a correct UCM2 playback
+profile and test sound without risking the hardware.
+
 ## Actual engineering gates
 
 1. **Kernel source compatibility:** verify the pinned COD9005X, Samsung Speedy bus and ABOX drivers and DT references stay enabled as the R08 kernel recipe changes. The source audit workflow handles this off-device.
