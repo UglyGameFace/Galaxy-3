@@ -1,8 +1,8 @@
 # R08-only adjustment of the pinned official AsteroidOS launcher.
 # Qt software rendering skips ShaderEffect; avoid a compositor-wide
-# round-mask shader on physical round display without affecting other watches.
+# round-mask shader or per-window GPU masking on the physical round display.
 FILESEXTRAPATHS:prepend:noblesse-r08 := "${THISDIR}/asteroid-launcher:"
-SRC_URI:append:noblesse-r08 = " file://0001-noblesse-r08-remove-gpu-only-round-mask.patch"
+SRC_URI:append:noblesse-r08 = " file://0001-noblesse-r08-remove-gpu-only-round-mask.patch file://0002-noblesse-r08-disable-app-window-mask-layer.patch"
 
 # LinuxFB is a QtBase QPA plugin. Unlike library dependencies, dlopened
 # platform plugins are not pulled in automatically by the linker.
