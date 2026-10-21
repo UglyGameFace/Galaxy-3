@@ -26,8 +26,10 @@ jobs:
     steps:
       - name: Checkout Galaxy-3
         uses: actions/checkout@v4
-      - name: Test compositor diagnostic paths before BitBake
-        run: python3 -m unittest discover -s tests -p test_watch3_compositor_env.py -v
+      - name: Test compositor and Qt plugin metadata diagnostics before BitBake
+        run: |
+          python3 -m unittest discover -s tests -p test_watch3_compositor_env.py -v
+          python3 -m unittest discover -s tests -p test_watch3_qt_plugin_env.py -v
       - name: Install metadata parsing prerequisites
         shell: bash
         run: |
@@ -147,6 +149,21 @@ jobs:
           fi
           cp "$actual" "$GITHUB_WORKSPACE/preflight-logs/04-unpacked-r08-compositor.conf"
           echo "PASS: actual AsteroidOS launcher config unpacks LinuxFB/QtQuick software backend"
+
+      - name: Verify Qt LinuxFB build features and packaged Wayland dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          bitbake -e qtbase > "$scratch/qtbase.env"
+          bitbake -e asteroid-launcher > "$scratch/asteroid-launcher.env"
+          python3 "$GITHUB_WORKSPACE/tools/check_watch3_qt_plugin_env.py" \
+            "$scratch/qtbase.env" "$scratch/asteroid-launcher.env"
+          echo 'Effective Qt and launcher package settings verified, no binaries built.'
 
       - name: Resolve AsteroidOS image dependencies without building
         shell: bash
