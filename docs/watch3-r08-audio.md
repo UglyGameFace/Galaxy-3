@@ -16,6 +16,43 @@ The vendor ABOX audio driver requests **`calliope_sram.bin`** (asynchronously) a
 
 These filenames are requirements in public source, **not proof that the binaries are in this repository, publicly redistributable, compatible with SM-R840X firmware R840XXXU1AUA2, or available to an AsteroidOS root filesystem**. Do not download or ship unrelated watch firmware as a shortcut.
 
+### R08-enabled auxiliary firmware (additional source finding)
+
+The exact R08 board DTSI includes the Exynos 9110 base DTSI. Its ABOX
+node enables two additional **auxiliary** firmware requests:
+
+| Filename | Device-tree node | DRAM offset | State |
+| --- | --- | --- | --- |
+| `APDV_AUDIO_SLSI.bin` | `ext_bin@0` | `0x502000` | Enabled |
+| `APSV_AUDIO_SLSI.bin` | `ext_bin@1` | `0x50C000` | Enabled |
+
+[Exynos 9110 device-tree source](https://github.com/UsrBinLuna/kernel_samsung_galileo/blob/ec258e12887d37362b59e3291c1d3e5363c24bff/arch/arm64/boot/dts/exynos/exynos9110.dtsi#L2159-L2170)
+and [R08 include](https://github.com/UsrBinLuna/kernel_samsung_galileo/blob/ec258e12887d37362b59e3291c1d3e5363c24bff/arch/arm64/boot/dts/exynos/exynos9110-tizen_noblesse_large_bt-r08.dtsi#L12-L18).
+
+ABOX attempts to load these enabled entries, but logs a warning and continues
+if an auxiliary file is missing. Whether these affect actual playback remains
+unverified. Two other entries, `AP_AUDIO_SLSI.bin` and
+`SoundBoosterParam.bin`, are **disabled** in this source and are not listed
+as required firmware.
+
+`meta-noblesse/conf/watch3-r08-abox-firmware.json` records the four
+referenced filenames with their distinct roles. Our source audit compares
+this manifest against the exact pinned vendor code without retrieving blobs.
+
+### Optional local-only firmware inventory
+
+Only after legally obtaining device-matched files, you can locally run:
+
+```bash
+python3 tools/audit_watch3_abox_firmware.py --skip-source --local-dir /path/to/local-firmware
+```
+
+This prints file sizes and SHA-256 hashes and flags missing/empty files.
+It never copies, uploads, modifies, signs, installs or flashes anything.
+**Presence and SHA-256 alone do not establish compatibility or licensing.**
+No authoritative SM-R840X firmware hashes or redistribution grants have
+been verified. Firmware from unrelated Exynos phones is not a safe substitute.
+
 ## Actual engineering gates
 
 1. **Kernel source compatibility:** verify the pinned COD9005X, Samsung Speedy bus and ABOX drivers and DT references stay enabled as the R08 kernel recipe changes. The source audit workflow handles this off-device.
