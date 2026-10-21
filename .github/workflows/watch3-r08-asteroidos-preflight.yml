@@ -192,7 +192,17 @@ jobs:
             echo "::error::GPU-only fullscreen round mask survived BitBake patch task"
             exit 1
           fi
-          echo 'PASS: real R08 BitBake do_patch applies the source-only launcher adaptation.'
+          window_qml="$source_dir/src/qml/compositor/WindowWrapperBase.qml"
+          test -f "$window_qml" || { echo "::error::Missing pinned app-window wrapper"; exit 1; }
+          grep -Fq 'physical round display already clips application windows' "$window_qml" || {
+            echo "::error::R08 per-window shader patch missing from real BitBake source tree"
+            exit 1
+          }
+          if grep -Eq '^[[:space:]]*layer\.(enabled|effect):' "$window_qml"; then
+            echo "::error::GPU-only app-window shader layer survived BitBake patch task"
+            exit 1
+          fi
+          echo 'PASS: actual R08 BitBake do_patch applies both software scenegraph adaptations.'
           echo 'NOT TESTED: Qt compositor binary or physical watch screen.'
 
       - name: Resolve AsteroidOS image dependencies without building
