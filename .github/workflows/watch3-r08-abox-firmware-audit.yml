@@ -1,0 +1,37 @@
+name: Galaxy Watch3 R08 ABOX firmware source manifest
+
+# Public pinned source and synthetic unit tests only. No firmware binaries.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-abox-firmware-audit.yml'
+      - 'tools/audit_watch3_abox_firmware.py'
+      - 'tests/test_abox_firmware.py'
+      - 'meta-noblesse/conf/watch3-r08-abox-firmware.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-manifest:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test local inventory with fake, non-firmware bytes
+        run: python3 -m unittest discover -s tests -p test_abox_firmware.py -v
+      - name: Check four expected firmware references against pinned R08 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/audit_watch3_abox_firmware.py | tee abox-firmware-source-report.txt
+      - name: Upload audit report only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-abox-firmware-audit-${{ github.run_number }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: abox-firmware-source-report.txt
