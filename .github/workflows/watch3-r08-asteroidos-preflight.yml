@@ -7,6 +7,9 @@ on:
     branches: [main]
     paths:
       - 'meta-noblesse/recipes-asteroid/**'
+      - '.github/workflows/watch3-r08-asteroidos-preflight.yml'
+      - 'tools/check_watch3_compositor_env.py'
+      - 'tests/test_watch3_compositor_env.py'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +26,8 @@ jobs:
     steps:
       - name: Checkout Galaxy-3
         uses: actions/checkout@v4
+      - name: Test compositor diagnostic paths before BitBake
+        run: python3 -m unittest discover -s tests -p test_watch3_compositor_env.py -v
       - name: Install metadata parsing prerequisites
         shell: bash
         run: |
@@ -125,24 +130,9 @@ jobs:
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
           bitbake -e asteroid-launcher-configs > "$GITHUB_WORKSPACE/preflight-logs/compositor-env.tmp"
-          python3 - "$GITHUB_WORKSPACE/preflight-logs/compositor-env.tmp" <<'PY'
-          from pathlib import Path
-          import sys
-          lines = Path(sys.argv[1]).read_text().splitlines()
-          env = {}
-          for line in lines:
-              if line.startswith(('UNPACKDIR=', 'FILESPATH=', 'MACHINE=')):
-                  key, raw = line.split('=', 1)
-                  env[key] = raw.strip('"')
-          if env.get("MACHINE") != "noblesse-r08":
-              raise SystemExit("FAIL: effective compositor machine is not noblesse-r08")
-          if "meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs" not in env.get("FILESPATH", ""):
-              raise SystemExit("FAIL: R08 compositor source override is absent from FILESPATH")
-          if not env.get("UNPACKDIR"):
-              raise SystemExit("FAIL: no resolved BitBake UNPACKDIR")
-          Path("preflight-logs/compositor-unpackdir.txt").write_text(env["UNPACKDIR"] + "\n")
-          print("PASS: BitBake uses our R08 source search path")
-          PY
+          python3 "$GITHUB_WORKSPACE/tools/check_watch3_compositor_env.py" \
+            "$GITHUB_WORKSPACE/preflight-logs/compositor-env.tmp" \
+            "$GITHUB_WORKSPACE/preflight-logs/compositor-unpackdir.txt"
           rm -f "$GITHUB_WORKSPACE/preflight-logs/compositor-env.tmp"
           bitbake -c unpack asteroid-launcher-configs 2>&1 | tee "$GITHUB_WORKSPACE/preflight-logs/04-compositor-unpack.txt"
           unpack_dir="$(cat "$GITHUB_WORKSPACE/preflight-logs/compositor-unpackdir.txt")"
