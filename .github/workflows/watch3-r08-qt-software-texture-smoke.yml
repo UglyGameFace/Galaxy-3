@@ -72,7 +72,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pkg-config --modversion Qt6Quick
+          # Qt6Quick is discovered through Qt's CMake package configuration.
+          # Ubuntu 22.04's Qt development packages do not supply Qt6Quick.pc.
+          # CMakeLists.txt uses find_package(Qt6 REQUIRED COMPONENTS Quick).
           cmake -S tests/qt_software_texture_smoke \
             -B "$RUNNER_TEMP/watch3-r08-software-texture-build" \
             -G Ninja -DCMAKE_BUILD_TYPE=Release
