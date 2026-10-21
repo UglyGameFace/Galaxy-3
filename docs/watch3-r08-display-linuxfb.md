@@ -156,7 +156,7 @@ The new [fast host Qt software texture smoke](https://github.com/UglyGameFace/Ga
 checks those pinned source contracts and then compiles a small host Qt Quick
 harness. It uses a deterministic CPU-memory image, `QT_QUICK_BACKEND=software`,
 a virtual X11 display and `QSGSimpleTextureNode`, and asserts actual pixels
-via `QQuickWindow::grabWindow()`. **New CI results are pending verification.**
+via `QQuickWindow::grabWindow()`. The user reports that the corrected GitHub Actions host smoke **passed** on 2026-10-21. Its successful run ID was not independently retrieved in this session. This is not evidence of a Wayland protocol exchange.
 
 The host runner's system Qt differs from the target Qt 6.11.3 and the
 test does **not** run a Wayland compositor/client protocol exchange, mount
@@ -170,3 +170,5 @@ References:
 - https://github.com/qt/qtwayland/blob/6.11.3/src/compositor/compositor_api/qwaylandquickitem.cpp
 - https://doc.qt.io/qt-6/qtwaylandcompositor-index.html
 - https://doc.qt.io/qt-6/qtquick-visualcanvas-adaptations-software.html
+
+The next step is a distinct Wayland client process handing a confirmed `wl_shm` buffer to a software QtWayland compositor, with the **compositor's displayed pixels** checked. See the [measurable off-device round-trip acceptance gate](watch3-r08-wayland-roundtrip-gate.md). That integration test is not implemented or passed yet.
