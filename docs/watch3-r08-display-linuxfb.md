@@ -41,3 +41,24 @@ Sources:
 - https://github.com/UsrBinLuna/kernel_samsung_galileo/blob/ec258e12887d37362b59e3291c1d3e5363c24bff/arch/arm64/configs/tizen_noblesse_defconfig#L2331-L2386
 - https://github.com/UsrBinLuna/kernel_samsung_galileo/blob/ec258e12887d37362b59e3291c1d3e5363c24bff/drivers/video/fbdev/exynos/dpu_9110/decon_core.c#L3273-L3287
 - https://github.com/AsteroidOS/meta-asteroid/blob/1af66a6188f7909303cfcec779c8475be1bc4679/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs_git.bb
+
+### Pinned AsteroidOS launcher software-rendering fallback
+
+The official Qt documentation confirms that `ShaderEffect` items do not draw
+on the Qt Quick software scenegraph. The pinned AsteroidOS launcher includes a
+full-screen `ShaderEffectSource` and `CircleMaskShader` for artificially
+rounding its compositor output. The physical Galaxy Watch3 panel is already
+round, so the `noblesse-r08` machine now includes an upstream-source QML
+patch removing **only** that compositor-wide GPU-only corner mask.
+
+The [launcher patch CI](https://github.com/UglyGameFace/Galaxy-3/actions/workflows/watch3-r08-launcher-patch.yml)
+checks the patch against AsteroidOS launcher commit
+`0ba0eb50a68fc6f1019312d511ec3e2fd1b48f31` without
+building Qt. This is a **source-level adaptation**, not proof the remaining
+Wayland compositor, watch faces or app animations work with CPU rendering.
+
+Other effects exist, including launcher speed-dial effects and watch-face
+shaders. Their software compatibility is still unresolved; do not mark the
+full GUI operational from this patch alone.
+
+Official reference: https://doc.qt.io/qt-6/qml-qtquick-shadereffect.html

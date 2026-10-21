@@ -1,0 +1,40 @@
+name: Watch3 R08 AsteroidOS software compositor patch
+
+# Apply real R08-only QML patch against pinned upstream launcher, no Qt compile.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher_%.bbappend'
+      - 'meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher/**'
+      - '.github/workflows/watch3-r08-launcher-patch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply-exact-upstream:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test patch against the exact pinned AsteroidOS launcher revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher/0001-noblesse-r08-remove-gpu-only-round-mask.patch"
+          recipe="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher_%.bbappend"
+          grep -Fq 'SRC_URI:append:noblesse-r08' "$recipe"
+          grep -Fq 'FILESEXTRAPATHS:prepend:noblesse-r08' "$recipe"
+          mkdir -p pinned/src/qml/compositor
+          curl --fail --location --silent --show-error --retry 2 --output pinned/src/qml/compositor/compositor.qml \
+            https://raw.githubusercontent.com/AsteroidOS/asteroid-launcher/0ba0eb50a68fc6f1019312d511ec3e2fd1b48f31/src/qml/compositor/compositor.qml
+          (cd pinned && git apply --check "$patch" && git apply "$patch")
+          if grep -Fq "ShaderEffectSource {" pinned/src/qml/compositor/compositor.qml; then
+            echo "::error::Original shader-backed full-screen corner mask is still present"
+            exit 1
+          fi
+          grep -Fq "physical round panel clips" pinned/src/qml/compositor/compositor.qml
+          echo "PASS: machine-scoped QML patch applies to exact pinned launcher and removes the GPU-only full-screen mask."
+          echo "NOT TESTED: Wayland software buffers, Qt platform plugin, or physical display."
