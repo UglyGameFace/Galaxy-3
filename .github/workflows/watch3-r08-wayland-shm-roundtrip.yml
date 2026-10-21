@@ -1,0 +1,70 @@
+name: Watch3 R08 real QtWayland wl_shm round-trip
+
+# Bounded off-device host Qt6 test; never builds Yocto, firmware or kernel.
+# This exercises a distinct Wayland client and a software Qt compositor.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/qt_wayland_shm_roundtrip/**'
+      - '.github/workflows/watch3-r08-wayland-shm-roundtrip.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: watch3-r08-wayland-shm-roundtrip
+  cancel-in-progress: false
+
+jobs:
+  shm-roundtrip:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install complete Ubuntu Jammy Qt6 compositor and client SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ pkg-config python3 \
+            qt6-base-dev qt6-declarative-dev qt6-wayland-dev qt6-wayland \
+            libqt6opengl6-dev libqt6shadertools6-dev libgl1-mesa-dev \
+            libxkbcommon-dev libvulkan-dev libxcb-cursor0 qt6-qpa-plugins \
+            qml6-module-qtquick qml6-module-qtquick-window \
+            qml6-module-qtqml qml6-module-qtqml-models \
+            qml6-module-qtwayland-compositor \
+            xvfb xauth
+          cmake_dir="/usr/lib/$(gcc -dumpmachine)/cmake"
+          for module in Qt6Quick Qt6WaylandCompositor Qt6Widgets; do
+            test -r "$cmake_dir/$module/${module}Config.cmake" || {
+              echo "::error::Qt SDK module not installed: $module"
+              exit 1
+            }
+          done
+          python3 -m py_compile tests/qt_wayland_shm_roundtrip/run_roundtrip.py
+          echo 'PASS: host QtWayland compositor/client SDK complete'
+
+      - name: Compile both Qt compositor and Wayland client
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S tests/qt_wayland_shm_roundtrip \
+            -B "$RUNNER_TEMP/watch3-shm-build" \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/watch3-shm-build" --parallel 2
+
+      - name: Assert real wl_shm protocol and pixels in software compositor
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=3s 45s \
+            xvfb-run -a -s '-screen 0 320x320x24' \
+            python3 tests/qt_wayland_shm_roundtrip/run_roundtrip.py \
+              "$RUNNER_TEMP/watch3-shm-build" \
+              "$GITHUB_WORKSPACE/tests/qt_wayland_shm_roundtrip"
+          echo 'NOT TESTED: target ARM64 Qt6.11.3, on-device LinuxFB or recovery'
