@@ -141,3 +141,32 @@ self-hosted runner with persistent Yocto download and shared-state caches.
 A standard hosted runner remains an opt-in choice. The full compiled plugin
 was not uploaded as a binary, only diagnostic metadata. No rootfs image or
 flashable firmware was produced by this package test.
+
+### CPU-rendered Wayland shared-memory scenegraph gate
+
+Pinned QtWayland 6.11.3 `src/compositor/compositor_api/qwaylandquickitem.cpp`
+has an explicit `ref.isSharedMemory()` path. It reads CPU pixel data via
+`buffer.image()`, calls `createTextureFromImage()`, and paints the view
+using `QSGSimpleTextureNode`. This is source-level evidence that
+`wl_shm` client frames have a non-EGL texture route. The Qt Quick software
+renderer cannot render `ShaderEffect`, which motivated the two
+machine-scoped launcher-mask patches.
+
+The new [fast host Qt software texture smoke](https://github.com/UglyGameFace/Galaxy-3/actions/workflows/watch3-r08-qt-software-texture-smoke.yml)
+checks those pinned source contracts and then compiles a small host Qt Quick
+harness. It uses a deterministic CPU-memory image, `QT_QUICK_BACKEND=software`,
+a virtual X11 display and `QSGSimpleTextureNode`, and asserts actual pixels
+via `QQuickWindow::grabWindow()`. **New CI results are pending verification.**
+
+The host runner's system Qt differs from the target Qt 6.11.3 and the
+test does **not** run a Wayland compositor/client protocol exchange, mount
+`/dev/fb0`, or install the actual ARM64 plugin. A future true
+`wl_shm` compositor/client smoke must prove buffer handoff, startup,
+and that the right QPA plugins are installed in the target rootfs before
+any hardware test. Do not interpret a host pixel-test pass as proof of a
+working watch UI.
+
+References:
+- https://github.com/qt/qtwayland/blob/6.11.3/src/compositor/compositor_api/qwaylandquickitem.cpp
+- https://doc.qt.io/qt-6/qtwaylandcompositor-index.html
+- https://doc.qt.io/qt-6/qtquick-visualcanvas-adaptations-software.html
