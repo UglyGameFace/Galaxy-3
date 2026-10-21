@@ -1,3 +1,17 @@
+Subject: [PATCH] compositor: avoid shader-only round mask on Watch3 R08
+
+On the experimental Galaxy Watch3 R08 software-rendered image, the
+Qt Quick software scenegraph does not draw ShaderEffect. The physical
+round display clips its own corners, so remove the GPU-only corner
+mask rather than depend on an unsupported shader effect.
+
+This patch is scoped to the R08 machine in meta-noblesse. Hardware
+rendering has not yet been validated; upstream submission has not
+been evaluated.
+
+Upstream-Status: Pending
+
+---
 diff --git a/src/qml/compositor/compositor.qml b/src/qml/compositor/compositor.qml
 --- a/src/qml/compositor/compositor.qml
 +++ b/src/qml/compositor/compositor.qml
