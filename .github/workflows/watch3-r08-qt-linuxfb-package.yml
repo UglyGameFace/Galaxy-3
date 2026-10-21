@@ -2,12 +2,19 @@ name: Galaxy Watch3 R08 Qt LinuxFB plugin package build
 
 # Off-device BitBake build of QtBase only to inspect the ARM64 LinuxFB QPA plugin.
 # Potentially expensive CI job, without flashable firmware.
+# Full QtBase cross-compilation is manual-only. Fast AsteroidOS metadata CI
+# remains automatic; do not launch another six-hour cold build on every edit.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/watch3-r08-qt-linuxfb-package.yml'
   workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Build runner (self-hosted requires a linux/x64/watch3-yocto runner)'
+        type: choice
+        required: true
+        default: standard
+        options:
+          - standard
+          - self-hosted
 
 permissions:
   contents: read
@@ -18,9 +25,9 @@ concurrency:
 
 jobs:
   qtbase-linuxfb:
-    runs-on: ubuntu-22.04
-    # QtBase cross-compilation can exceed 150 minutes on hosted runners.
-    # Keep GitHub's standard maximum rather than cancelling a valid build early.
+    # The self-hosted option must be explicitly configured by the repository owner.
+    # Standard GitHub runners have limited disk; the capacity gate below fails early.
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted","linux","x64","watch3-yocto"]') || 'ubuntu-22.04' }}
     timeout-minutes: 360
     steps:
       - name: Checkout Galaxy-3
@@ -96,6 +103,34 @@ jobs:
           BB_NUMBER_THREADS = "3"
           PARALLEL_MAKE = "-j3"
           EOF
+          # Persistent across runs on a dedicated self-hosted builder. Standard
+          # GitHub-hosted runners discard these directories after each job.
+          mkdir -p "$HOME/.cache/watch3-yocto/downloads" "$HOME/.cache/watch3-yocto/sstate-cache"
+          printf 'DL_DIR = "%s/.cache/watch3-yocto/downloads"\n' "$HOME" >> build/conf/local.conf
+          printf 'SSTATE_DIR = "%s/.cache/watch3-yocto/sstate-cache"\n' "$HOME" >> build/conf/local.conf
+          # Ask BitBake to stop when storage is dangerously low.
+          echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},2G,100K"' >> build/conf/local.conf
+
+      - name: Check host capacity before spending hours compiling
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Runner: $RUNNER_NAME / $RUNNER_OS / $RUNNER_ARCH"
+          echo '---- Storage ----'
+          df -h "$GITHUB_WORKSPACE" "$HOME"
+          echo '---- Memory ----'
+          free -h
+          echo '---- Cores ----'
+          nproc
+          available_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+          # Safety floor for this specific cold QtBase cross-compile, not the
+          # 90GB Yocto full-image recommendation. A 14GB host is unsuitable.
+          minimum_kib="$((24 * 1024 * 1024))"
+          if [ "$available_kib" -lt "$minimum_kib" ]; then
+            echo "::error title=Build host too small::Need at least 24 GiB free before starting the QtBase package build. Found $((available_kib / 1024 / 1024)) GiB. Use a storage-capable watch3-yocto self-hosted runner rather than repeat a cold six-hour build on this runner."
+            exit 1
+          fi
+
       - name: Run QtBase LinuxFB package-validator regressions
         shell: bash
         run: |
@@ -124,6 +159,22 @@ jobs:
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
+          # Live heartbeat and host/task snapshots so future slowdowns are
+          # distinguishable from a stalled build, even before logs are archived.
+          (
+            while sleep 180; do
+              echo "::group::Watch3 QtBase build health $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              df -h "$GITHUB_WORKSPACE" "$HOME" || true
+              free -h || true
+              ps -eo pid,etime,%cpu,%mem,args --sort=-%cpu | head -n 12 || true
+              if [ -f "$GITHUB_WORKSPACE/qt-logs/qtbase-package-build.log" ]; then
+                tail -n 12 "$GITHUB_WORKSPACE/qt-logs/qtbase-package-build.log" || true
+              fi
+              echo "::endgroup::"
+            done
+          ) &
+          monitor_pid=$!
+          trap 'kill "$monitor_pid" 2>/dev/null || true' EXIT
           bitbake -c package qtbase 2>&1 | tee "$GITHUB_WORKSPACE/qt-logs/qtbase-package-build.log"
       - name: Inspect actual packaged R08 LinuxFB QPA binary
         shell: bash
