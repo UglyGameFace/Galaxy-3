@@ -19,7 +19,9 @@ concurrency:
 jobs:
   qtbase-linuxfb:
     runs-on: ubuntu-22.04
-    timeout-minutes: 150
+    # QtBase cross-compilation can exceed 150 minutes on hosted runners.
+    # Keep GitHub's standard maximum rather than cancelling a valid build early.
+    timeout-minutes: 360
     steps:
       - name: Checkout Galaxy-3
         uses: actions/checkout@v4
