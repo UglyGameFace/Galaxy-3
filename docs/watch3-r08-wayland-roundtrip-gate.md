@@ -11,9 +11,33 @@
 - Both R08 shader-mask patches are scoped to `noblesse-r08`; preserve the
   upstream compositor on other devices.
 
+## Implemented host prototype (2026-10-21; CI result not yet verified)
+
+The first off-device implementation now exists under
+[`tests/qt_wayland_shm_roundtrip/`](../tests/qt_wayland_shm_roundtrip/)
+with a separate QWidget Wayland client, a minimal QtWayland 6.2.4 QML
+compositor, a C++ protocol/pixel observer, a Python process supervisor,
+and a bounded [GitHub Actions workflow](../.github/workflows/watch3-r08-wayland-shm-roundtrip.yml).
+
+The compositor C++ code requires a real `QWaylandView::currentBuffer()`
+for which `QWaylandBufferRef::isSharedMemory()` is true, asserts the
+buffer has the expected green pixels, and independently asserts those pixels
+in `QQuickWindow::grabWindow()` from the software compositor. The
+supervisor checks that the Wayland socket appears and that a **separate**
+Wayland client process is still alive; it cleans up children on all exits.
+
+The workflow installs Qt Wayland compositor and XDG shell QML support from
+Ubuntu 22.04, verifies the installed Qt CMake development modules and
+runs under Xvfb with explicit deadlines. A failure must be diagnosed using
+the actual job logs, **not** interpreted as hardware failure or papered over
+with additional speculative package names.
+
+**Not passed or proven yet:** runtime CI, target Qt 6.11.3 cross-compiled
+compositor, packaging into the R08 image, and watch framebuffer output.
+
 ## Real end-to-end acceptance criteria
 
-Create a separate, **off-device only** QtWayland integration test which:
+Validate the separate, **off-device only** QtWayland prototype against these criteria:
 
 1. Starts a minimal **QtWaylandCompositor** with one `WaylandOutput`, an
    `XdgShell` and a view of the client's surface, under Xvfb using
