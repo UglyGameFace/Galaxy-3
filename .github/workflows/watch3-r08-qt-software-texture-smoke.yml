@@ -44,7 +44,7 @@ jobs:
             echo "::error::Missing GL development pkg-config metadata"
             exit 1
           }
-          dpkg-query -W -f='\${Package} \${Version}\\n' libgl-dev libglvnd-dev
+          dpkg-query -W libgl-dev libglvnd-dev
       - name: Verify pinned Qt 6.11 shared-memory scenegraph path and AsteroidOS launcher environment
         shell: bash
         run: |
