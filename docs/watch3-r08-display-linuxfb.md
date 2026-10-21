@@ -24,7 +24,7 @@ This targets the Samsung DECON fbdev driver instead of an unproven TGM DRM KMS b
 ## Real blockers, not solved by this recipe
 
 - `/dev/fb0` was **not verified on the user's watch**. Framebuffer registration in public reference source isn't runtime evidence.
-- The exact Qt6 LinuxFB QPA plugin must be built and installed in the target image.
+- Qt6 LinuxFB QPA plugin cross-compilation and package splitting **passed**; inclusion in the eventual target image and runtime plugin loading remain unverified.
 - The AsteroidOS Lipstick/QtWayland compositor must be checked for shader and Wayland buffer compatibility with software rendering.
 - CPU rendering might be slow and increase power usage.
 - The stock boot chain and recoverable boot method are still unverified. Never flash this image.
@@ -32,10 +32,10 @@ This targets the Samsung DECON fbdev driver instead of an unproven TGM DRM KMS b
 ## Next verification
 
 The off-device AsteroidOS preflight has unpacked `asteroid-launcher-configs`
-and matched the effective `10-platform.conf` to the Watch3 file. The subsequent
-Qt package metadata test checks the R08 recipe's LinuxFB feature and plugin
-installation dependencies; it still does **not** build `libqlinuxfb.so`,
-run a compositor/client rendering test, or verify the physical watch framebuffer.
+and matched the effective `10-platform.conf` to the Watch3 file. The subsequent Qt package metadata test checks the R08 recipe's LinuxFB feature and plugin dependencies.
+The [full QtBase package CI run](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39593317503)
+**successfully compiled `libqlinuxfb.so` for AArch64**, but did not run a
+compositor/client rendering test or verify the physical watch framebuffer.
 
 Sources:
 
@@ -71,8 +71,9 @@ dependency. In Qt6 meta-qt6, the QPA plugins live in a separate
 `qtbase-plugins` package. R08 now explicitly adds `qtbase-plugins` to the
 launcher's runtime dependencies, with CI inspecting effective `bitbake -e`
 metadata for `qtbase` LinuxFB/GUI `PACKAGECONFIG`, the plugin packaging
-mapping and launcher package dependencies. This is **not** proof the plugin
-has actually been compiled or included in the final root filesystem.
+mapping and launcher package dependencies. The [QtBase package build](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39593317503)
+now proves the plugin compiled and was placed in `qtbase-plugins`, but not
+that it was installed in the final image or loaded by a running compositor.
 
 QtWaylandCompositor documents shared-memory (`wl_shm`) client buffers when
 hardware integrations are unavailable. Its `QWaylandQuickItem` can create
@@ -88,10 +89,11 @@ Do not apply `QT_QPA_PLATFORM=linuxfb` globally: Wayland clients need their
 own Wayland platform selection, not direct framebuffer access. Establish the
 actual application launch environment before changing that path.
 
-Remaining validation gates: real BitBake metadata CI success, compiled QtBase
-`libqlinuxfb.so` installed in an R08 package/rootfs, a software QtWayland
-compositor+client `wl_shm` runtime test, and ultimately non-destructive
-physical display testing after recovery/boot is independently verified.
+Remaining validation gates: confirm the complete AsteroidOS preflight CI
+(including the launcher `do_patch` stage), install the verified QtBase plugin
+in an actual R08 rootfs, test QtWayland compositor/client `wl_shm` rendering,
+and eventually verify physical display behavior only after recovery/boot
+safety has been independently established.
 
 References:
 - https://github.com/AsteroidOS/meta-asteroid/blob/master/recipes-asteroid/asteroid-launcher/asteroid-launcher_git.bb
@@ -112,4 +114,19 @@ The validator has regression tests for missing/misplaced plugin binaries,
 wrong architecture or ELF type, invalid headers, and duplicate copies.
 This is an **off-device package check**, not a runtime plugin-load,
 Wayland `wl_shm` compositor/client test, or physical framebuffer test.
-The actual CI build result must be checked before calling this gate passed.
+**Verified passed:** [run #39593317503](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39593317503)
+completed all 2,171 BitBake tasks and produced `libqlinuxfb.so` under
+`qtbase-plugins/usr/lib/plugins/platforms/`. The file is an ELF64 AArch64
+shared object, with SHA-256
+`eeb85c3d13ba428067f514798da27ac3957d90518a536513f89d760ddb24afb6`.
+The run executed from 11:37 to 17:26 UTC on 2026-10-21. BitBake reported
+719 sstate-cache misses out of 719 wanted entries, explaining why the cold
+build required almost six hours. The runner had 86 GB free when inspected
+before the build; disk exhaustion was not observed.
+
+The expensive package workflow is now **manual-only**, has a pre-build disk
+capacity check, and can run on an explicitly provisioned `watch3-yocto`
+self-hosted runner with persistent Yocto download and shared-state caches.
+A standard hosted runner remains an opt-in choice. The full compiled plugin
+was not uploaded as a binary, only diagnostic metadata. No rootfs image or
+flashable firmware was produced by this package test.
