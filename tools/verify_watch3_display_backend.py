@@ -23,7 +23,7 @@ def main():
         values[key] = value
     checks = {
         "recipe only applies to R08": "FILESEXTRAPATHS:prepend:noblesse-r08 :=" in recipe,
-        "uses upstream recipe without replacement": "SRC_URI" not in recipe and "do_install" not in recipe,
+        "extends upstream installation without replacement": "SRC_URI =" not in recipe and "do_install()" not in recipe and "do_install:append:noblesse-r08()" in recipe,
         "upstream 10-platform.conf path overridden": "${THISDIR}/asteroid-launcher-configs:" in recipe,
         "Qt6 uses Linux framebuffer": values.get("QT_QPA_PLATFORM") == "linuxfb",
         "Qt Quick software scenegraph": values.get("QT_QUICK_BACKEND") == "software",
