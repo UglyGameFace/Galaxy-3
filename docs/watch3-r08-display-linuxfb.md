@@ -98,3 +98,18 @@ References:
 - https://github.com/AsteroidOS/meta-asteroid/blob/master/recipes-asteroid/asteroid-launcher/asteroid-launcher/asteroid-launcher.service
 - https://github.com/YoeDistro/meta-qt6/blob/6.11/recipes-qt/qt6/qt6.inc
 - https://doc.qt.io/qt-6/qtwaylandcompositor-index.html
+
+### Off-device QtBase LinuxFB binary packaging gate
+
+A separate [Watch3 QtBase LinuxFB package build workflow](https://github.com/UglyGameFace/Galaxy-3/actions/workflows/watch3-r08-qt-linuxfb-package.yml) is now available.
+It follows the already-used pinned AsteroidOS/OE-Core metadata revisions, verifies
+QtBase/launcher effective settings, and builds only `qtbase -c package`.
+It then checks the real `PKGDEST/qtbase-plugins` output for exactly one
+`plugins/platforms/libqlinuxfb.so` with an AArch64 ELF64 shared-object
+header. The plugin itself is not uploaded or distributed.
+
+The validator has regression tests for missing/misplaced plugin binaries,
+wrong architecture or ELF type, invalid headers, and duplicate copies.
+This is an **off-device package check**, not a runtime plugin-load,
+Wayland `wl_shm` compositor/client test, or physical framebuffer test.
+The actual CI build result must be checked before calling this gate passed.
