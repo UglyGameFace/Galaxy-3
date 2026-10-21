@@ -117,6 +117,47 @@ jobs:
           grep -E '^(MACHINE|DISTRO|OLDEST_KERNEL|IMAGE_INSTALL|KERNEL_DEVICETREE|PREFERRED_PROVIDER_virtual/kernel)=' "$env_file" > "$GITHUB_WORKSPACE/preflight-logs/02-effective-settings.txt"
           rm -f "$env_file"
           echo 'Real AsteroidOS distro and image recipe resolved for R08. No compile yet.'
+      - name: Verify actual upstream AsteroidOS compositor unpacks Watch3 LinuxFB config
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e asteroid-launcher-configs > "$GITHUB_WORKSPACE/preflight-logs/compositor-env.tmp"
+          python3 - "$GITHUB_WORKSPACE/preflight-logs/compositor-env.tmp" <<'PY'
+          from pathlib import Path
+          import sys
+          lines = Path(sys.argv[1]).read_text().splitlines()
+          env = {}
+          for line in lines:
+              if line.startswith(('UNPACKDIR=', 'FILESPATH=', 'MACHINE=')):
+                  key, raw = line.split('=', 1)
+                  env[key] = raw.strip('"')
+          if env.get("MACHINE") != "noblesse-r08":
+              raise SystemExit("FAIL: effective compositor machine is not noblesse-r08")
+          if "meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs" not in env.get("FILESPATH", ""):
+              raise SystemExit("FAIL: R08 compositor source override is absent from FILESPATH")
+          if not env.get("UNPACKDIR"):
+              raise SystemExit("FAIL: no resolved BitBake UNPACKDIR")
+          Path("preflight-logs/compositor-unpackdir.txt").write_text(env["UNPACKDIR"] + "\n")
+          print("PASS: BitBake uses our R08 source search path")
+          PY
+          rm -f "$GITHUB_WORKSPACE/preflight-logs/compositor-env.tmp"
+          bitbake -c unpack asteroid-launcher-configs 2>&1 | tee "$GITHUB_WORKSPACE/preflight-logs/04-compositor-unpack.txt"
+          unpack_dir="$(cat "$GITHUB_WORKSPACE/preflight-logs/compositor-unpackdir.txt")"
+          actual="$unpack_dir/10-platform.conf"
+          wanted="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs/10-platform.conf"
+          test -f "$actual" || { echo "::error::Unpacked compositor configuration is missing"; exit 1; }
+          if ! cmp -s "$wanted" "$actual"; then
+            echo "::error title=Incorrect compositor backend::BitBake unpacked the wrong 10-platform.conf"
+            echo "Expected R08 LinuxFB configuration, got:"
+            cat "$actual"
+            exit 1
+          fi
+          cp "$actual" "$GITHUB_WORKSPACE/preflight-logs/04-unpacked-r08-compositor.conf"
+          echo "PASS: actual AsteroidOS launcher config unpacks LinuxFB/QtQuick software backend"
+
       - name: Resolve AsteroidOS image dependencies without building
         shell: bash
         run: |
