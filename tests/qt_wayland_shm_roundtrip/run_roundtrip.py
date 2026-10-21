@@ -25,7 +25,10 @@ def main():
         env["WAYLAND_DISPLAY"] = socket
         env["QT_QPA_PLATFORM"] = "xcb"
         env["QT_QUICK_BACKEND"] = "software"
-        env["QT_WAYLAND_CLIENT_BUFFER_INTEGRATION"] = "shm"
+        # QWidget raster rendering normally uses wl_shm by default.
+        # Do not force a nonexistent "shm" client-buffer plugin; the compositor
+        # asserts isSharedMemory() on the buffer that actually arrives.
+        env.pop("QT_WAYLAND_CLIENT_BUFFER_INTEGRATION", None)
         server_log = root / "compositor.log"
         client_log = root / "client.log"
         server_out = server_log.open("w")
