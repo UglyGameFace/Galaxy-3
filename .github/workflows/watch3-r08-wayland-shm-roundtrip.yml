@@ -34,11 +34,24 @@ jobs:
             cmake ninja-build g++ pkg-config python3 \
             qt6-base-dev qt6-declarative-dev qt6-wayland-dev qt6-wayland \
             libqt6opengl6-dev libqt6shadertools6-dev libgl1-mesa-dev \
-            libxkbcommon-dev libvulkan-dev libxcb-cursor0 qt6-qpa-plugins \
+            libwayland-dev libxkbcommon-dev libvulkan-dev libxcb-cursor0 qt6-qpa-plugins \
             qml6-module-qtquick qml6-module-qtquick-window \
             qml6-module-qtqml qml6-module-qtqml-models \
             qml6-module-qtwayland-compositor \
             xvfb xauth
+          # Qt6WaylandCompositorConfig.cmake exists even if its transitive
+          # Wayland development dependency cannot be found by CMake.
+          # Verify the exact components previously reported missing.
+          for component in wayland-client wayland-server wayland-cursor wayland-egl; do
+            if ! pkg-config --exists "$component"; then
+              echo "::error title=Missing Wayland development component::$component is not installed"
+              exit 1
+            fi
+            pkg-config --modversion "$component"
+          done
+          test -r /usr/include/wayland-client.h
+          test -r /usr/include/wayland-server.h
+          test -r /usr/include/wayland-egl.h
           cmake_dir="/usr/lib/$(gcc -dumpmachine)/cmake"
           for module in Qt6Quick Qt6WaylandCompositor Qt6Widgets; do
             test -r "$cmake_dir/$module/${module}Config.cmake" || {
