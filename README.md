@@ -3,7 +3,7 @@
 **Device:** Samsung Galaxy Watch3 SM-R840X, NOBLESSE-LARGE-BT (Exynos 9110, revision R08)
 **Installed firmware:** R840XXXU1AUA2; Tizen 5.5; running kernel Linux 4.9.59.
 
-This repository is for **off-device research and reproducible kernel/DTB compilation only**.
+This repository contains **off-device research, a successfully built Linux baseline, and experimental AsteroidOS machine-specific integration**.
 Nothing here is a tested or flashable watch image. There is no verified custom boot or recovery
 procedure for this particular firmware, and the public upstream source has **not** been proven
 to match the production firmware.
@@ -40,11 +40,12 @@ The [`meta-noblesse` layer](meta-noblesse/README.md) contains an experimental
 - The experimental machine now sets `OLDEST_KERNEL = "4.9.59"` to target
   the older kernel ABI for prospective glibc userspace. Runtime compatibility
   is untested.
-- [Experimental minimum userspace build](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39481244746)
-  tests kernel deployment plus a minimal Linux `ext4` filesystem.
-  It is **not** the AsteroidOS UI, and no boot is authorized.
-- Full AsteroidOS userspace, Wayland/Mali compositor integration, on-watch
-  boot, backups and recovery remain unvalidated.
+- [Completed minimum userspace build](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39505517130)
+  passed 2,141 BitBake tasks and built kernel, R08 DTB, and minimal Linux `ext4` rootfs.
+- [AsteroidOS image dependency preflight](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39514362687) passed, resolving 7,584 planned tasks without compiling the full graphical OS.
+- The real AsteroidOS `asteroid-machine-config` package [built successfully](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39516972444); the job's final validator failed on incorrect metadata key names, which were later corrected and [tested separately](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39522874180).
+- A **Watch3-only LinuxFB/software-QtQuick compositor override** is now implemented in `meta-noblesse/recipes-asteroid/asteroid-launcher/`. It targets Samsung's enabled DECON framebuffer driver, not the TGM DRM/KMS interface. See [display findings](docs/watch3-r08-display-linuxfb.md).
+- The real compositor file-unpack check, Qt LinuxFB plugin availability, shader compatibility, on-watch framebuffer, boot, backup and recovery still require independent verification. **No device flashing is authorized.**
 
 No device connection, signing or flashing steps are present.
 
