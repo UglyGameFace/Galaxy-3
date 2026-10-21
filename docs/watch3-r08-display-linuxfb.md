@@ -31,10 +31,11 @@ This targets the Samsung DECON fbdev driver instead of an unproven TGM DRM KMS b
 
 ## Next verification
 
-Run off-device BitBake `bitbake -c unpack asteroid-launcher-configs` and compare
-its effective unpacked `10-platform.conf` to the Watch3 layer's replacement,
-then inspect the Qt6 package configuration. These steps verify actual recipe
-file selection; they do **not** demonstrate a watch framebuffer or a bootable GUI.
+The off-device AsteroidOS preflight has unpacked `asteroid-launcher-configs`
+and matched the effective `10-platform.conf` to the Watch3 file. The subsequent
+Qt package metadata test checks the R08 recipe's LinuxFB feature and plugin
+installation dependencies; it still does **not** build `libqlinuxfb.so`,
+run a compositor/client rendering test, or verify the physical watch framebuffer.
 
 Sources:
 
@@ -62,3 +63,38 @@ shaders. Their software compatibility is still unresolved; do not mark the
 full GUI operational from this patch alone.
 
 Official reference: https://doc.qt.io/qt-6/qml-qtquick-shadereffect.html
+
+### Runtime plugin and Wayland client integration (in progress)
+
+The official AsteroidOS launcher declares `qtwayland-plugins` as a runtime
+dependency. In Qt6 meta-qt6, the QPA plugins live in a separate
+`qtbase-plugins` package. R08 now explicitly adds `qtbase-plugins` to the
+launcher's runtime dependencies, with CI inspecting effective `bitbake -e`
+metadata for `qtbase` LinuxFB/GUI `PACKAGECONFIG`, the plugin packaging
+mapping and launcher package dependencies. This is **not** proof the plugin
+has actually been compiled or included in the final root filesystem.
+
+QtWaylandCompositor documents shared-memory (`wl_shm`) client buffers when
+hardware integrations are unavailable. Its `QWaylandQuickItem` can create
+Qt Quick textures from shared-memory buffer images. This makes a CPU-rendering
+path plausible; a real off-device compositor/client smoke test is still needed
+and watch performance remains unknown.
+
+AsteroidOS's upstream `asteroid-launcher.service` reads its `EnvironmentFile`
+from `/var/lib/environment/compositor/*.conf` **for that launcher service**.
+The Watch3 LinuxFB environment override is therefore *not* evidence that
+independently launched Wayland client apps inherit `QT_QUICK_BACKEND=software`.
+Do not apply `QT_QPA_PLATFORM=linuxfb` globally: Wayland clients need their
+own Wayland platform selection, not direct framebuffer access. Establish the
+actual application launch environment before changing that path.
+
+Remaining validation gates: real BitBake metadata CI success, compiled QtBase
+`libqlinuxfb.so` installed in an R08 package/rootfs, a software QtWayland
+compositor+client `wl_shm` runtime test, and ultimately non-destructive
+physical display testing after recovery/boot is independently verified.
+
+References:
+- https://github.com/AsteroidOS/meta-asteroid/blob/master/recipes-asteroid/asteroid-launcher/asteroid-launcher_git.bb
+- https://github.com/AsteroidOS/meta-asteroid/blob/master/recipes-asteroid/asteroid-launcher/asteroid-launcher/asteroid-launcher.service
+- https://github.com/YoeDistro/meta-qt6/blob/6.11/recipes-qt/qt6/qt6.inc
+- https://doc.qt.io/qt-6/qtwaylandcompositor-index.html
