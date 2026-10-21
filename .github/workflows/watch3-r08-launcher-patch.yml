@@ -24,24 +24,33 @@ jobs:
         run: |
           set -euo pipefail
           patch="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher/0001-noblesse-r08-remove-gpu-only-round-mask.patch"
+          app_patch="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher/0002-noblesse-r08-disable-app-window-mask-layer.patch"
           recipe="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher_%.bbappend"
           grep -Fq 'SRC_URI:append:noblesse-r08' "$recipe"
           grep -Fq 'FILESEXTRAPATHS:prepend:noblesse-r08' "$recipe"
+          grep -Fq 'file://0001-noblesse-r08-remove-gpu-only-round-mask.patch' "$recipe"
+          grep -Fq 'file://0002-noblesse-r08-disable-app-window-mask-layer.patch' "$recipe"
           # Yocto rejects patches without an honest Upstream-Status header.
           # Keep this in the quick check so the expensive BitBake stage
           # does not rediscover the same packaging error.
-          grep -Fxq 'Upstream-Status: Pending' "$patch" || {
-            echo "::error::R08 launcher patch is missing its expected Yocto upstream status"
-            exit 1
-          }
+          for candidate in "$patch" "$app_patch"; do
+            grep -Fxq 'Upstream-Status: Pending' "$candidate" || {
+              echo "::error::Missing Yocto upstream status in $candidate"
+              exit 1
+            }
+          done
           mkdir -p pinned/src/qml/compositor
           curl --fail --location --silent --show-error --retry 2 --output pinned/src/qml/compositor/compositor.qml \
             https://raw.githubusercontent.com/AsteroidOS/asteroid-launcher/0ba0eb50a68fc6f1019312d511ec3e2fd1b48f31/src/qml/compositor/compositor.qml
+          curl --fail --location --silent --show-error --retry 2 --output pinned/src/qml/compositor/WindowWrapperBase.qml \
+            https://raw.githubusercontent.com/AsteroidOS/asteroid-launcher/0ba0eb50a68fc6f1019312d511ec3e2fd1b48f31/src/qml/compositor/WindowWrapperBase.qml
           # Make the pinned upstream source an isolated Git work tree.
           # Without this, git apply can anchor to Galaxy-3's parent work tree.
           git -C pinned init -q
           git -C pinned apply --check "$patch"
           git -C pinned apply "$patch"
+          git -C pinned apply --check "$app_patch"
+          git -C pinned apply "$app_patch"
           if ! grep -Fq "physical round panel clips" pinned/src/qml/compositor/compositor.qml; then
             echo "::error::Patch was not applied to the PINNED upstream file"
             exit 1
@@ -51,5 +60,13 @@ jobs:
             exit 1
           fi
           grep -Fq "physical round panel clips" pinned/src/qml/compositor/compositor.qml
-          echo "PASS: machine-scoped QML patch applies to exact pinned launcher and removes the GPU-only full-screen mask."
+          if ! grep -Fq 'physical round display already clips application windows' pinned/src/qml/compositor/WindowWrapperBase.qml; then
+            echo "::error::Watch3 application-window patch was not applied"
+            exit 1
+          fi
+          if grep -Eq '^[[:space:]]*layer\.(enabled|effect):' pinned/src/qml/compositor/WindowWrapperBase.qml; then
+            echo "::error::App-window GPU-only shader layer remains enabled"
+            exit 1
+          fi
+          echo "PASS: both R08 compositor patches apply to pinned launcher and remove fullscreen and per-window GPU masks."
           echo "NOT TESTED: Wayland software buffers, Qt platform plugin, or physical display."
