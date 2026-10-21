@@ -37,6 +37,7 @@ jobs:
             libwayland-dev libxkbcommon-dev libvulkan-dev libxcb-cursor0 qt6-qpa-plugins \
             qml6-module-qtquick qml6-module-qtquick-window \
             qml6-module-qtqml qml6-module-qtqml-models \
+            qml6-module-qtqml-workerscript \
             qml6-module-qtwayland-compositor \
             xvfb xauth
           # Qt6WaylandCompositorConfig.cmake exists even if its transitive
@@ -67,6 +68,26 @@ jobs:
               echo "::error::Qt SDK module not installed: $module"
               exit 1
             }
+          done
+          # Qt6 QML imports are separately packaged on Jammy. Checking only
+          # Qt6WaylandCompositorConfig.cmake misses runtime QML modules.
+          # Audit every import used directly or transitively by the compositor.
+          qml_root="/usr/lib/$(gcc -dumpmachine)/qt6/qml"
+          for import_dir in \
+            QtQml \
+            QtQml/Models \
+            QtQml/WorkerScript \
+            QtQuick \
+            QtQuick/Window \
+            QtWayland/Compositor \
+            QtWayland/Compositor/XdgShell; do
+            qmldir="$qml_root/$import_dir/qmldir"
+            if [ ! -s "$qmldir" ]; then
+              echo "::error title=Missing Qt6 runtime QML import::$qmldir absent"
+              exit 1
+            fi
+            echo "PASS[import]: $import_dir"
+            dpkg-query -S "$qmldir"
           done
           python3 -m py_compile tests/qt_wayland_shm_roundtrip/run_roundtrip.py
           echo 'PASS: host QtWayland compositor/client SDK complete'
