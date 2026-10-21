@@ -1,0 +1,86 @@
+name: Watch3 R08 Qt Quick software texture smoke
+
+# Fast host-side smoke only. It does not build a Yocto image or touch hardware.
+# Ubuntu system Qt may differ from the pinned target Qt 6.11.3.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/qt_software_texture_smoke/**'
+      - '.github/workflows/watch3-r08-qt-software-texture-smoke.yml'
+      - 'meta-noblesse/recipes-asteroid/asteroid-launcher/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: watch3-r08-qt-software-texture-smoke
+  cancel-in-progress: false
+
+jobs:
+  software-scenegraph-smoke:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Galaxy-3
+        uses: actions/checkout@v4
+      - name: Install host Qt Quick and virtual display
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ pkg-config qt6-base-dev qt6-declarative-dev xvfb
+      - name: Verify pinned Qt 6.11 shared-memory scenegraph path and AsteroidOS launcher environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          curl -fLsS --retry 2 \
+            https://raw.githubusercontent.com/qt/qtwayland/6.11.3/src/compositor/compositor_api/qwaylandquickitem.cpp \
+            -o "$scratch/qwaylandquickitem.cpp"
+          curl -fLsS --retry 2 \
+            https://raw.githubusercontent.com/AsteroidOS/asteroid-launcher/0ba0eb50a68fc6f1019312d511ec3e2fd1b48f31/src/main.cpp \
+            -o "$scratch/main.cpp"
+          python3 - "$scratch/qwaylandquickitem.cpp" "$scratch/main.cpp" \
+            "$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs/10-platform.conf" <<'PY'
+          from pathlib import Path
+          import sys
+          qt, launcher, config = (Path(p).read_text() for p in sys.argv[1:])
+          expected = [
+              'if (buffer.isSharedMemory())',
+              'createTextureFromImage(buffer.image())',
+              'if (ref.isSharedMemory()',
+              'new QSGSimpleTextureNode()',
+          ]
+          for fragment in expected:
+              if fragment not in qt:
+                  raise SystemExit(f"FAIL: pinned QtWayland wl_shm scenegraph branch lacks: {fragment}")
+          created = launcher.find('HomeApplication app(argc, argv)')
+          client_env = launcher.find('setenv("QT_QPA_PLATFORM", "wayland", 1)')
+          if created < 0 or client_env < created:
+              raise SystemExit("FAIL: launcher Wayland client environment ordering has changed")
+          for key in ('QT_QPA_PLATFORM=linuxfb', 'QT_QUICK_BACKEND=software'):
+              if key not in config:
+                  raise SystemExit(f"FAIL: R08 compositor configuration lacks: {key}")
+          print("PASS: pinned QtWayland 6.11.3 wl_shm conversion + pinned launcher client/compositor configuration")
+          PY
+      - name: Compile host-side Qt Quick software scenegraph test
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg-config --modversion Qt6Quick
+          cmake -S tests/qt_software_texture_smoke \
+            -B "$RUNNER_TEMP/watch3-r08-software-texture-build" \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/watch3-r08-software-texture-build" --parallel 2
+      - name: Verify CPU image can paint through QSGSimpleTextureNode
+        shell: bash
+        run: |
+          set -euo pipefail
+          xvfb-run -a -s '-screen 0 320x320x24' env \
+            QT_QPA_PLATFORM=xcb QT_QUICK_BACKEND=software QSG_INFO=1 \
+            "$RUNNER_TEMP/watch3-r08-software-texture-build/watch3_r08_software_texture_smoke"
+          echo 'NOT TESTED: end-to-end wl_shm compositor/client IPC, target Qt 6.11.3 binary, or watch panel'
