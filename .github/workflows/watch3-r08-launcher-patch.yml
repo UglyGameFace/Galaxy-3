@@ -30,7 +30,15 @@ jobs:
           mkdir -p pinned/src/qml/compositor
           curl --fail --location --silent --show-error --retry 2 --output pinned/src/qml/compositor/compositor.qml \
             https://raw.githubusercontent.com/AsteroidOS/asteroid-launcher/0ba0eb50a68fc6f1019312d511ec3e2fd1b48f31/src/qml/compositor/compositor.qml
-          (cd pinned && git apply --check "$patch" && git apply "$patch")
+          # Make the pinned upstream source an isolated Git work tree.
+          # Without this, git apply can anchor to Galaxy-3's parent work tree.
+          git -C pinned init -q
+          git -C pinned apply --check "$patch"
+          git -C pinned apply "$patch"
+          if ! grep -Fq "physical round panel clips" pinned/src/qml/compositor/compositor.qml; then
+            echo "::error::Patch was not applied to the PINNED upstream file"
+            exit 1
+          fi
           if grep -Fq "ShaderEffectSource {" pinned/src/qml/compositor/compositor.qml; then
             echo "::error::Original shader-backed full-screen corner mask is still present"
             exit 1
