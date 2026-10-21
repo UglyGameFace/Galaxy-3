@@ -27,6 +27,13 @@ jobs:
           recipe="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher_%.bbappend"
           grep -Fq 'SRC_URI:append:noblesse-r08' "$recipe"
           grep -Fq 'FILESEXTRAPATHS:prepend:noblesse-r08' "$recipe"
+          # Yocto rejects patches without an honest Upstream-Status header.
+          # Keep this in the quick check so the expensive BitBake stage
+          # does not rediscover the same packaging error.
+          grep -Fxq 'Upstream-Status: Pending' "$patch" || {
+            echo "::error::R08 launcher patch is missing its expected Yocto upstream status"
+            exit 1
+          }
           mkdir -p pinned/src/qml/compositor
           curl --fail --location --silent --show-error --retry 2 --output pinned/src/qml/compositor/compositor.qml \
             https://raw.githubusercontent.com/AsteroidOS/asteroid-launcher/0ba0eb50a68fc6f1019312d511ec3e2fd1b48f31/src/qml/compositor/compositor.qml
