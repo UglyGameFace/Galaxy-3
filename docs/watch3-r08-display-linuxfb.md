@@ -171,4 +171,4 @@ References:
 - https://doc.qt.io/qt-6/qtwaylandcompositor-index.html
 - https://doc.qt.io/qt-6/qtquick-visualcanvas-adaptations-software.html
 
-The next step is a distinct Wayland client process handing a confirmed `wl_shm` buffer to a software QtWayland compositor, with the **compositor's displayed pixels** checked. See the [measurable off-device round-trip acceptance gate](watch3-r08-wayland-roundtrip-gate.md). That integration test is not implemented or passed yet.
+The [off-device QtWayland `wl_shm` round-trip test](watch3-r08-wayland-roundtrip-gate.md) **passed in GitHub Actions run #39695926149** on 2026-10-21. The real compositor observed a client's shared-memory frame and captured its expected pixels using Qt Quick's software renderer. This is host Qt 6.2.4 under Xvfb; target ARM64 Qt 6.11.3, rootfs integration, `/dev/fb0` and watch boot remain untested.
