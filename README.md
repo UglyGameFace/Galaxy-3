@@ -45,7 +45,8 @@ The [`meta-noblesse` layer](meta-noblesse/README.md) contains an experimental
 - [AsteroidOS image dependency preflight](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39514362687) passed, resolving 7,584 planned tasks without compiling the full graphical OS.
 - The real AsteroidOS `asteroid-machine-config` package [built successfully](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39516972444); the job's final validator failed on incorrect metadata key names, which were later corrected and [tested separately](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39522874180).
 - A **Watch3-only LinuxFB/software-QtQuick compositor override** is now implemented in `meta-noblesse/recipes-asteroid/asteroid-launcher/`. It targets Samsung's enabled DECON framebuffer driver, not the TGM DRM/KMS interface. See [display findings](docs/watch3-r08-display-linuxfb.md).
-- The real compositor file-unpack check, Qt LinuxFB plugin availability, shader compatibility, on-watch framebuffer, boot, backup and recovery still require independent verification. **No device flashing is authorized.**
+- The real compositor file-unpack check passed: BitBake selected the Watch3 LinuxFB configuration. The pinned launcher corner-mask QML patch has source-level CI coverage.
+- R08 now explicitly depends on `qtbase-plugins`, and the AsteroidOS preflight checks effective Qt LinuxFB package/launcher metadata. The CI result, compiled LinuxFB plugin, software Wayland client rendering, on-watch framebuffer, boot, backup and recovery still require independent verification. **No device flashing is authorized.**
 
 No device connection, signing or flashing steps are present.
 
