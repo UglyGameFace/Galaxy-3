@@ -1,0 +1,15 @@
+# Prevent accidentally committing proprietary or device-specific firmware.
+*.bin
+*.img
+*.simg
+*.ext4
+*.elf
+private-firmware/
+local-firmware/
+firmware-local/
+# Offline build outputs, not source files.
+build/
+out/
+oe-core/
+*.pyc
+__pycache__/
