@@ -1,0 +1,27 @@
+Subject: [PATCH] compositor: avoid shader app-window layer on Watch3 R08
+
+The pinned AsteroidOS compositor's WindowWrapperBase still applies a
+CircleMaskShader layer when gesture-driven app-window borders are smoothed.
+Qt Quick's software backend cannot render ShaderEffect layers, so removing
+only the fullscreen corner mask is not sufficient. The R08 physical watch
+panel already has circular edges.
+
+Keep this change R08-specific in meta-noblesse and preserve upstream
+behavior for machines using GPU-backed scenegraphs. No hardware display
+or Wayland runtime validation has been performed.
+
+Upstream-Status: Pending
+
+---
+diff --git a/src/qml/compositor/WindowWrapperBase.qml b/src/qml/compositor/WindowWrapperBase.qml
+--- a/src/qml/compositor/WindowWrapperBase.qml
++++ b/src/qml/compositor/WindowWrapperBase.qml
+@@ -59,6 +59,6 @@
+         window.y = 0
+     }
+ 
+-    layer.enabled: smoothBorders && DeviceSpecs.hasRoundScreen
+-    layer.effect: CircleMaskShader { }
++    // R08: the physical round display already clips application windows.
++    // Avoid the unsupported GPU shader layer on the Qt Quick software backend.
+ }
