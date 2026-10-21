@@ -58,9 +58,20 @@ checks the patch against AsteroidOS launcher commit
 building Qt. This is a **source-level adaptation**, not proof the remaining
 Wayland compositor, watch faces or app animations work with CPU rendering.
 
+The pinned launcher also uses `WindowWrapperBase.qml` to apply a
+`CircleMaskShader` **per application window** during gestures. R08 now
+has a second machine-scoped patch,
+`0002-noblesse-r08-disable-app-window-mask-layer.patch`, that removes
+this GPU-only window layer without changing other watches. The
+[fast pinned-source workflow](https://github.com/UglyGameFace/Galaxy-3/actions/workflows/watch3-r08-launcher-patch.yml)
+applies both patches to the exact upstream `0ba0eb50` source and checks the
+resulting QML. The real BitBake `do_patch` preflight now inspects both
+QML files as well. These workflow results have not yet been confirmed for
+the new changes.
+
 Other effects exist, including launcher speed-dial effects and watch-face
 shaders. Their software compatibility is still unresolved; do not mark the
-full GUI operational from this patch alone.
+full GUI operational from these two patches alone.
 
 Official reference: https://doc.qt.io/qt-6/qml-qtquick-shadereffect.html
 
