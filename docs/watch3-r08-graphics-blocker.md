@@ -10,6 +10,15 @@
 - AsteroidOS upstream's `recipes-asteroid/asteroid-launcher/asteroid-launcher-configs/10-platform.conf` selects `QT_QPA_PLATFORM=eglfs` with `QT_QPA_EGLFS_INTEGRATION=eglfs_kms`.
 - The unmodified AsteroidOS launcher therefore has **no demonstrated rendering path** on the R08 watch. Successfully resolving or building Qt6 recipes says nothing about physical scanout.
 
+## New machine-specific Linux framebuffer implementation
+
+**A concrete candidate exists; on-device graphics are still unverified.**
+
+- Samsung's pinned `tizen_noblesse_defconfig` enables `CONFIG_FB=y`, `CONFIG_EXYNOS_DECON_9110=y` and `CONFIG_EXYNOS_DECON_FB=y`.
+- `drivers/video/fbdev/exynos/dpu_9110/decon_core.c` implements fbdev `fb_ops` (including `fb_mmap`) and calls `register_framebuffer()`.
+- A new R08-only `asteroid-launcher-configs_%.bbappend` overrides upstream `10-platform.conf` to select `QT_QPA_PLATFORM=linuxfb`, `QT_QUICK_BACKEND=software`, and `QT_QPA_FB_DRM=0`.
+- This deliberately avoids the TGM driver: framebuffer and DRM/KMS are different interfaces. Qt's LinuxFB can render software raster frames to fbdev; it does not require an EGLFS/KMS backend.
+- [Implementation details and outstanding checks](watch3-r08-display-linuxfb.md). Full QtWayland/Lipstick compatibility, the LinuxFB plugin and `/dev/fb0` availability still need verification.
 ## What cannot be assumed
 
 - `DRIVER_GEM | DRIVER_PRIME` is not evidence that DRM modesetting, connectors, atomic KMS, or Qt's EGLFS/KMS device integration work.
@@ -30,4 +39,4 @@ Upstream reference sources:
 - https://github.com/UsrBinLuna/kernel_samsung_galileo/blob/ec258e12887d37362b59e3291c1d3e5363c24bff/drivers/gpu/drm/tgm/tgm_drv.c
 - https://github.com/AsteroidOS/meta-asteroid/blob/master/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs/10-platform.conf
 
-**Status: device-specific graphical display support remains unimplemented and unverified.**
+**Status: Watch3-specific LinuxFB configuration implemented; functional on-device graphical display remains unverified.**
