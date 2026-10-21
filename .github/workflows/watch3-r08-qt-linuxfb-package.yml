@@ -1,0 +1,153 @@
+name: Galaxy Watch3 R08 Qt LinuxFB plugin package build
+
+# Off-device BitBake build of QtBase only to inspect the ARM64 LinuxFB QPA plugin.
+# Potentially expensive CI job, without flashable firmware.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-qt-linuxfb-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: galaxy3-r08-qt-linuxfb-package
+  cancel-in-progress: false
+
+jobs:
+  qtbase-linuxfb:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    steps:
+      - name: Checkout Galaxy-3
+        uses: actions/checkout@v4
+      - name: Install metadata parsing prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git python3 python3-packaging python3-setuptools gawk diffstat chrpath
+      - name: Fetch the upstream AsteroidOS metadata layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src preflight-logs
+          get_layer() {
+            local dest="$1" url="$2" branch="$3"
+            git clone --depth=1 --single-branch --branch "$branch" "$url" "src/$dest"
+            printf '%s %s %s\n' "$dest" "$branch" "$(git -C "src/$dest" rev-parse HEAD)" | tee -a preflight-logs/upstream-commits.txt
+          }
+          get_layer oe-core https://github.com/openembedded/openembedded-core.git whinlatter
+          get_layer oe-core/bitbake https://github.com/openembedded/bitbake.git 2.16
+          # Reuse the same known-good core revisions as the successful R08 Linux rootfs.
+          git -C src/oe-core fetch --depth=1 origin 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core checkout --detach 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core/bitbake fetch --depth=1 origin 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          git -C src/oe-core/bitbake checkout --detach 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          get_layer meta-openembedded https://github.com/openembedded/meta-openembedded.git whinlatter
+          get_layer meta-qt6 https://code.qt.io/yocto/meta-qt6.git 6.11
+          get_layer meta-smartphone https://github.com/shr-distribution/meta-smartphone.git whinlatter
+          get_layer meta-clang https://github.com/kraj/meta-clang.git whinlatter
+          get_layer meta-asteroid https://github.com/AsteroidOS/meta-asteroid.git master
+          get_layer meta-asteroid-community https://github.com/AsteroidOS/meta-asteroid-community.git master
+          get_layer meta-virtualization https://git.yoctoproject.org/meta-virtualization whinlatter
+          git -C src/meta-openembedded checkout --detach f52f32952cb9717949f8bc3d3ccf6c4c5a59521f
+          git -C src/meta-qt6 checkout --detach ec98b3ab1c8deeab9412ef6cbfd55729dc567b01
+          git -C src/meta-smartphone checkout --detach 0ef4e8979fbf3403ff8aef977874496dc312d913
+          git -C src/meta-clang checkout --detach cf20f8bd1366d41094c945597b95dd746e87b871
+          git -C src/meta-asteroid checkout --detach 1af66a6188f7909303cfcec779c8475be1bc4679
+          git -C src/meta-asteroid-community checkout --detach f911d8900b2da887d1486416a8c16b8f8f15dd35
+          git -C src/meta-virtualization checkout --detach 8f03a0cc8950ef5d5e4f11d9ae494946d1991e45
+          { echo 'PINNED CORE:'; git -C src/oe-core rev-parse HEAD; git -C src/oe-core/bitbake rev-parse HEAD; } | tee -a preflight-logs/upstream-commits.txt
+          echo 'AsteroidOS source layers downloaded; no kernel or operating system built.'
+      - name: Configure actual AsteroidOS distro with R08 machine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/conf preflight-logs
+          cat > build/conf/bblayers.conf <<'EOF'
+          BBPATH = "${TOPDIR}"
+          BBLAYERS = " \
+            ${TOPDIR}/../src/oe-core/meta \
+            ${TOPDIR}/../src/meta-qt6 \
+            ${TOPDIR}/../src/meta-asteroid \
+            ${TOPDIR}/../src/meta-asteroid-community \
+            ${TOPDIR}/../src/meta-openembedded/meta-oe \
+            ${TOPDIR}/../src/meta-openembedded/meta-multimedia \
+            ${TOPDIR}/../src/meta-openembedded/meta-gnome \
+            ${TOPDIR}/../src/meta-openembedded/meta-networking \
+            ${TOPDIR}/../src/meta-smartphone/meta-android \
+            ${TOPDIR}/../src/meta-openembedded/meta-python \
+            ${TOPDIR}/../src/meta-openembedded/meta-filesystems \
+            ${TOPDIR}/../src/meta-clang \
+            ${TOPDIR}/../src/meta-virtualization \
+            ${TOPDIR}/../meta-noblesse \
+          "
+          EOF
+          cat > build/conf/local.conf <<'EOF'
+          MACHINE = "noblesse-r08"
+          DISTRO = "asteroid"
+          PACKAGE_CLASSES = "package_ipk"
+          BB_NUMBER_THREADS = "3"
+          PARALLEL_MAKE = "-j3"
+          EOF
+      - name: Run QtBase LinuxFB package-validator regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_watch3_qt_linuxfb_package.py -v
+          python3 -m unittest discover -s tests -p test_watch3_qt_plugin_env.py -v
+      - name: Verify effective Watch3 Qt platform and launcher metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p qt-logs
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e qtbase > "$GITHUB_WORKSPACE/qt-logs/qtbase-env.tmp"
+          bitbake -e asteroid-launcher > "$GITHUB_WORKSPACE/qt-logs/launcher-env.tmp"
+          python3 "$GITHUB_WORKSPACE/tools/check_watch3_qt_plugin_env.py" \
+            "$GITHUB_WORKSPACE/qt-logs/qtbase-env.tmp" \
+            "$GITHUB_WORKSPACE/qt-logs/launcher-env.tmp"
+          rm -f "$GITHUB_WORKSPACE/qt-logs/qtbase-env.tmp" "$GITHUB_WORKSPACE/qt-logs/launcher-env.tmp"
+          df -h "$GITHUB_WORKSPACE"
+      - name: Build only QtBase through package staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -c package qtbase 2>&1 | tee "$GITHUB_WORKSPACE/qt-logs/qtbase-package-build.log"
+      - name: Inspect actual packaged R08 LinuxFB QPA binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e qtbase > "$GITHUB_WORKSPACE/qt-logs/qtbase-env.tmp"
+          pkgdest="$(awk -F'"' '$1=="PKGDEST=" {print $2}' "$GITHUB_WORKSPACE/qt-logs/qtbase-env.tmp" | tail -n 1)"
+          rm -f "$GITHUB_WORKSPACE/qt-logs/qtbase-env.tmp"
+          test -n "$pkgdest" && test -d "$pkgdest" || {
+            echo "::error::QtBase package staging directory is missing: $pkgdest"
+            exit 1
+          }
+          python3 "$GITHUB_WORKSPACE/tools/validate_watch3_qt_linuxfb_package.py" "$pkgdest"
+          plugin="$(find "$pkgdest/qtbase-plugins" -type f -path '*/plugins/platforms/libqlinuxfb.so' -print -quit)"
+          test -n "$plugin"
+          sha256sum "$plugin" | tee "$GITHUB_WORKSPACE/qt-logs/qt-linuxfb-plugin-sha256.txt"
+          file "$plugin" | tee "$GITHUB_WORKSPACE/qt-logs/qt-linuxfb-plugin-architecture.txt"
+          echo 'Package inspection only; no compositor launch or watch screen test.'
+      - name: Archive Qt plugin diagnostics (never the binary)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-qt-linuxfb-${{ github.run_number }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: qt-logs/
