@@ -1,0 +1,48 @@
+name: Watch3 R08 fast AsteroidOS hardware metadata checks
+
+# Uses captured historical real machine.conf, and a clearly labeled synthetic correction.
+# No full kernel/Qt6 compile or device operations.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'meta-noblesse/conf/machine/noblesse-r08.conf'
+      - 'tools/validate_asteroid_machine_config.py'
+      - 'tests/fixtures/asteroid-machine-config-run-39516972444.conf'
+      - '.github/workflows/watch3-r08-fast-machine-metadata.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify hardware speaker flag in R08 machine
+        run: grep -Fxq 'MACHINE_HAS_SPEAKER = "true"' meta-noblesse/conf/machine/noblesse-r08.conf
+      - name: Validate actual historical generated configuration
+        run: python3 tools/validate_asteroid_machine_config.py tests/fixtures/asteroid-machine-config-run-39516972444.conf --expected-speaker false
+      - name: Reject outdated speaker setting and validate corrected expectation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, subprocess, sys, tempfile
+          original = pathlib.Path('tests/fixtures/asteroid-machine-config-run-39516972444.conf').read_text()
+          assert 'HAS_SPEAKER = false' in original
+          with tempfile.TemporaryDirectory() as directory:
+              check = pathlib.Path(directory) / 'machine.conf'
+              check.write_text(original)
+              cmd = [sys.executable, 'tools/validate_asteroid_machine_config.py', str(check)]
+              bad = subprocess.run(cmd, text=True, capture_output=True)
+              assert bad.returncode != 0, 'Incorrect speaker setting was accepted'
+              check.write_text(original.replace('HAS_SPEAKER = false', 'HAS_SPEAKER = true'))
+              good = subprocess.run(cmd, text=True, capture_output=True)
+              if good.returncode:
+                  raise SystemExit(good.stdout + good.stderr)
+              print(good.stdout)
+          print('PASS: synthetic corrected config accepted; actual updated package not rebuilt')
+          PY

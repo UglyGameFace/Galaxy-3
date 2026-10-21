@@ -2,13 +2,8 @@ name: Galaxy Watch3 R08 AsteroidOS machine package
 
 # Build only the small upstream AsteroidOS machine-identity package on the R08 machine.
 # Never produces signed, bootable or flashable firmware.
+# Expensive BitBake package build is manual. Fast validator runs on metadata edits.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/watch3-r08-asteroidos-machine-package.yml'
-      - 'meta-noblesse/conf/**'
-      - 'meta-noblesse/recipes-asteroid/**'
   workflow_dispatch:
 
 permissions:
@@ -126,19 +121,7 @@ jobs:
           config="$(find "$GITHUB_WORKSPACE/build/tmp/work" -path '*/asteroid-machine-config/1.0/image/etc/asteroid/machine.conf' -type f -print -quit)"
           test -n "$config" && test -s "$config" || { echo '::error::Missing installed AsteroidOS machine.conf'; exit 1; }
           cp "$config" "$GITHUB_WORKSPACE/machine-logs/asteroid-machine.conf"
-          python3 - "$config" <<'PY'
-          import configparser
-          import sys
-          conf = configparser.ConfigParser()
-          conf.read(sys.argv[1])
-          expected = {('Display','ROUND'): 'true', ('Capabilities','WLAN'): 'true', ('Capabilities','SPEAKER'): 'false', ('Identity','MACHINE'): 'noblesse-r08'}
-          for (section, key), target in expected.items():
-              actual = conf.get(section, key, fallback=None)
-              if actual != target:
-                  raise SystemExit(f'{section}.{key}: expected {target!r}, found {actual!r}')
-              print(f'PASS {section}.{key}={actual}')
-          print('Device metadata validated. Graphics, touch and on-watch boot UNTESTED.')
-          PY
+          python3 "$GITHUB_WORKSPACE/tools/validate_asteroid_machine_config.py" "$config"
       - name: Upload package metadata and diagnostic logs
         if: always()
         uses: actions/upload-artifact@v4

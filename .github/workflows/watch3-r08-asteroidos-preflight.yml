@@ -6,8 +6,6 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/watch3-r08-asteroidos-preflight.yml'
-      - 'meta-noblesse/conf/**'
       - 'meta-noblesse/recipes-asteroid/**'
   workflow_dispatch:
 

@@ -5,8 +5,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'meta-noblesse/**'
-      - '.github/workflows/watch3-r08-bitbake-parse.yml'
+      - 'meta-noblesse/recipes-kernel/**'
   workflow_dispatch:
 
 permissions:
