@@ -1,0 +1,23 @@
+name: Galaxy Watch3 R08 compositor LinuxFB config
+
+# Tests the actual AsteroidOS bbappend, not an entire Linux build.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'meta-noblesse/recipes-asteroid/asteroid-launcher/**'
+      - 'tools/verify_watch3_display_backend.py'
+      - '.github/workflows/watch3-r08-display-backend.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  display-override:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify machine-scoped AsteroidOS LinuxFB compositor override
+        run: python3 tools/verify_watch3_display_backend.py
