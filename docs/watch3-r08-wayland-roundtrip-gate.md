@@ -32,8 +32,22 @@ runs under Xvfb with explicit deadlines. A failure must be diagnosed using
 the actual job logs, **not** interpreted as hardware failure or papered over
 with additional speculative package names.
 
-**Not passed or proven yet:** runtime CI, target Qt 6.11.3 cross-compiled
-compositor, packaging into the R08 image, and watch framebuffer output.
+**Still not proven:** target Qt 6.11.3 cross-compiled compositor, packaging into the R08 image, and watch framebuffer output.
+
+
+## Verified real Wayland shared-memory round-trip (2026-10-21)
+
+GitHub Actions [run #39695926149](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39695926149/job/119553160094) **passed**. The actual job logs confirm CMake configuration, both executable builds, compositor startup, a separate Wayland client connection, an observed `wl_shm` buffer, the expected client pixel values, Qt Quick's software renderer, and matching pixels captured from the compositor output. Key lines:
+
+```text
+PASS[protocol]: compositor received actual wl_shm buffer
+PASS[pixels]: compositor output contains the Wayland client's green pixels
+PASS[roundtrip]: separate Wayland QWidget client -> real wl_shm -> software compositor pixels
+```
+
+The log includes a failed EGL-display initialization warning, yet the verified software-scenegraph test succeeded. The separate client's connection-broken diagnostic followed the successful compositor shutdown. A Qt QML deprecated signal-handler parameter warning is also present; this is a cleanup issue, not a failed gate.
+
+**Scope limit:** This pass used Ubuntu 22.04's host Qt 6.2.4 packages under Xvfb, not cross-compiled target Qt 6.11.3, the actual ARM64 rootfs, the Watch3 framebuffer device, its boot chain, or on-device display. Do not authorize flashing on the strength of this result.
 
 ## Real end-to-end acceptance criteria
 
