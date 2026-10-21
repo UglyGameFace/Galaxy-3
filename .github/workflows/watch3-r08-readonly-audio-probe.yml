@@ -1,0 +1,25 @@
+name: Watch3 R08 read-only SDB audio probe tests
+
+# Synthetic tests only. CI never connects to a watch.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/probe_watch3_audio_readonly.py'
+      - 'tests/test_watch3_audio_probe.py'
+      - '.github/workflows/watch3-r08-readonly-audio-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-probe-test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test parser and forbid any SDB mutations
+        run: python3 -m unittest discover -s tests -p 'test_watch3_audio_probe.py' -v
+      - name: Verify default does not contact hardware
+        run: python3 tools/probe_watch3_audio_readonly.py
