@@ -167,6 +167,34 @@ jobs:
             "$scratch/qtbase.env" "$scratch/asteroid-launcher.env"
           echo 'Effective Qt and launcher package settings verified, no binaries built.'
 
+      - name: Verify BitBake really applies the R08-only launcher QML patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          scratch="$(mktemp)"
+          trap 'rm -f "$scratch"' EXIT
+          bitbake -e asteroid-launcher > "$scratch"
+          source_dir="$(sed -n 's/^S="\\(.*\\)"$/\\1/p' "$scratch" | tail -n 1)"
+          if [ -z "$source_dir" ]; then
+            echo "::error::Cannot resolve launcher S from BitBake metadata"
+            exit 1
+          fi
+          bitbake -c patch asteroid-launcher 2>&1 | tee "$GITHUB_WORKSPACE/preflight-logs/05-launcher-bitbake-patch.txt"
+          qml="$source_dir/src/qml/compositor/compositor.qml"
+          test -f "$qml" || { echo "::error::Missing patched launcher QML: $qml"; exit 1; }
+          grep -Fq 'physical round panel clips' "$qml" || {
+            echo "::error::R08 launcher patch missing from BitBake source tree"; exit 1;
+          }
+          if grep -Fq 'ShaderEffectSource {' "$qml"; then
+            echo "::error::GPU-only fullscreen round mask survived BitBake patch task"
+            exit 1
+          fi
+          echo 'PASS: real R08 BitBake do_patch applies the source-only launcher adaptation.'
+          echo 'NOT TESTED: Qt compositor binary or physical watch screen.'
+
       - name: Resolve AsteroidOS image dependencies without building
         shell: bash
         run: |
