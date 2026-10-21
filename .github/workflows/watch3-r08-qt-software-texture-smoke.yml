@@ -50,7 +50,7 @@ jobs:
           # Do not conceal missing Qt module CMake packages behind Qt6Quick's
           # top-level 'not found' message. Fail before the compile step with
           # precise missing-path diagnostics on this exact Ubuntu runner.
-          cmake_dir="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/cmake"
+          cmake_dir="/usr/lib/$(gcc -dumpmachine)/cmake"
           for config in \
             "$cmake_dir/Qt6OpenGL/Qt6OpenGLConfig.cmake" \
             "$cmake_dir/Qt6ShaderTools/Qt6ShaderToolsConfig.cmake" \
