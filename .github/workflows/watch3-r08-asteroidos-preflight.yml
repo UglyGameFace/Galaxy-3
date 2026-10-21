@@ -10,6 +10,8 @@ on:
       - '.github/workflows/watch3-r08-asteroidos-preflight.yml'
       - 'tools/check_watch3_compositor_env.py'
       - 'tests/test_watch3_compositor_env.py'
+      - 'tools/check_watch3_qt_plugin_env.py'
+      - 'tests/test_watch3_qt_plugin_env.py'
   workflow_dispatch:
 
 permissions:
