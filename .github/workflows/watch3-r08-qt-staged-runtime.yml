@@ -229,11 +229,27 @@ jobs:
           if [ "$status" -eq 124 ]; then
             echo 'finished=false' >> "$GITHUB_OUTPUT"
             echo 'PARTIAL: bounded compile time reached; save completed Yocto task state'
+            echo "::notice title=PARTIAL Qt stage, not a finished binary::$TARGET compilation reached its bounded cutoff; only completed signed task archives can be reused"
+            {
+              echo "## PARTIAL: $TARGET stage (not compiled completely)"
+              echo "- Real BitBake window: $seconds seconds"
+              echo "- The package was **NOT** built or validated."
+              echo "- Completed sstate tasks are eligible for a bounded checkpoint."
+            } >> "$GITHUB_STEP_SUMMARY"
           elif [ "$status" -eq 0 ]; then
             echo 'finished=true' >> "$GITHUB_OUTPUT"
             echo 'PASS: target Qt package staging completed'
+            {
+              echo "## Built: $TARGET target package stage"
+              echo '- Post-build ARM64 package validation is still required.'
+            } >> "$GITHUB_STEP_SUMMARY"
           else
+            echo 'finished=false' >> "$GITHUB_OUTPUT"
             echo "::error::Real BitBake failure, exit status $status"
+            {
+              echo "## FAILED: $TARGET stage"
+              echo "- BitBake exited $status, see build log. Only valid completed task outputs may be cached."
+            } >> "$GITHUB_STEP_SUMMARY"
             exit "$status"
           fi
 
@@ -265,6 +281,12 @@ jobs:
           state = json.loads(Path(sys.argv[1]).read_text())
           with Path(sys.argv[2]).open('a') as f:
               f.write("present=" + ("true" if state['archive_pairs'] else "false") + "\n")
+          summary = (f"- Real completed sstate pairs saved: **{state['archive_pairs']}**\\n"
+                     f"- Portable snapshot: **{state['bytes']/1024**2:.1f} MiB** (4 GiB cap)\\n"
+                     f"- Omitted for size: **{state['skipped_pairs']}** pairs\\n"
+                     "- A saved checkpoint is **not** a completed Qt binary.\\n")
+          with Path(__import__('os').environ['GITHUB_STEP_SUMMARY']).open('a') as out:
+              out.write(summary)
           print(f"CHECKPOINT: {state['archive_pairs']} complete task archives, "
                 f"{state['bytes']/1024**3:.2f} GiB (max 4 GiB)")
           PY
