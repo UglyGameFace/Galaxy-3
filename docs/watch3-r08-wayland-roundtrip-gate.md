@@ -86,8 +86,20 @@ target image. That is a separate gate, not a license to flash the watch.
 can inspect an **already-extracted** R08 AsteroidOS root filesystem. Its
 [twelve regression tests](../tests/test_watch3_graphics_rootfs.py) ran
 successfully against synthetic fixtures before committing. This tool is
-**not connected to an automatic full-image build**; there is no actual
-ARM64 AsteroidOS image available in this task to evaluate.
+**now wired into a separately guarded, manual-only graphical rootfs
+build workflow**. The workflow executes `bitbake -c rootfs asteroid-image`
+and reads `IMAGE_ROOTFS` plus `IMAGE_MANIFEST` from the actual effective
+BitBake environment before invoking the validator. It does not run on pushes,
+cannot proceed without `BUILD_OFF_DEVICE_ROOTFS_ONLY` confirmation, and
+requires at least 120 GiB free disk and 12 GiB available memory. The optional
+`watch3-yocto` self-hosted runner keeps Yocto caches between builds.
+Standard hosted runners must pass the same capacity gate.
+
+The separate [five-minute regression workflow](../.github/workflows/watch3-r08-graphics-validator-check.yml)
+runs on changes to the rootfs checker and graphical workflow, without
+building Qt or an image. Its first CI result is not yet verified.
+**No full graphical rootfs build has been run in this task**, and its
+real ARM64 artifacts remain unverified.
 
 It verifies the existence and ELF64 AArch64 machine ID of the
 `/usr/bin/asteroid-launcher` program, LinuxFB `libqlinuxfb.so` QPA
@@ -111,7 +123,7 @@ runtime launch, graphics/ELF dependency loader test, watch framebuffer
 probe, boot validation or a recovery guarantee. The script never executes
 the target binaries, touches the watch, or changes the image. Do not
 confuse the synthetic regression pass with real ARM64 rootfs validation.
-The expensive image build remains a separate, explicit decision.
+The actual source build remains a separate expensive manual decision; this change only prepares its validation.
 
 ## Real end-to-end acceptance criteria
 
