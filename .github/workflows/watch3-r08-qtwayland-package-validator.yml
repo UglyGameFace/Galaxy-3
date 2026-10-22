@@ -1,0 +1,42 @@
+name: Watch3 R08 QtWayland ARM64 package validator regression
+
+# Free host-only package-validator tests. Does NOT compile Qt or build firmware.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-qtwayland-package-validator.yml'
+      - 'tools/validate_watch3_qtwayland_package.py'
+      - 'tools/validate_watch3_graphics_rootfs.py'
+      - 'tests/test_watch3_qtwayland_package.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qtwayland-target-package-validation:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test pinned R08 QtWayland runtime package expectations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/validate_watch3_qtwayland_package.py tests/test_watch3_qtwayland_package.py
+          python3 -m unittest discover -s tests -p 'test_watch3_qtwayland_package.py' -v
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('tools/validate_watch3_qtwayland_package.py').read_text()
+          required = (
+              'qtwayland-plugins',
+              'libQt6WaylandCompositor.so.*',
+              'libqwayland*.so',
+              'elf_aarch64',
+              'external packaged symlink',
+          )
+          for phrase in required:
+              assert phrase in source, f'Missing QtWayland target package contract: {phrase}'
+          print('PASS: QtWayland target post-build validation is ready, no ARM64 build requested')
+          PY
