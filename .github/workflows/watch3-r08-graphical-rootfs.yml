@@ -93,6 +93,7 @@ jobs:
           git -C src/meta-qt6 checkout --detach ec98b3ab1c8deeab9412ef6cbfd55729dc567b01
           git -C src/meta-smartphone checkout --detach 0ef4e8979fbf3403ff8aef977874496dc312d913
           git -C src/meta-clang checkout --detach cf20f8bd1366d41094c945597b95dd746e87b871
+          git -C src/meta-asteroid fetch --depth=1 origin 1af66a6188f7909303cfcec779c8475be1bc4679
           git -C src/meta-asteroid checkout --detach 1af66a6188f7909303cfcec779c8475be1bc4679
           git -C src/meta-asteroid-community checkout --detach f911d8900b2da887d1486416a8c16b8f8f15dd35
           git -C src/meta-virtualization checkout --detach 8f03a0cc8950ef5d5e4f11d9ae494946d1991e45
@@ -156,8 +157,8 @@ jobs:
             "$GITHUB_WORKSPACE/rootfs-logs/qtwayland.env" \
             "$GITHUB_WORKSPACE/rootfs-logs/qtdeclarative.env"
           # Never upload enormous environment files, some may contain host paths.
-          rm -f rootfs-logs/*.env
-          bitbake -n asteroid-image 2>&1 | tee rootfs-logs/00-dry-run.log
+          rm -f "$GITHUB_WORKSPACE/rootfs-logs/"*.env
+          bitbake -n asteroid-image 2>&1 | tee "$GITHUB_WORKSPACE/rootfs-logs/00-dry-run.log"
           echo 'PASS: preflight metadata and dry-run; compiling only after this point'
 
       - name: Build the graphical rootfs task off-device only
