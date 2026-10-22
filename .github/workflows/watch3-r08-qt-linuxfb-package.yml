@@ -114,6 +114,29 @@ jobs:
           # Ask BitBake to stop when storage is dangerously low.
           echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},2G,100K"' >> build/conf/local.conf
 
+      - name: Restore signed Yocto sstate snapshot from free GitHub cache
+        id: restore_sstate
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/watch3-yocto/sstate-snapshot
+          key: galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-${{ github.run_id }}
+          restore-keys: |
+            galaxy3-r08-oe8751-qt611-v1-sstate-qtwayland-
+            galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-
+
+      - name: Load cached task signatures before any expensive compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          snapshot="$HOME/.cache/watch3-yocto/sstate-snapshot"
+          active="$HOME/.cache/watch3-yocto/sstate-cache"
+          if [ -f "$snapshot/watch3-sstate-manifest.json" ]; then
+            python3 tools/watch3_yocto_sstate_checkpoint.py restore "$snapshot" "$active"
+          else
+            echo 'CACHE MISS: no previous R08 Qt task archive exists'
+          fi
+          echo 'Cache is a best-effort optimization; BitBake still verifies task signatures'
+
       - name: Check host capacity before spending hours compiling
         shell: bash
         run: |
@@ -140,6 +163,7 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s tests -p test_watch3_qt_linuxfb_package.py -v
           python3 -m unittest discover -s tests -p test_watch3_qt_plugin_env.py -v
+          python3 -m unittest discover -s tests -p test_watch3_yocto_sstate_checkpoint.py -v
       - name: Verify effective Watch3 Qt platform and launcher metadata
         shell: bash
         run: |
@@ -156,6 +180,7 @@ jobs:
           rm -f "$GITHUB_WORKSPACE/qt-logs/qtbase-env.tmp" "$GITHUB_WORKSPACE/qt-logs/launcher-env.tmp"
           df -h "$GITHUB_WORKSPACE"
       - name: Build only QtBase through package staging
+        id: qtbase_build
         shell: bash
         run: |
           set -euo pipefail
@@ -178,7 +203,10 @@ jobs:
           ) &
           monitor_pid=$!
           trap 'kill "$monitor_pid" 2>/dev/null || true' EXIT
-          bitbake -c package qtbase 2>&1 | tee "$GITHUB_WORKSPACE/qt-logs/qtbase-package-build.log"
+          # Keep room before GitHub's six-hour job cap to checkpoint sstate,
+          # even if cold QtBase is not yet finished.
+          timeout --signal=TERM --kill-after=15s 18000s \
+            bitbake -c package qtbase 2>&1 | tee "$GITHUB_WORKSPACE/qt-logs/qtbase-package-build.log"
       - name: Inspect actual packaged R08 LinuxFB QPA binary
         shell: bash
         run: |
@@ -216,6 +244,45 @@ jobs:
             tee "$GITHUB_WORKSPACE/qt-logs/arm64-platform-plugin/SHA256SUMS"
           echo 'PASS: actual ARM64 LinuxFB .so retained for off-device package integration'
           echo 'NOT TESTED: target QtWayland compositor, final rootfs, device framebuffer or boot'
+      - name: Prepare bounded portable R08 Yocto task checkpoint
+        id: snapshot
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          sstate="$HOME/.cache/watch3-yocto/sstate-cache"
+          snapshot="$HOME/.cache/watch3-yocto/sstate-snapshot"
+          if [ ! -d "$sstate" ] || [ -z "$(find "$sstate" -type f -name '*.tar.zst' -print -quit)" ]; then
+            echo 'No complete sstate task archives exist; no cache checkpoint saved'
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          free_kib="$(df -Pk "$HOME" | awk 'NR==2 {print $4}')"
+          if (( free_kib < 10 * 1024 * 1024 )); then
+            echo 'Less than 10 GiB free disk; skip checkpoint copy to protect runner'
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 "$GITHUB_WORKSPACE/tools/watch3_yocto_sstate_checkpoint.py" \
+            checkpoint "$sstate" "$snapshot" --max-mib 4096
+          python3 - "$snapshot/watch3-sstate-manifest.json" "$GITHUB_OUTPUT" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          info = json.loads(Path(sys.argv[1]).read_text())
+          print(f"Selected {info['archive_pairs']} signed sstate archive pairs; "
+                f"snapshot size {info['bytes'] / 1024**3:.2f} GiB")
+          with Path(sys.argv[2]).open("a") as stream:
+              stream.write(f"present={'true' if info['archive_pairs'] else 'false'}\n")
+          PY
+
+      - name: Save completed R08 Qt task state on success or bounded build failure
+        if: always() && steps.snapshot.outputs.present == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/watch3-yocto/sstate-snapshot
+          key: galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-${{ github.run_id }}
+
       - name: Archive Qt plugin and build diagnostics (including real ARM64 binary)
         if: always()
         uses: actions/upload-artifact@v4
