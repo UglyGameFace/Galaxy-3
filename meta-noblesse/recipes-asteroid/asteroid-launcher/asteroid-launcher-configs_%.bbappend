@@ -12,3 +12,9 @@ do_install:append:noblesse-r08() {
     grep -Fxq "QT_QUICK_BACKEND=software" "${platform}" || bbfatal "R08 Qt Quick software backend override missing"
     grep -Fxq "QT_QPA_FB_DRM=0" "${platform}" || bbfatal "R08 DRM fallback must remain disabled"
 }
+
+# This upstream recipe installs text environment files and converts a keymap
+# using the native kmap2qmap tool. It compiles NO target ARM64 code.
+# Avoid unrelated virtual/cross-cc, compilerlibs and libc cold builds on R08.
+# KEEP the upstream qttools-native DEPENDS and keys.kmap -> keys.qmap step.
+INHIBIT_DEFAULT_DEPS:noblesse-r08 = "1"
