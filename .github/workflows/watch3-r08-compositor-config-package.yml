@@ -7,6 +7,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/watch3-r08-compositor-config-package.yml'
+      - 'tools/validate_watch3_compositor_ipk.py'
+      - 'tests/test_watch3_compositor_ipk.py'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +25,11 @@ jobs:
     steps:
       - name: Checkout Galaxy-3
         uses: actions/checkout@v4
+      - name: Run fast compositor package regression tests before BitBake
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_watch3_compositor_ipk.py' -v
       - name: Check free runner capacity before fetching pinned sources
         shell: bash
         run: |
@@ -206,29 +213,23 @@ jobs:
           pkg="$pkgdest/asteroid-launcher-configs"
           linuxfb="$pkg/var/lib/environment/compositor/10-platform.conf"
           keymap="$pkg/usr/share/qt6/keymaps/keys.qmap"
-          for file in \
-            "$pkg/var/lib/environment/compositor/00-default.conf" \
-            "$linuxfb" \
-            "$pkg/var/lib/environment/compositor/20-device.conf" \
-            "$keymap"; do
-            test -s "$file" || { echo "::error::Missing actual package file: $file"; exit 1; }
-          done
-          grep -Fxq 'QT_QPA_PLATFORM=linuxfb' "$linuxfb"
-          grep -Fxq 'QT_QUICK_BACKEND=software' "$linuxfb"
-          grep -Fxq 'QT_QPA_FB_DRM=0' "$linuxfb"
-          test "$(stat -c %s "$keymap")" -eq 88
-          python3 - "$keymap" <<'PY'
-          from pathlib import Path
-          import hashlib
-          import sys
-          payload = Path(sys.argv[1]).read_bytes()
-          expected = '480250ec53e8a65e5bac7566597a957fcb96b59f0439602c0591da14cb49c767'
-          assert hashlib.sha256(payload).hexdigest() == expected, 'Packaged Watch3 keymap differs from host-Qt6-validated six-key golden'
-          print('PASS: actual R08 IPK payload includes all six Qt6-compatible button mappings')
-          PY
+          # Pinned upstream 20-device.conf is intentionally ZERO BYTES.
+          # test -s would reject a valid file after all 571 BitBake tasks passed.
+          python3 "$GITHUB_WORKSPACE/tools/validate_watch3_compositor_ipk.py" "$pkg"
           sha256sum "$keymap" > "$GITHUB_WORKSPACE/compositor-logs/03-qmap-sha256.txt"
           cp "$linuxfb" "$GITHUB_WORKSPACE/compositor-logs/04-linuxfb-platform.conf"
-          echo 'PASS: actual R08 compositor configuration package has LinuxFB, software QtQuick and six-button keymap'
+          cp "$pkg/var/lib/environment/compositor/20-device.conf" "$GITHUB_WORKSPACE/compositor-logs/05-empty-device.conf"
+          # Preserve only the small nonflashable .ipk to avoid another cold
+          # build for future payload inspection. Fail if no IPK exists.
+          pkgdir="$GITHUB_WORKSPACE/build/tmp/deploy/ipk"
+          mapfile -d '' -t ipks < <(find "$pkgdir" -type f -name 'asteroid-launcher-configs_*.ipk' -print0)
+          if [ "${#ipks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one built compositor .ipk, found ${#ipks[@]}"
+            exit 1
+          fi
+          mkdir -p "$GITHUB_WORKSPACE/compositor-logs/packaged-ipk"
+          cp "${ipks[0]}" "$GITHUB_WORKSPACE/compositor-logs/packaged-ipk/"
+          echo 'PASS: real R08 config IPK validated and archived for future inspection'
           echo 'NOT TESTED: full QtWayland compositor, rootfs, device boot or display'
 
       - name: Upload diagnostics only, never firmware
