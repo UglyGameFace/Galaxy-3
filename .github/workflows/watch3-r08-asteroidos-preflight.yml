@@ -26,7 +26,7 @@ concurrency:
 jobs:
   asteroid-metadata:
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout Galaxy-3
         uses: actions/checkout@v4
@@ -191,6 +191,58 @@ jobs:
             "$scratch/qtwayland.env" "$scratch/qtdeclarative.env" \
             | tee "$GITHUB_WORKSPACE/preflight-logs/06-graphics-runtime-metadata.txt"
           echo 'NOT TESTED: actual ARM64 IPK contents, full rootfs or hardware.'
+
+      - name: Fetch and inspect pinned target QtWayland 6.11 shared-memory source
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          scratch="$(mktemp)"
+          trap 'rm -f "$scratch"' EXIT
+          bitbake -e qtwayland > "$scratch"
+          python3 - "$scratch" "$GITHUB_WORKSPACE/preflight-logs/qtwayland-target-s.txt" <<'PY'
+          from pathlib import Path
+          import sys
+          keys = ('MACHINE', 'DISTRO', 'PV', 'SRCREV', 'S',
+                  'REQUIRED_DISTRO_FEATURES', 'PACKAGES')
+          values = {}
+          for line in Path(sys.argv[1]).read_text().splitlines():
+              for key in keys:
+                  if line.startswith(key + '='):
+                      raw = line.partition('=')[2]
+                      values[key] = raw[1:-1] if raw.startswith('"') and raw.endswith('"') else raw
+          assert values.get('MACHINE') == 'noblesse-r08', 'wrong QtWayland target'
+          assert values.get('DISTRO') == 'asteroid', 'wrong target distro'
+          assert values.get('PV') == '6.11.3', f"QtWayland version drift: {values.get('PV')}"
+          expected = '35bfd4e8e146fb49fa95f4d58028661a910b2705'
+          assert values.get('SRCREV') == expected, f"QtWayland source drift: {values.get('SRCREV')}"
+          assert 'wayland' in values.get('REQUIRED_DISTRO_FEATURES', '').split()
+          assert 'qtwayland-plugins' in values.get('PACKAGES', '').split()
+          source_dir = Path(values.get('S', ''))
+          assert source_dir.is_absolute(), 'QtWayland source path is not absolute'
+          Path(sys.argv[2]).write_text(str(source_dir) + '\n')
+          print('PASS: R08 QtWayland 6.11.3 source commit and plugin package are pinned')
+          PY
+          # Fetch and unpack only. Never run QtBase or QtWayland compilation.
+          timeout --signal=TERM --kill-after=5s 1200s bitbake -c unpack qtwayland \
+            2>&1 | tee "$GITHUB_WORKSPACE/preflight-logs/07-qtwayland-source-unpack.txt"
+          source_dir="$(cat "$GITHUB_WORKSPACE/preflight-logs/qtwayland-target-s.txt")"
+          file="$source_dir/src/compositor/compositor_api/qwaylandquickitem.cpp"
+          test -s "$file" || { echo "::error::Missing pinned QtWayland compositor source: $file"; exit 1; }
+          python3 - "$file" <<'PY'
+          from pathlib import Path
+          import sys
+          source = Path(sys.argv[1]).read_text()
+          for fragment in ('buffer.isSharedMemory()', 'ref.isSharedMemory()',
+                           'createTextureFromImage(buffer.image())',
+                           'new QSGSimpleTextureNode()'):
+              assert fragment in source, f'Missing target Qt shared-memory path: {fragment}'
+          print('PASS: actual BitBake-unpacked R08 QtWayland wl_shm software texture path')
+          print('NOT TESTED: cross-compiled compositor binary, rootfs or watch display')
+          PY
+          sha256sum "$file" | tee "$GITHUB_WORKSPACE/preflight-logs/08-qtwayland-source-sha256.txt"
 
       - name: Verify BitBake really applies the R08-only launcher QML patch
         shell: bash
