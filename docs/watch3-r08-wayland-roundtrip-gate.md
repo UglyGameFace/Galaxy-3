@@ -108,28 +108,35 @@ and 100K free-inode stop threshold after the accidental 200M-inode guard
 blocked a previous run. The workflow also explicitly fetches the pinned
 historical AsteroidOS commit before checkout to avoid master-branch drift.
 
-**Current free dependency-budget experiment:** The R08-only
-[launcher-config bbappend](../meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs_%.bbappend)
-now sets `INHIBIT_DEFAULT_DEPS:noblesse-r08 = "1"` because the recipe
-contains no ARM64 compilation. This removes only automatic target GCC/libc
-dependencies, not the upstream `qttools-native` build dependency or
-`keys.kmap` conversion. The [free graph-only workflow](../.github/workflows/watch3-r08-compositor-graph.yml)
-resolves its **real** BitBake dependency graph on the pinned R08 environment
-and reports recipe/task counts; it does not compile anything. Its first
-[run #39843007333](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39843007333)
-was still in progress when this documentation was updated.
+**Compositor configuration dependency budget: measured and improved.**
+[Run #39843007333](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39843007333)
+**passed** and measured **126 recipes / 1,475 task IDs** with
+`qtbase-native`, `qtdeclarative-native`, and `qttools-native`
+in the original upstream keyboard-map toolchain. QtTools 6.11's
+`kmap2qmap` symbol lookup handles `VolumeDown` and `VolumeUp`
+but not the `MenuKB` and `Sleep` symbols used in the pinned
+upstream `keys.kmap` file; using it unchanged may omit buttons.
 
-**Next blocker / build budget decision:** Upstream
-`asteroid-launcher-configs_git.bb` has `DEPENDS += "qttools-native"`
-because it invokes `kmap2qmap` to convert `keys.kmap` into a Qt
-keymap, even though the R08 LinuxFB environment is just a text file.
-The compositor environment **source** and effective BitBake unpack
-were already verified in the free AsteroidOS preflight, but the actual
-`asteroid-launcher-configs` target package has **not** been built.
-Before running it, determine whether the `qttools-native` dependency
-can fit the measured free runner's disk and six-hour bounds or be
-reused from a proven sstate cache. Do not silently skip the Qt keymap
-or replace the upstream recipe with an untested alternative.
+A strict, `noblesse-r08`-only
+[Qt6 keymap encoder](../meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs/r08-qmap.py)
+now encodes **all six physical input keycodes** into the Qt QDataStream
+`.qmap` format. It rejects any unexpected input to prevent a silent
+incorrect map. The [host Qt6 compatibility run #39845554241](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39845554241)
+**passed** all nine Python regression tests, fetched the real pinned
+AsteroidOS `keys.kmap`, generated the 88-byte binary, and used a compiled
+Qt6 QDataStream reader to verify all six `Qt::Key` values.
+
+The [R08-only recipe override](../meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs_%.bbappend)
+retains the three upstream compositor environment files and
+`keys.kmap`, but substitutes the host-Qt6-validated conversion
+for `qttools-native`. Other AsteroidOS machines still use their
+original recipe and QtTools tool. The revised
+[dependency graph #39845884696](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39845884696)
+is checking that the heavy native Qt dependency chain was removed.
+The guarded [configuration IPK build #39846145882](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39846145882)
+will inspect the actual packaged LinuxFB settings and check the
+six-button file's fixed SHA256 if its dependency budget gate passes.
+**Neither run's conclusion was verified at the time of this edit.**
 
 The successful machine package does **not** prove any Qt compositor
 binary, installed graphical root filesystem, framebuffer device,
