@@ -1,0 +1,229 @@
+name: Watch3 R08 off-device AsteroidOS graphical rootfs validation
+
+# Manual only: full AsteroidOS dependency compilation is large and expensive.
+# No firmware packaging, signing, flashing, or on-device steps.
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Build host; standard must pass capacity gate; self-hosted needs watch3-yocto label'
+        type: choice
+        required: true
+        default: self-hosted
+        options:
+          - self-hosted
+          - standard
+      confirm:
+        description: 'Enter BUILD_OFF_DEVICE_ROOTFS_ONLY to acknowledge the expensive build'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: galaxy3-r08-graphical-rootfs
+  cancel-in-progress: false
+
+jobs:
+  graphics-rootfs:
+    if: ${{ inputs.confirm == 'BUILD_OFF_DEVICE_ROOTFS_ONLY' }}
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted","linux","x64","watch3-yocto"]') || 'ubuntu-22.04' }}
+    timeout-minutes: ${{ inputs.runner == 'self-hosted' && 1440 || 360 }}
+    steps:
+      - name: Checkout Galaxy-3
+        uses: actions/checkout@v4
+
+      - name: Verify rootfs validator regressions before downloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_watch3_graphics_rootfs.py -v
+          python3 -m unittest discover -s tests -p test_watch3_graphics_image_env.py -v
+
+      - name: Enforce capacity before any expensive source fetch or compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h "$GITHUB_WORKSPACE" "$HOME"
+          free -h
+          nproc
+          available_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+          minimum_kib="$((120 * 1024 * 1024))"
+          if [ "$available_kib" -lt "$minimum_kib" ]; then
+            echo "::error title=Insufficient graphical build space::Need at least 120 GiB free before starting a full AsteroidOS rootfs. Actual free: $((available_kib/1024/1024)) GiB. No build started."
+            exit 1
+          fi
+          available_mem_kib="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+          minimum_mem_kib="$((12 * 1024 * 1024))"
+          if [ "$available_mem_kib" -lt "$minimum_mem_kib" ]; then
+            echo "::error title=Insufficient graphical build memory::Need at least 12 GiB available before starting rootfs compilation. No build started."
+            exit 1
+          fi
+
+      - name: Install known Yocto build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git build-essential chrpath cpio diffstat gawk file libssl-dev \
+            texinfo python3 python3-packaging python3-setuptools \
+            wget zstd liblz4-tool bc bison flex xz-utils unzip zip locales
+
+      - name: Fetch the upstream AsteroidOS metadata layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src preflight-logs
+          get_layer() {
+            local dest="$1" url="$2" branch="$3"
+            git clone --depth=1 --single-branch --branch "$branch" "$url" "src/$dest"
+            printf '%s %s %s\n' "$dest" "$branch" "$(git -C "src/$dest" rev-parse HEAD)" | tee -a preflight-logs/upstream-commits.txt
+          }
+          get_layer oe-core https://github.com/openembedded/openembedded-core.git whinlatter
+          get_layer oe-core/bitbake https://github.com/openembedded/bitbake.git 2.16
+          # Reuse the same known-good core revisions as the successful R08 Linux rootfs.
+          git -C src/oe-core fetch --depth=1 origin 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core checkout --detach 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core/bitbake fetch --depth=1 origin 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          git -C src/oe-core/bitbake checkout --detach 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          get_layer meta-openembedded https://github.com/openembedded/meta-openembedded.git whinlatter
+          get_layer meta-qt6 https://code.qt.io/yocto/meta-qt6.git 6.11
+          get_layer meta-smartphone https://github.com/shr-distribution/meta-smartphone.git whinlatter
+          get_layer meta-clang https://github.com/kraj/meta-clang.git whinlatter
+          get_layer meta-asteroid https://github.com/AsteroidOS/meta-asteroid.git master
+          get_layer meta-asteroid-community https://github.com/AsteroidOS/meta-asteroid-community.git master
+          get_layer meta-virtualization https://git.yoctoproject.org/meta-virtualization whinlatter
+          git -C src/meta-openembedded checkout --detach f52f32952cb9717949f8bc3d3ccf6c4c5a59521f
+          git -C src/meta-qt6 checkout --detach ec98b3ab1c8deeab9412ef6cbfd55729dc567b01
+          git -C src/meta-smartphone checkout --detach 0ef4e8979fbf3403ff8aef977874496dc312d913
+          git -C src/meta-clang checkout --detach cf20f8bd1366d41094c945597b95dd746e87b871
+          git -C src/meta-asteroid checkout --detach 1af66a6188f7909303cfcec779c8475be1bc4679
+          git -C src/meta-asteroid-community checkout --detach f911d8900b2da887d1486416a8c16b8f8f15dd35
+          git -C src/meta-virtualization checkout --detach 8f03a0cc8950ef5d5e4f11d9ae494946d1991e45
+          { echo 'PINNED CORE:'; git -C src/oe-core rev-parse HEAD; git -C src/oe-core/bitbake rev-parse HEAD; } | tee -a preflight-logs/upstream-commits.txt
+          echo 'AsteroidOS source layers downloaded; no kernel or operating system built.'
+      - name: Configure actual AsteroidOS distro with R08 machine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/conf preflight-logs
+          cat > build/conf/bblayers.conf <<'EOF'
+          BBPATH = "${TOPDIR}"
+          BBLAYERS = " \
+            ${TOPDIR}/../src/oe-core/meta \
+            ${TOPDIR}/../src/meta-qt6 \
+            ${TOPDIR}/../src/meta-asteroid \
+            ${TOPDIR}/../src/meta-asteroid-community \
+            ${TOPDIR}/../src/meta-openembedded/meta-oe \
+            ${TOPDIR}/../src/meta-openembedded/meta-multimedia \
+            ${TOPDIR}/../src/meta-openembedded/meta-gnome \
+            ${TOPDIR}/../src/meta-openembedded/meta-networking \
+            ${TOPDIR}/../src/meta-smartphone/meta-android \
+            ${TOPDIR}/../src/meta-openembedded/meta-python \
+            ${TOPDIR}/../src/meta-openembedded/meta-filesystems \
+            ${TOPDIR}/../src/meta-clang \
+            ${TOPDIR}/../src/meta-virtualization \
+            ${TOPDIR}/../meta-noblesse \
+          "
+          EOF
+          cat > build/conf/local.conf <<'EOF'
+          MACHINE = "noblesse-r08"
+          DISTRO = "asteroid"
+          PACKAGE_CLASSES = "package_ipk"
+          BB_NUMBER_THREADS = "3"
+          PARALLEL_MAKE = "-j3"
+          EOF
+          # Persistent across runs on a dedicated self-hosted builder. Standard
+          # GitHub-hosted runners discard these directories after each job.
+          mkdir -p "$HOME/.cache/watch3-yocto/downloads" "$HOME/.cache/watch3-yocto/sstate-cache"
+          printf 'DL_DIR = "%s/.cache/watch3-yocto/downloads"\n' "$HOME" >> build/conf/local.conf
+          printf 'SSTATE_DIR = "%s/.cache/watch3-yocto/sstate-cache"\n' "$HOME" >> build/conf/local.conf
+          # Ask BitBake to stop when storage is dangerously low.
+          echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},2G,100K"' >> build/conf/local.conf
+
+
+      - name: Validate R08 image metadata before cross-compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p rootfs-logs
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          for recipe in asteroid-image asteroid-launcher qtbase qtwayland qtdeclarative; do
+            bitbake -e "$recipe" > "$GITHUB_WORKSPACE/rootfs-logs/$recipe.env"
+          done
+          python3 "$GITHUB_WORKSPACE/tools/check_watch3_graphics_image_env.py" \
+            "$GITHUB_WORKSPACE/rootfs-logs/asteroid-image.env" \
+            "$GITHUB_WORKSPACE/rootfs-logs/asteroid-launcher.env" \
+            "$GITHUB_WORKSPACE/rootfs-logs/qtbase.env" \
+            "$GITHUB_WORKSPACE/rootfs-logs/qtwayland.env" \
+            "$GITHUB_WORKSPACE/rootfs-logs/qtdeclarative.env"
+          # Never upload enormous environment files, some may contain host paths.
+          rm -f rootfs-logs/*.env
+          bitbake -n asteroid-image 2>&1 | tee rootfs-logs/00-dry-run.log
+          echo 'PASS: preflight metadata and dry-run; compiling only after this point'
+
+      - name: Build the graphical rootfs task off-device only
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          # Resolves/builds required target packages and executes do_rootfs.
+          # Does NOT run do_image, create a flashable update or contact device.
+          bitbake -c rootfs asteroid-image 2>&1 | tee "$GITHUB_WORKSPACE/rootfs-logs/01-rootfs-build.log"
+
+      - name: Inspect actual ARM64 rootfs and installed package manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e asteroid-image > "$GITHUB_WORKSPACE/rootfs-logs/postbuild.env"
+          # Yocto's IMAGE_ROOTFS and IMAGE_MANIFEST come from the same image task.
+          # Do not glob another build's stale manifest or pretend rootfs exists.
+          python3 - "$GITHUB_WORKSPACE/rootfs-logs/postbuild.env" "$GITHUB_WORKSPACE/rootfs-logs/rootfs-paths.txt" <<'PY'
+          from pathlib import Path
+          import sys
+          values = {}
+          for line in Path(sys.argv[1]).read_text().splitlines():
+              for key in ('MACHINE', 'DISTRO', 'IMAGE_ROOTFS', 'IMAGE_MANIFEST'):
+                  if line.startswith(key + '='):
+                      raw = line.split('=', 1)[1]
+                      values[key] = raw[1:-1] if raw.startswith('"') and raw.endswith('"') else raw
+          assert values.get('MACHINE') == 'noblesse-r08', values.get('MACHINE')
+          assert values.get('DISTRO') == 'asteroid', values.get('DISTRO')
+          paths = [Path(values.get(k, '')) for k in ('IMAGE_ROOTFS', 'IMAGE_MANIFEST')]
+          if any(not p.is_absolute() for p in paths):
+              raise SystemExit('FAIL: IMAGE_ROOTFS or IMAGE_MANIFEST is not an absolute path')
+          if not paths[0].is_dir() or not paths[1].is_file():
+              raise SystemExit(f'FAIL: actual rootfs or image manifest missing: {paths}')
+          Path(sys.argv[2]).write_text('\n'.join(map(str, paths)) + '\n')
+          print('PASS: real ARM64 image rootfs directory and manifest resolved')
+          PY
+          mapfile -t paths < "$GITHUB_WORKSPACE/rootfs-logs/rootfs-paths.txt"
+          python3 "$GITHUB_WORKSPACE/tools/validate_watch3_graphics_rootfs.py" \
+            "${paths[0]}" --installed-packages "${paths[1]}" \
+            | tee "$GITHUB_WORKSPACE/rootfs-logs/02-rootfs-validation.log"
+          cp "${paths[1]}" "$GITHUB_WORKSPACE/rootfs-logs/installed-packages.manifest"
+          du -sh "${paths[0]}"
+          echo 'PASS: inspected actual target rootfs directory; no image built or watch touched'
+
+      - name: Archive diagnostics only, never the rootfs or firmware
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-graphics-rootfs-${{ github.run_number }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            rootfs-logs/00-dry-run.log
+            rootfs-logs/01-rootfs-build.log
+            rootfs-logs/02-rootfs-validation.log
+            rootfs-logs/installed-packages.manifest
+            rootfs-logs/rootfs-paths.txt
