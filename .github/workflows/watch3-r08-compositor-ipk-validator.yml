@@ -1,0 +1,38 @@
+name: Watch3 R08 staged compositor package validator tests
+
+# Free, fast tests only; no BitBake or Qt package build.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-compositor-ipk-validator.yml'
+      - '.github/workflows/watch3-r08-compositor-config-package.yml'
+      - 'tools/validate_watch3_compositor_ipk.py'
+      - 'tests/test_watch3_compositor_ipk.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-validator:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python syntax and validate intentionally empty upstream file fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/validate_watch3_compositor_ipk.py tests/test_watch3_compositor_ipk.py
+          python3 -m unittest discover -s tests -p test_watch3_compositor_ipk.py -v
+          python3 - <<'PY'
+          from pathlib import Path
+          workflow = Path('.github/workflows/watch3-r08-compositor-config-package.yml').read_text()
+          assert 'validate_watch3_compositor_ipk.py" "$pkg"' in workflow
+          assert 'test -s "$file"' not in workflow
+          assert "python3 -m unittest discover -s tests -p 'test_watch3_compositor_ipk.py' -v" in workflow
+          assert "bitbake asteroid-launcher-configs" in workflow
+          assert "packaged-ipk" in workflow
+          print('PASS: package job runs regression tests and validates staged files, not a nonempty placeholder')
+          PY
