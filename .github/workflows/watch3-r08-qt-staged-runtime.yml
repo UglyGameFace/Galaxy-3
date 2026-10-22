@@ -1,0 +1,315 @@
+name: Watch3 R08 free staged ARM64 Qt build and cache checkpoint
+
+# First push warms real sstate for 12 minutes; manual runs resume a selected Qt stage.
+# Only standard free Ubuntu CI. Does not build or flash firmware.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-qt-staged-runtime.yml'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Single Qt package stage'
+        required: true
+        type: choice
+        default: qtbase
+        options:
+          - qtbase
+          - qtdeclarative
+          - qtwayland
+
+permissions:
+  contents: read
+
+concurrency:
+  group: galaxy3-r08-qt-linuxfb-package
+  cancel-in-progress: false
+
+jobs:
+  asteroid-metadata:
+    runs-on: ubuntu-22.04
+    timeout-minutes: ${{ github.event_name == 'push' && 35 || 355 }}
+    env:
+      TARGET: ${{ github.event_name == 'push' && 'qtbase' || inputs.target }}
+    steps:
+      - name: Checkout Galaxy-3
+        uses: actions/checkout@v4
+      - name: Check free runner capacity before fetching pinned sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h "$GITHUB_WORKSPACE"
+          free -h
+          disk_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+          mem_kib="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+          if (( disk_kib < 30 * 1024 * 1024 || mem_kib < 4 * 1024 * 1024 )); then
+            echo "::error title=Runner capacity below package gate::Need >=30 GiB free disk and >=4 GiB RAM for small metadata package task. No build started."
+            exit 1
+          fi
+          echo 'PASS: available free runner supports bounded machine configuration package stage'
+      - name: Install metadata parsing prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git python3 python3-packaging python3-setuptools gawk diffstat chrpath
+      - name: Fetch the upstream AsteroidOS metadata layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src preflight-logs
+          get_layer() {
+            local dest="$1" url="$2" branch="$3"
+            git clone --depth=1 --single-branch --branch "$branch" "$url" "src/$dest"
+            printf '%s %s %s\n' "$dest" "$branch" "$(git -C "src/$dest" rev-parse HEAD)" | tee -a preflight-logs/upstream-commits.txt
+          }
+          get_layer oe-core https://github.com/openembedded/openembedded-core.git whinlatter
+          get_layer oe-core/bitbake https://github.com/openembedded/bitbake.git 2.16
+          # Reuse the same known-good core revisions as the successful R08 Linux rootfs.
+          git -C src/oe-core fetch --depth=1 origin 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core checkout --detach 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core/bitbake fetch --depth=1 origin 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          git -C src/oe-core/bitbake checkout --detach 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          get_layer meta-openembedded https://github.com/openembedded/meta-openembedded.git whinlatter
+          get_layer meta-qt6 https://code.qt.io/yocto/meta-qt6.git 6.11
+          get_layer meta-smartphone https://github.com/shr-distribution/meta-smartphone.git whinlatter
+          get_layer meta-clang https://github.com/kraj/meta-clang.git whinlatter
+          get_layer meta-asteroid https://github.com/AsteroidOS/meta-asteroid.git master
+          get_layer meta-asteroid-community https://github.com/AsteroidOS/meta-asteroid-community.git master
+          get_layer meta-virtualization https://git.yoctoproject.org/meta-virtualization whinlatter
+          git -C src/meta-openembedded checkout --detach f52f32952cb9717949f8bc3d3ccf6c4c5a59521f
+          git -C src/meta-qt6 checkout --detach ec98b3ab1c8deeab9412ef6cbfd55729dc567b01
+          git -C src/meta-smartphone checkout --detach 0ef4e8979fbf3403ff8aef977874496dc312d913
+          git -C src/meta-clang checkout --detach cf20f8bd1366d41094c945597b95dd746e87b871
+          # master can advance after the shallow clone; explicitly fetch our tested commit.
+          git -C src/meta-asteroid fetch --depth=1 origin 1af66a6188f7909303cfcec779c8475be1bc4679
+          git -C src/meta-asteroid checkout --detach 1af66a6188f7909303cfcec779c8475be1bc4679
+          git -C src/meta-asteroid-community checkout --detach f911d8900b2da887d1486416a8c16b8f8f15dd35
+          git -C src/meta-virtualization checkout --detach 8f03a0cc8950ef5d5e4f11d9ae494946d1991e45
+          { echo 'PINNED CORE:'; git -C src/oe-core rev-parse HEAD; git -C src/oe-core/bitbake rev-parse HEAD; } | tee -a preflight-logs/upstream-commits.txt
+          echo 'AsteroidOS source layers downloaded; no kernel or operating system built.'
+      - name: Configure actual AsteroidOS distro with R08 machine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/conf preflight-logs
+          cat > build/conf/bblayers.conf <<'EOF'
+          BBPATH = "${TOPDIR}"
+          BBLAYERS = " \
+            ${TOPDIR}/../src/oe-core/meta \
+            ${TOPDIR}/../src/meta-qt6 \
+            ${TOPDIR}/../src/meta-asteroid \
+            ${TOPDIR}/../src/meta-asteroid-community \
+            ${TOPDIR}/../src/meta-openembedded/meta-oe \
+            ${TOPDIR}/../src/meta-openembedded/meta-multimedia \
+            ${TOPDIR}/../src/meta-openembedded/meta-gnome \
+            ${TOPDIR}/../src/meta-openembedded/meta-networking \
+            ${TOPDIR}/../src/meta-smartphone/meta-android \
+            ${TOPDIR}/../src/meta-openembedded/meta-python \
+            ${TOPDIR}/../src/meta-openembedded/meta-filesystems \
+            ${TOPDIR}/../src/meta-clang \
+            ${TOPDIR}/../src/meta-virtualization \
+            ${TOPDIR}/../meta-noblesse \
+          "
+          EOF
+          cat > build/conf/local.conf <<'EOF'
+          MACHINE = "noblesse-r08"
+          DISTRO = "asteroid"
+          PACKAGE_CLASSES = "package_ipk"
+          BB_NUMBER_THREADS = "3"
+          PARALLEL_MAKE = "-j3"
+          EOF
+          mkdir -p "$HOME/.cache/watch3-yocto/sstate-cache" "$HOME/.cache/watch3-yocto/downloads"
+          printf 'SSTATE_DIR = "%s/.cache/watch3-yocto/sstate-cache"\n' "$HOME" >> build/conf/local.conf
+          printf 'DL_DIR = "%s/.cache/watch3-yocto/downloads"\n' "$HOME" >> build/conf/local.conf
+          echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},8G,100K"' >> build/conf/local.conf
+      - name: Check that inode safety limit fits this free runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The previous 200M free-inode threshold meant 209,715,200
+          # inodes and stopped the build with ~18 million actually free.
+          df -h "$GITHUB_WORKSPACE"
+          df -i "$GITHUB_WORKSPACE"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          config = Path('build/conf/local.conf').read_text()
+          limits = [line for line in config.splitlines() if line.startswith('BB_DISKMON_DIRS = ')]
+          assert len(limits) == 1 and limits[0].endswith(',8G,100K"'), 'Unsafe BitBake disk/inode limit'
+          st = os.statvfs('build')
+          disk_gib = st.f_bavail * st.f_frsize / 1024**3
+          print(f'Free disk: {disk_gib:.1f} GiB; stop limit: 8 GiB')
+          assert disk_gib >= 20, 'Free disk too low for this build'
+          if st.f_files > 0 and st.f_favail >= 0:
+              print(f'Free inodes: {st.f_favail:,}; stop limit: 102,400')
+              assert st.f_favail >= 500_000, 'Free inodes too low for this build'
+          print('PASS: BitBake inode guard is realistic and filesystem has headroom')
+          PY
+      - name: Restore previous completed R08 task archive snapshot
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/watch3-yocto/sstate-snapshot
+          key: galaxy3-r08-oe8751-qt611-v1-sstate-${{ github.event_name == 'push' && 'qtbase' || inputs.target }}-${{ github.run_id }}
+          restore-keys: |
+            galaxy3-r08-oe8751-qt611-v1-sstate-qtwayland-
+            galaxy3-r08-oe8751-qt611-v1-sstate-qtdeclarative-
+            galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-
+
+      - name: Restore paired sstate archives to the active BitBake cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          saved="$HOME/.cache/watch3-yocto/sstate-snapshot"
+          if [ -f "$saved/watch3-sstate-manifest.json" ]; then
+            python3 tools/watch3_yocto_sstate_checkpoint.py restore \
+              "$saved" "$HOME/.cache/watch3-yocto/sstate-cache"
+          else
+            echo 'CACHE MISS: first R08 compile stage has no saved task state'
+          fi
+          python3 -m unittest discover -s tests -p test_watch3_yocto_sstate_checkpoint.py -v
+
+      - name: Verify pinned R08 Qt recipe and bound task graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p stage-logs
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e "$TARGET" > "$GITHUB_WORKSPACE/stage-logs/target.env"
+          python3 - "$GITHUB_WORKSPACE/stage-logs/target.env" "$TARGET" <<'PY'
+          from pathlib import Path
+          import sys
+          values = {}
+          for line in Path(sys.argv[1]).read_text().splitlines():
+              for name in ('PN','MACHINE','DISTRO','PV'):
+                  if line.startswith(name+'='):
+                      raw = line.partition('=')[2]
+                      values[name] = raw[1:-1] if raw.startswith('"') and raw.endswith('"') else raw
+          for key,want in (('PN',sys.argv[2]),('MACHINE','noblesse-r08'),
+                           ('DISTRO','asteroid'),('PV','6.11.3')):
+              assert values.get(key)==want, f'{key}: expected {want}, got {values.get(key)}'
+          print('PASS: pinned R08 Qt6 6.11.3 target recipe')
+          PY
+          rm -f "$GITHUB_WORKSPACE/stage-logs/target.env"
+          timeout --signal=TERM --kill-after=5s 420s \
+            bitbake -g "$TARGET" 2>&1 | tee "$GITHUB_WORKSPACE/stage-logs/graph.log"
+          python3 - "$TARGET" <<'PY'
+          from pathlib import Path
+          import re,sys
+          tasks = set(re.findall(r'"([^"]+\.do_[^"]+)"', Path('task-depends.dot').read_text()))
+          names = set(Path('pn-buildlist').read_text().splitlines())
+          assert sys.argv[1] in names and 0 < len(tasks) <= 4200, 'Stage unexpectedly changed'
+          print(f'PASS: {sys.argv[1]} task budget {len(tasks)}')
+          PY
+
+      - name: Run the bounded real ARM64 BitBake Qt package stage
+        id: qtbuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            seconds=720
+            echo 'Initial automatic warm-up: 12 minutes only, not a full package build'
+          else
+            seconds=18000
+            echo 'Manual stage: five-hour compile cutoff leaves checkpoint time'
+          fi
+          set +e
+          timeout --signal=TERM --kill-after=15s "$seconds" \
+            bitbake -c package "$TARGET" 2>&1 | tee "$GITHUB_WORKSPACE/stage-logs/build.log"
+          status=$?
+          set -e
+          if [ "$status" -eq 124 ]; then
+            echo 'finished=false' >> "$GITHUB_OUTPUT"
+            echo 'PARTIAL: bounded compile time reached; save completed Yocto task state'
+          elif [ "$status" -eq 0 ]; then
+            echo 'finished=true' >> "$GITHUB_OUTPUT"
+            echo 'PASS: target Qt package staging completed'
+          else
+            echo "::error::Real BitBake failure, exit status $status"
+            exit "$status"
+          fi
+
+      - name: Checkpoint up to 4 GiB of completed signature-matched tasks
+        id: checkpoint
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          source="$HOME/.cache/watch3-yocto/sstate-cache"
+          dest="$HOME/.cache/watch3-yocto/sstate-snapshot"
+          if [ ! -d "$source" ] || [ -z "$(find "$source" -type f -name '*.tar.zst' -print -quit)" ]; then
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo 'No completed sstate archives to checkpoint'
+            exit 0
+          fi
+          free_kib="$(df -Pk "$HOME" | awk 'NR==2 {print $4}')"
+          if (( free_kib < 10 * 1024 * 1024 )); then
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo 'Skipping cache duplication with insufficient free disk'
+            exit 0
+          fi
+          python3 "$GITHUB_WORKSPACE/tools/watch3_yocto_sstate_checkpoint.py" \
+            checkpoint "$source" "$dest" --max-mib 4096
+          python3 - "$dest/watch3-sstate-manifest.json" "$GITHUB_OUTPUT" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          state = json.loads(Path(sys.argv[1]).read_text())
+          with Path(sys.argv[2]).open('a') as f:
+              f.write("present=" + ("true" if state['archive_pairs'] else "false") + "\n")
+          print(f"CHECKPOINT: {state['archive_pairs']} complete task archives, "
+                f"{state['bytes']/1024**3:.2f} GiB (max 4 GiB)")
+          PY
+
+      - name: Save reusable task outputs to default free GitHub cache
+        if: always() && steps.checkpoint.outputs.present == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/watch3-yocto/sstate-snapshot
+          key: galaxy3-r08-oe8751-qt611-v1-sstate-${{ github.event_name == 'push' && 'qtbase' || inputs.target }}-${{ github.run_id }}
+
+      - name: Validate real ARM64 target library after a complete build
+        if: steps.qtbuild.outputs.finished == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e "$TARGET" > "$GITHUB_WORKSPACE/stage-logs/postbuild.env"
+          pkg="$(awk -F'"' '$1=="PKGDEST=" {print $2}' "$GITHUB_WORKSPACE/stage-logs/postbuild.env" | tail -n 1)"
+          test -n "$pkg" && test -d "$pkg"
+          if [ "$TARGET" = qtbase ]; then
+            python3 "$GITHUB_WORKSPACE/tools/validate_watch3_qt_linuxfb_package.py" "$pkg"
+            found="$(find "$pkg/qtbase-plugins" -name libqlinuxfb.so -type f -print -quit)"
+            mkdir -p "$GITHUB_WORKSPACE/stage-logs/arm64"
+            cp -L "$found" "$GITHUB_WORKSPACE/stage-logs/arm64/libqlinuxfb.so"
+          elif [ "$TARGET" = qtwayland ]; then
+            python3 "$GITHUB_WORKSPACE/tools/validate_watch3_qtwayland_package.py" "$pkg"
+            mkdir -p "$GITHUB_WORKSPACE/stage-logs/arm64"
+            find "$pkg/qtwayland" -name 'libQt6WaylandCompositor.so.*' -type f -exec cp -L '{}' "$GITHUB_WORKSPACE/stage-logs/arm64/" ';'
+            find "$pkg/qtwayland-plugins" -name 'libqwayland*.so' -type f -exec cp -L '{}' "$GITHUB_WORKSPACE/stage-logs/arm64/" ';'
+          else
+            test -d "$pkg/qtdeclarative" || exit 1
+          fi
+          echo 'PASS: verified completed R08 ARM64 Qt target package'
+
+      - name: Preserve validated ELF files and stage logs only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-qt-stage-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            stage-logs/graph.log
+            stage-logs/build.log
+            stage-logs/arm64/
