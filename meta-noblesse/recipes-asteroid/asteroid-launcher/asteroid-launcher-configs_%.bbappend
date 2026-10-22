@@ -18,3 +18,22 @@ do_install:append:noblesse-r08() {
 # Avoid unrelated virtual/cross-cc, compilerlibs and libc cold builds on R08.
 # KEEP the upstream qttools-native DEPENDS and keys.kmap -> keys.qmap step.
 INHIBIT_DEFAULT_DEPS:noblesse-r08 = "1"
+
+# QtTools 6.11 kmap2qmap lacks entries for MenuKB and Sleep in its symbol
+# lookup table, although these are valid Qt::Key enum values. This R08-only
+# encoder preserves *all six* watch buttons and the exact QDataStream binary
+# mapping proven by the host Qt6 compatibility workflow.
+# Every other AsteroidOS machine continues using upstream kmap2qmap.
+SRC_URI:append:noblesse-r08 = " file://r08-qmap.py"
+DEPENDS:remove:noblesse-r08 = "qttools-native"
+
+do_install:noblesse-r08() {
+    install -d ${D}/var/lib/environment/compositor/
+    install -m 0644 ${UNPACKDIR}/00-default.conf ${D}/var/lib/environment/compositor/
+    install -m 0644 ${UNPACKDIR}/10-platform.conf ${D}/var/lib/environment/compositor/
+    install -m 0644 ${UNPACKDIR}/20-device.conf ${D}/var/lib/environment/compositor/
+
+    install -d ${D}/usr/share/qt6/keymaps/
+    python3 ${UNPACKDIR}/r08-qmap.py ${UNPACKDIR}/keys.kmap ${D}/usr/share/qt6/keymaps/keys.qmap
+    test -s ${D}/usr/share/qt6/keymaps/keys.qmap || bbfatal "R08 Qt keymap missing"
+}
