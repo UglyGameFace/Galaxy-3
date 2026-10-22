@@ -112,7 +112,124 @@ jobs:
           BB_NUMBER_THREADS = "3"
           PARALLEL_MAKE = "-j3"
           EOF
-          echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},8G,200M"' >> build/conf/local.conf
+          echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},8G,100K"' >> build/conf/local.conf
+      - name: Validate BitBake disk and inode safety limits before expensive work
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Pinned BitBake 2.16 converts M=1048576 units for both byte
+          # and inode fields. The old 200M inode guard required 209 million
+          # free inodes even though the runner had ~18 million available.
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import sys
+          config = Path('build/conf/local.conf').read_text()
+          match = re.search(
+              r'^BB_DISKMON_DIRS\s*=\s*"STOPTASKS,\$\{TMPDIR\},(\d+)([GMK]),(\d+)([GMK])"        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p machine-logs
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e asteroid-machine-config > "$GITHUB_WORKSPACE/machine-logs/metadata-full.tmp"
+          source_env="$GITHUB_WORKSPACE/machine-logs/metadata-full.tmp"
+          grep -Fxq 'MACHINE="noblesse-r08"' "$source_env"
+          grep -Fxq 'DISTRO="asteroid"' "$source_env"
+          grep -Fxq 'OLDEST_KERNEL="4.9.59"' "$source_env"
+          # This R08 package only writes a text machine.conf with Python.
+          # Refuse another needless glibc/gcc cold build before running BitBake.
+          python3 - "$source_env" <<'PY'
+          from pathlib import Path
+          import sys
+          data = {}
+          for line in Path(sys.argv[1]).read_text().splitlines():
+              for key in ('INHIBIT_DEFAULT_DEPS', 'BASEDEPENDS', 'DEPENDS'):
+                  if line.startswith(key + '='):
+                      raw = line.partition('=')[2]
+                      data[key] = raw[1:-1] if raw.startswith('"') and raw.endswith('"') else raw
+          if data.get('INHIBIT_DEFAULT_DEPS') != '1':
+              raise SystemExit('FAIL: R08 machine-config did not inhibit unnecessary compiler/libc dependencies')
+          unexpected = {'virtual/cross-cc', 'virtual/compilerlibs', 'virtual/libc'}
+          for key in ('BASEDEPENDS', 'DEPENDS'):
+              bad = unexpected.intersection(data.get(key, '').split())
+              if bad:
+                  raise SystemExit(f'FAIL: {key} still pulls full target toolchain: {sorted(bad)}')
+          print('PASS: effective BitBake R08 machine-config skips cross-gcc and glibc default dependencies')
+          PY
+          grep -E '^(MACHINE|DISTRO|OLDEST_KERNEL|MACHINE_DISPLAY_ROUND|MACHINE_HAS_WLAN|MACHINE_HAS_SPEAKER)=' "$source_env" > "$GITHUB_WORKSPACE/machine-logs/machine-metadata.txt"
+          rm -f "$source_env"
+      - name: Build actual upstream AsteroidOS machine-configuration package
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          echo 'Building target package with R08-only compiler/libc dependency inhibition'
+          df -h "$GITHUB_WORKSPACE"
+          timeout --signal=TERM --kill-after=5s 2700s \
+            bitbake asteroid-machine-config 2>&1 | tee "$GITHUB_WORKSPACE/machine-logs/asteroid-machine-config-build.log"
+      - name: Inspect generated Watch3 identity and capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          config="$(find "$GITHUB_WORKSPACE/build/tmp/work" -path '*/asteroid-machine-config/1.0/image/etc/asteroid/machine.conf' -type f -print -quit)"
+          test -n "$config" && test -s "$config" || { echo '::error::Missing installed AsteroidOS machine.conf'; exit 1; }
+          cp "$config" "$GITHUB_WORKSPACE/machine-logs/asteroid-machine.conf"
+          python3 "$GITHUB_WORKSPACE/tools/validate_asteroid_machine_config.py" "$config"
+          # Also inspect real package staging rather than only do_install's image.
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e asteroid-machine-config > "$GITHUB_WORKSPACE/machine-logs/package-env.tmp"
+          pkgdest="$(awk -F'"' '$1=="PKGDEST=" {print $2}' "$GITHUB_WORKSPACE/machine-logs/package-env.tmp" | tail -n 1)"
+          rm -f "$GITHUB_WORKSPACE/machine-logs/package-env.tmp"
+          packaged="$pkgdest/asteroid-machine-config/etc/asteroid/machine.conf"
+          test -n "$pkgdest" && test -s "$packaged" || {
+            echo "::error title=Target package missing::Expected asteroid-machine-config package file at $packaged"
+            exit 1
+          }
+          cmp -s "$config" "$packaged" || {
+            echo "::error::Packaged machine.conf differs from do_install output"
+            exit 1
+          }
+          python3 "$GITHUB_WORKSPACE/tools/validate_asteroid_machine_config.py" "$packaged"
+          echo 'PASS: validated actual R08 machine identity in packaged target payload'
+          echo 'NOT TESTED: Qt compositor, full rootfs or Watch3 hardware'
+      - name: Upload package metadata and diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-asteroid-machine-${{ github.run_number }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: machine-logs/
+,
+              config,
+              re.MULTILINE,
+          )
+          if match is None:
+              sys.exit('FAIL: R08 safety gate missing or unrecognized BB_DISKMON_DIRS')
+          disk_count, disk_unit, inode_count, inode_unit = match.groups()
+          factors = {'G': 1024**3, 'M': 1024**2, 'K': 1024}
+          disk_floor = int(disk_count) * factors[disk_unit]
+          inode_floor = int(inode_count) * factors[inode_unit]
+          if disk_floor < 4 * 1024**3 or not 1024 <= inode_floor <= 1024**2:
+              sys.exit('FAIL: unexpected disk/inode monitor thresholds')
+          stats = os.statvfs('.')
+          disk_free = stats.f_bavail * stats.f_frsize
+          inode_free = stats.f_favail
+          print(f'Free disk: {disk_free / 1024**3:.2f} GiB (guard {disk_floor / 1024**3:.1f} GiB)')
+          print(f'Free inodes: {inode_free:,} (guard {inode_floor:,})')
+          if disk_free <= disk_floor + 8 * 1024**3:
+              sys.exit('FAIL: insufficient disk cushion for build')
+          if stats.f_files and inode_free <= max(inode_floor * 3, 500_000):
+              sys.exit('FAIL: insufficient inode cushion for build')
+          print('PASS: real runner disk and inode free counts exceed safe BitBake thresholds')
+          PY
       - name: Verify R08 package metadata
         shell: bash
         run: |
