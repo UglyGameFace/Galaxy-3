@@ -1,0 +1,54 @@
+name: Watch3 R08 graphics rootfs validator regression
+
+# Fast host-side regression only. NEVER builds Qt, Yocto or an ARM64 image.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/validate_watch3_graphics_rootfs.py'
+      - 'tests/test_watch3_graphics_rootfs.py'
+      - '.github/workflows/watch3-r08-graphical-rootfs.yml'
+      - '.github/workflows/watch3-r08-graphics-validator-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rootfs-validator-regression:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Galaxy-3
+        uses: actions/checkout@v4
+      - name: Run actual ELF, image presence and package-manifest regression fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/validate_watch3_graphics_rootfs.py
+          python3 -m unittest discover -s tests -p test_watch3_graphics_rootfs.py -v
+      - name: Ensure full graphical rootfs build cannot run on push
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path(".github/workflows/watch3-r08-graphical-rootfs.yml")
+          text = p.read_text()
+          required = (
+              "on:\n  workflow_dispatch:",
+              "inputs.confirm == 'BUILD_OFF_DEVICE_ROOTFS_ONLY'",
+              "bitbake -c rootfs asteroid-image",
+              "validate_watch3_graphics_rootfs.py",
+              "IMAGE_ROOTFS",
+              "IMAGE_MANIFEST",
+              "120 * 1024 * 1024",
+              "12 * 1024 * 1024",
+              "Archive diagnostics only, never the rootfs or firmware",
+          )
+          for item in required:
+              assert item in text, f"Missing rootfs workflow safety requirement: {item}"
+          assert "\n  push:" not in text, "Expensive graphical rootfs workflow must not auto-run"
+          assert "bitbake asteroid-image 2>&1" not in text, "Must stop at do_rootfs"
+          print("PASS: manual-only graphical rootfs workflow and post-build validator are wired")
+          PY
