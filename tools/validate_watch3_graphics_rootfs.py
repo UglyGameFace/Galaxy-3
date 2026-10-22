@@ -22,7 +22,7 @@ def elf_aarch64(path: Path) -> tuple[bool, str]:
             header = stream.read(64)
     except OSError as exc:
         return False, f'unreadable: {exc}'
-    if len(header) < 64 or header[:4] != b'\\x7fELF':
+    if len(header) < 64 or header[:4] != b'\x7fELF':
         return False, 'not a complete ELF64 header'
     if header[4] != 2:
         return False, 'not ELF64'
