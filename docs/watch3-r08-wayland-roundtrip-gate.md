@@ -227,6 +227,51 @@ The full target QtWayland build, complete Qt runtime package set, on-device
 fbdev/Wayland rendering, and boot/recovery remain **unverified**. Preserve
 the existing firmware and continue the zero-cost, staged build path.
 
+## Free incremental Yocto sstate checkpoint path (October 22, 2026)
+
+The first [two-runner cache test #39870135883](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39870135883)
+**passed**. The [ten-test paired-sstate snapshot and cross-runner
+restore #39870529598](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39870529598)
+also **passed**: it verified archive-plus-`.siginfo` task pairs, priority,
+capacity bounds and reuse between isolated free Actions runners. These
+tests used fixture archives, not Qt compilation.
+
+The [snapshot helper](../tools/watch3_yocto_sstate_checkpoint.py) copies
+**whole signature-matched sstate archive+siginfo pairs** without modifying
+the original BitBake cache. With its 4 GiB uncompressed snapshot cap, it
+prioritizes expensive QtBase/QtDeclarative/QtWayland and core toolchain
+tasks, then available additional tasks. A size-bound subset can still
+require rebuilding other tasks. The source downloads directory and
+`TMPDIR` are **not** preserved, and cached sstate task signatures must
+still match the effective build metadata.
+
+[The existing manual QtBase workflow](../.github/workflows/watch3-r08-qt-linuxfb-package.yml)
+now restores compatible task snapshots and saves a bounded snapshot on
+success **or** failure, after a five-hour BitBake cutoff leaves time for
+the GitHub cache upload. Its previous full compile did **not** retain
+sstate; the old six-hour work cannot be recovered retroactively.
+
+The new [free staged Qt runtime workflow](../.github/workflows/watch3-r08-qt-staged-runtime.yml)
+offers one initial automatic **12-minute real BitBake warm-up**, then
+manual single-target compilation for `qtbase`, `qtdeclarative`, or
+`qtwayland`, with up to **five hours of compilation per invocation**.
+Each stage restores the latest compatible snapshot and saves up to 4 GiB
+of verified archive/signature pairs. Completed QtBase and QtWayland
+stages must pass their target architecture/package validators; completed
+binaries are archived separately. Warm-up/cutoff outcomes represent
+**partial compilation**, not a finished binary.
+
+The initial [warm-up run #39871045746](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39871045746)
+was **still running when this milestone note was added**; no real sstate
+reuse success is claimed yet.
+
+**Cost boundary:** GitHub's default Actions cache allowance is **10 GB
+per repository**; increasing it can incur charges. The project does not
+alter any paid cache setting. Cache entries can be evicted and a 4 GiB
+snapshot cap is not a guarantee of permanent storage. Use public
+repository standard GitHub runners only, no paid VM and no on-watch
+deployment. The six-hour runner ceiling still applies.
+
 ## R08 target image graphics dependency gate (2026-10-21)
 
 After host Qt 6.2.4 `wl_shm` round-trip success, the next task is target
