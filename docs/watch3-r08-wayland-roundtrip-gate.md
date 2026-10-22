@@ -132,11 +132,15 @@ retains the three upstream compositor environment files and
 for `qttools-native`. Other AsteroidOS machines still use their
 original recipe and QtTools tool. The revised
 [dependency graph #39845884696](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39845884696)
-is checking that the heavy native Qt dependency chain was removed.
+**passed**, confirming **56 recipes / 571 task IDs**, down from
+**126 recipes / 1,475 task IDs**, without `qtbase-native`,
+`qtdeclarative-native`, or `qttools-native`. This eliminates 904 task
+IDs (about 61% of the earlier graph) while preserving six-button Qt6
+binary compatibility verified by host C++.
 The guarded [configuration IPK build #39846145882](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39846145882)
 will inspect the actual packaged LinuxFB settings and check the
 six-button file's fixed SHA256 if its dependency budget gate passes.
-**Neither run's conclusion was verified at the time of this edit.**
+**The dependency graph passed; the actual configuration package outcome remains unverified.**
 
 The successful machine package does **not** prove any Qt compositor
 binary, installed graphical root filesystem, framebuffer device,
