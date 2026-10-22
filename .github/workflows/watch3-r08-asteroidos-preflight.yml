@@ -12,6 +12,8 @@ on:
       - 'tests/test_watch3_compositor_env.py'
       - 'tools/check_watch3_qt_plugin_env.py'
       - 'tests/test_watch3_qt_plugin_env.py'
+      - 'tools/check_watch3_graphics_image_env.py'
+      - 'tests/test_watch3_graphics_image_env.py'
   workflow_dispatch:
 
 permissions:
@@ -32,6 +34,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p test_watch3_compositor_env.py -v
           python3 -m unittest discover -s tests -p test_watch3_qt_plugin_env.py -v
+          python3 -m unittest discover -s tests -p test_watch3_graphics_image_env.py -v
       - name: Install metadata parsing prerequisites
         shell: bash
         run: |
@@ -166,6 +169,28 @@ jobs:
           python3 "$GITHUB_WORKSPACE/tools/check_watch3_qt_plugin_env.py" \
             "$scratch/qtbase.env" "$scratch/asteroid-launcher.env"
           echo 'Effective Qt and launcher package settings verified, no binaries built.'
+
+      - name: Validate actual R08 image graphics package split and hard runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          # Effective BitBake metadata only; these do not compile target
+          # Qt6 or create an image. Never substitute host Ubuntu package names.
+          bitbake -e asteroid-image > "$scratch/image.env"
+          bitbake -e asteroid-launcher > "$scratch/launcher.env"
+          bitbake -e qtbase > "$scratch/qtbase.env"
+          bitbake -e qtwayland > "$scratch/qtwayland.env"
+          bitbake -e qtdeclarative > "$scratch/qtdeclarative.env"
+          python3 "$GITHUB_WORKSPACE/tools/check_watch3_graphics_image_env.py" \
+            "$scratch/image.env" "$scratch/launcher.env" "$scratch/qtbase.env" \
+            "$scratch/qtwayland.env" "$scratch/qtdeclarative.env" \
+            | tee "$GITHUB_WORKSPACE/preflight-logs/06-graphics-runtime-metadata.txt"
+          echo 'NOT TESTED: actual ARM64 IPK contents, full rootfs or hardware.'
 
       - name: Verify BitBake really applies the R08-only launcher QML patch
         shell: bash
