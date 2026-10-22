@@ -20,6 +20,8 @@ def elf_aarch64(path: Path) -> tuple[bool, str]:
     try:
         with path.open('rb') as stream:
             header = stream.read(64)
+            stream.seek(0, 2)
+            file_size = stream.tell()
     except OSError as exc:
         return False, f'unreadable: {exc}'
     if len(header) < 64 or header[:4] != b'\x7fELF':
@@ -37,6 +39,12 @@ def elf_aarch64(path: Path) -> tuple[bool, str]:
     header_size = struct.unpack_from('<H', header, 52)[0]
     if header_size != 64:
         return False, f'ELF64 header size is {header_size}, expected 64'
+    phoff = struct.unpack_from('<Q', header, 32)[0]
+    phentsize, phnum = struct.unpack_from('<HH', header, 54)
+    if phoff < header_size or phentsize != 56 or phnum == 0:
+        return False, 'ELF64 executable has no valid program-header table'
+    if phoff + phentsize * phnum > file_size:
+        return False, 'ELF64 program-header table extends beyond file'
     return True, 'ELF64 little-endian AArch64 executable/shared-object'
 
 def matching_files(rootfs: Path, pattern: str) -> list[Path]:
