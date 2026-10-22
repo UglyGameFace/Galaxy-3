@@ -146,6 +146,55 @@ The successful machine package does **not** prove any Qt compositor
 binary, installed graphical root filesystem, framebuffer device,
 boot chain, or on-watch display. No flashing is authorized.
 
+## Verified compositor configuration IPK and reuse boundary (October 22, 2026)
+
+The actual **R08 AsteroidOS compositor configuration package** completed
+successfully in [free GitHub Actions run #39855122250](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39855122250):
+**571/571 BitBake tasks passed**, including `do_package_write_ipk` and
+package QA. The staged package verifier passed LinuxFB, Qt Quick software
+backend, the real empty `20-device.conf`, and all six Qt6 button mappings.
+
+The [archived build artifact](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39855122250/artifacts/12461382260)
+contains the actual **`asteroid-launcher-configs_git-r0_noblesse_r08.ipk`**,
+not just a checksum. Artifact retention is seven days. The archive's
+SHA-256 as independently inspected on October 22 is:
+
+```text
+bec0c5392502f308beeeb271ea8a2d9bb112e4642bd8cad89c0aff3e147ec206  asteroid-launcher-configs_git-r0_noblesse_r08.ipk
+```
+
+Independent [archive audit run #39864737091](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39864737091)
+**passed without rebuilding**: it downloaded that exact prior GitHub artifact,
+inspected its `ar` package control (architecture `noblesse_r08`),
+extracted `data.tar.zst`, and ran the staged-file validator against
+the real compressed package contents. The keymap SHA-256 is
+`480250ec53e8a65e5bac7566597a957fcb96b59f0439602c0591da14cb49c767`.
+
+**What is reusable now:** R08 compositor configuration source, real IPK,
+and independently validated six-button keymap. The previously successful
+ARM64 QtBase LinuxFB build
+[run #39593317503](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39593317503)
+archived its ELF architecture report and checksum, **not the binary**.
+The [manual QtBase workflow](../.github/workflows/watch3-r08-qt-linuxfb-package.yml)
+has now been changed to retain the real `libqlinuxfb.so` and its checksum
+on the **next** successful compile. That change has only passed the fast
+[static regression run #39865045015](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39865045015);
+it has not been exercised by another six-hour QtBase build.
+
+The separately guarded manual
+[full graphical rootfs workflow](../.github/workflows/watch3-r08-graphical-rootfs.yml)
+also fixes a working-directory error after `oe-init-build-env` changes
+into `build/`; its dry-run log and temporary environment cleanup now
+use `$GITHUB_WORKSPACE/rootfs-logs`. This is verified by fast CI, not a
+completed rootfs build.
+
+**Next real milestone:** establish a reusable **ARM64 QtBase LinuxFB
+plugin package** and a target **QtWayland compositor runtime** package,
+then validate their installed-file closure with the now-proven R08
+compositor configuration IPK. Do not infer bootability or actual
+framebuffer output from any of these off-device package results. No
+watch flashing or paid VM is required for the completed tests.
+
 ## R08 target image graphics dependency gate (2026-10-21)
 
 After host Qt 6.2.4 `wl_shm` round-trip success, the next task is target
