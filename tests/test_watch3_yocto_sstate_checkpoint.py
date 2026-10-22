@@ -38,12 +38,12 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(restored.with_name(restored.name + ".siginfo").read_bytes(), b"sig")
 
     def test_prioritize_qt_over_misc_under_budget(self):
-        other = self.create("zlib", length=80)
-        preferred = self.create("qtbase", length=80)
-        checkpoint(self.source, self.saved, 1024)
+        other = self.create("zlib", length=800)
+        preferred = self.create("qtbase", length=800)
+        checkpoint(self.source, self.saved, 4096)
         self.assertTrue((self.saved / preferred.relative_to(self.source)).exists())
         self.assertTrue((self.saved / other.relative_to(self.source)).exists())
-        checkpoint(self.source, self.saved, 90)
+        checkpoint(self.source, self.saved, 1024)
         self.assertTrue((self.saved / preferred.relative_to(self.source)).exists())
         self.assertFalse((self.saved / other.relative_to(self.source)).exists())
 
