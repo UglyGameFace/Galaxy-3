@@ -80,6 +80,39 @@ plugin, Wayland client QPA plugin, QtWayland compositor library, launcher
 binary, launcher configuration and actual Qt Quick QML imports inside one
 target image. That is a separate gate, not a license to flash the watch.
 
+## Actual ARM64 rootfs contents gate (prepared, not executed on an image)
+
+[The post-build file validator](../tools/validate_watch3_graphics_rootfs.py)
+can inspect an **already-extracted** R08 AsteroidOS root filesystem. Its
+[twelve regression tests](../tests/test_watch3_graphics_rootfs.py) ran
+successfully against synthetic fixtures before committing. This tool is
+**not connected to an automatic full-image build**; there is no actual
+ARM64 AsteroidOS image available in this task to evaluate.
+
+It verifies the existence and ELF64 AArch64 machine ID of the
+`/usr/bin/asteroid-launcher` program, LinuxFB `libqlinuxfb.so` QPA
+plugin, a Wayland-client `libqwayland*.so` QPA plugin, and the
+`libQt6WaylandCompositor.so.*` runtime library. It also checks the
+launcher systemd user service, exact R08 compositor environment settings,
+and the QtQuick QML module's `qmldir`. The optional package manifest check
+requires the installed-package names to include
+`asteroid-launcher`, `asteroid-launcher-configs`, `qtbase-plugins`,
+`qtwayland-plugins`, and `qtdeclarative-qmlplugins`.
+
+Use it only after a real target image or already-built rootfs is available:
+
+```sh
+python3 tools/validate_watch3_graphics_rootfs.py PATH_TO_EXTRACTED_ARM64_ROOTFS \
+  --installed-packages PATH_TO_INSTALLED_PACKAGE_NAMES.txt
+```
+
+This is a **file-and-package presence** gate, not a successful target
+runtime launch, graphics/ELF dependency loader test, watch framebuffer
+probe, boot validation or a recovery guarantee. The script never executes
+the target binaries, touches the watch, or changes the image. Do not
+confuse the synthetic regression pass with real ARM64 rootfs validation.
+The expensive image build remains a separate, explicit decision.
+
 ## Real end-to-end acceptance criteria
 
 Validate the separate, **off-device only** QtWayland prototype against these criteria:
