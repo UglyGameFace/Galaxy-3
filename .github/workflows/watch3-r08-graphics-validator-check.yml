@@ -8,6 +8,7 @@ on:
       - 'tools/validate_watch3_graphics_rootfs.py'
       - 'tests/test_watch3_graphics_rootfs.py'
       - '.github/workflows/watch3-r08-graphical-rootfs.yml'
+      - '.github/workflows/watch3-r08-qt-linuxfb-package.yml'
       - '.github/workflows/watch3-r08-graphics-validator-check.yml'
   workflow_dispatch:
 
@@ -53,5 +54,19 @@ jobs:
           assert not any(line.strip().startswith("runs-on:") and "ubuntu-22.04" in line for line in text.splitlines()), "Expensive build cannot target standard hosted runner"
           assert "          - standard" not in text, "Dead-end runner choice should stay removed"
           assert "bitbake asteroid-image 2>&1" not in text, "Must stop at do_rootfs"
+          assert 'rm -f "$GITHUB_WORKSPACE/rootfs-logs/"*.env' in text, "Rootfs env cleanup must use workspace path after BitBake changes cwd"
+          assert 'bitbake -n asteroid-image 2>&1 | tee "$GITHUB_WORKSPACE/rootfs-logs/00-dry-run.log"' in text, "Rootfs dry-run log must use absolute workspace path"
+          qt = Path(".github/workflows/watch3-r08-qt-linuxfb-package.yml").read_text()
+          assert "  workflow_dispatch:" in qt and "\\n  push:" not in qt, "Six-hour QtBase build must stay manual"
+          for required_qt in (
+              'arm64-platform-plugin/libqlinuxfb.so',
+              'cp -L "$plugin"',
+              'cmp -s "$plugin"',
+              'arm64-platform-plugin/SHA256SUMS',
+              'git -C src/meta-asteroid fetch --depth=1 origin 1af66a6188f7909303cfcec779c8475be1bc4679',
+          ):
+              assert required_qt in qt, f"QtBase artifact or pinned checkout safeguard missing: {required_qt}"
+          assert "never the binary" not in qt, "QtBase workflow must preserve compiled binary"
+          print("PASS: future LinuxFB ARM64 binary is archived; no build was launched")
           print("PASS: manual-only graphical rootfs workflow and post-build validator are wired")
           PY
