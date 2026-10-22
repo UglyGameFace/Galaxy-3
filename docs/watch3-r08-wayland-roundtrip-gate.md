@@ -49,6 +49,37 @@ The log includes a failed EGL-display initialization warning, yet the verified s
 
 **Scope limit:** This pass used Ubuntu 22.04's host Qt 6.2.4 packages under Xvfb, not cross-compiled target Qt 6.11.3, the actual ARM64 rootfs, the Watch3 framebuffer device, its boot chain, or on-device display. Do not authorize flashing on the strength of this result.
 
+## Free runner and pinned QtWayland source gate (October 22, 2026)
+
+The [free runner capacity probe](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39773040330)
+**passed** on GitHub's public-repository `ubuntu-22.04` runner. Its actual
+logs measured **85.8 GiB available disk**, **14.8 GiB available RAM** and
+**4 CPU cores**. The earlier QtBase package build used the same class of
+runner and passed 2,171 tasks in under six hours. This is evidence that
+carefully bounded off-device stages can run without paid hosting. It does
+**not** prove that the full AsteroidOS build fits within six hours or disk
+limits on every fresh runner.
+
+The corrected [rootfs validator regression](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39773769137)
+also **passed**. The previous failing run was caused by a safety assertion
+matching `ubuntu-22.04` in an explanatory comment; all 16 ELF tests passed
+even in that earlier run.
+
+The existing [AsteroidOS metadata preflight](../.github/workflows/watch3-r08-asteroidos-preflight.yml)
+now performs one additional **free, non-compiling** test:
+`bitbake -c unpack qtwayland`. It checks that the effective R08 QtWayland
+recipe uses Qt **6.11.3** and Git revision
+`35bfd4e8e146fb49fa95f4d58028661a910b2705`, then inspects the
+actual BitBake-unpacked `qwaylandquickitem.cpp` for the `wl_shm` software
+texture conversion. The target-source test is capped at 20 minutes and
+the entire job at 45 minutes. Its first run is
+[39774432709](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39774432709);
+**outcome not yet verified when this note was written**.
+
+Neither stage compiles target QtWayland nor produces an image. The next
+expensive stage should be planned from measured disk usage and a realistic
+free cache budget, never by assuming the full image is already ready.
+
 ## R08 target image graphics dependency gate (2026-10-21)
 
 After host Qt 6.2.4 `wl_shm` round-trip success, the next task is target
