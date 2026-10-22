@@ -1,0 +1,55 @@
+name: Watch3 R08 free Yocto cache cross-job smoke test
+
+# Confirms that GitHub's free Actions cache can save and restore R08 data
+# across two separate hosted runners. Never compiles Qt, Yocto or firmware.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-yocto-cache-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  save:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Create tiny deterministic test payload (no real build state)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cache/watch3-yocto/cache-probe"
+          printf 'galaxy3-r08-cache-v1\n%s\n' "$GITHUB_SHA" > \
+            "$HOME/.cache/watch3-yocto/cache-probe/probe.txt"
+      - name: Save private R08 smoke test key
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/watch3-yocto/cache-probe
+          key: galaxy3-r08-cache-smoke-v1-${{ github.run_id }}
+
+  restore:
+    needs: save
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Restore cached data on a fresh runner
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/watch3-yocto/cache-probe
+          key: galaxy3-r08-cache-smoke-v1-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - name: Check exact payload on the second runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(printf 'galaxy3-r08-cache-v1\n%s\n' "$GITHUB_SHA")"
+          actual="$(cat "$HOME/.cache/watch3-yocto/cache-probe/probe.txt")"
+          test "$actual" = "$expected" || {
+            echo "::error::R08 cache cross-runner payload mismatch"
+            exit 1
+          }
+          echo 'PASS: GitHub free cache restores exact R08 data across isolated runners'
+          echo 'NOT TESTED: cached Yocto sstate, QtBase compilation or watch firmware'
