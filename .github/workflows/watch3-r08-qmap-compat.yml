@@ -1,0 +1,86 @@
+name: Watch3 R08 Qt6 button keymap compatibility
+
+# Free host-only validation: no native QtTools build, rootfs or watch flashing.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-qmap-compat.yml'
+      - 'meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs/r08-qmap.py'
+      - 'tests/test_watch3_r08_qmap.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qt6-keymap:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the strict six-button encoder against known Qt6 bytes
+        run: python3 -m unittest discover -s tests -p test_watch3_r08_qmap.py -v
+      - name: Install Qt6 Core headers and library from Ubuntu, not a Yocto Qt build
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            qt6-base-dev pkg-config
+      - name: Generate Qt keymap from pinned, real upstream AsteroidOS keys.kmap
+        shell: bash
+        run: |
+          set -euo pipefail
+          rev='1af66a6188f7909303cfcec779c8475be1bc4679'
+          file='recipes-asteroid/asteroid-launcher/asteroid-launcher-configs/keys.kmap'
+          curl --fail --silent --show-error --location --retry 3 --max-time 60 \
+            "https://raw.githubusercontent.com/AsteroidOS/meta-asteroid/$rev/$file" \
+            -o "$RUNNER_TEMP/keys.kmap"
+          python3 meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs/r08-qmap.py \
+            "$RUNNER_TEMP/keys.kmap" "$RUNNER_TEMP/keys.qmap"
+          test "$(stat -c %s "$RUNNER_TEMP/keys.qmap")" -eq 88
+      - name: Compile a tiny host Qt6 QDataStream reader and verify all six keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/check.cpp" <<'CPP'
+          #include <QDataStream>
+          #include <QFile>
+          #include <Qt>
+          #include <cstdio>
+          struct Expected { quint16 code; quint32 qtkey; };
+          int main(int argc, char** argv) {
+              if (argc != 2) return 2;
+              QFile f(argv[1]);
+              if (!f.open(QIODevice::ReadOnly)) return 3;
+              QDataStream ds(&f);
+              quint32 magic = 0, version = 0, count = 0, compose = 0;
+              ds >> magic >> version >> count >> compose;
+              if (magic != 0x514d4150 || version != 1 || count != 6 || compose != 0) return 4;
+              Expected expected[] = {
+                  {114, Qt::Key_VolumeDown}, {115, Qt::Key_VolumeUp},
+                  {116, Qt::Key_Sleep}, {128, Qt::Key_MenuKB},
+                  {139, Qt::Key_MenuKB}, {750, Qt::Key_MenuKB}
+              };
+              for (auto e : expected) {
+                  quint16 keycode = 0, unicode = 0, special = 1;
+                  quint32 qtcode = 0;
+                  quint8 modifiers = 255, flags = 255;
+                  ds >> keycode >> unicode >> qtcode >> modifiers >> flags >> special;
+                  if (ds.status() != QDataStream::Ok ||
+                      keycode != e.code || unicode != 0xffff || qtcode != e.qtkey ||
+                      modifiers != 0 || flags != 0 || special != 0) {
+                      std::fprintf(stderr, "Unexpected Qt mapping for keycode %u\n", e.code);
+                      return 5;
+                  }
+              }
+              if (ds.status() != QDataStream::Ok || !f.atEnd()) return 6;
+              std::puts("PASS: Qt6 QDataStream parsed all six real Watch3 button codes");
+              std::puts("NOT TESTED: on-watch evdev events, firmware or boot");
+              return 0;
+          }
+          CPP
+          g++ -std=c++17 -fPIC "$RUNNER_TEMP/check.cpp" \
+            $(pkg-config --cflags --libs Qt6Core) -o "$RUNNER_TEMP/check-qmap"
+          "$RUNNER_TEMP/check-qmap" "$RUNNER_TEMP/keys.qmap"
