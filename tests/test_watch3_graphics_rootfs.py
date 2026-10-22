@@ -9,8 +9,16 @@ from validate_watch3_graphics_rootfs import elf_aarch64, validate, REQUIRED_MANI
 
 
 def elf(machine=183, bits=2):
-    return b'\x7fELF' + bytes((bits, 1, 1)) + b'\x00' * 11 + machine.to_bytes(2, 'little') + b'\x00' * 8
-
+    header = bytearray(64)
+    header[:4] = b'\x7fELF'
+    header[4] = bits
+    header[5] = 1  # little-endian ARM64
+    header[6] = 1  # ELF version
+    header[16:18] = (3).to_bytes(2, 'little')  # ET_DYN
+    header[18:20] = machine.to_bytes(2, 'little')
+    header[20:24] = (1).to_bytes(4, 'little')
+    header[52:54] = (64).to_bytes(2, 'little')
+    return bytes(header)
 
 class TestGraphicsRootfs(unittest.TestCase):
     def setUp(self):
@@ -82,12 +90,27 @@ class TestGraphicsRootfs(unittest.TestCase):
         self.manifest.write_text('RRECOMMENDS:qtbase-plugins\n')
         self.assert_fails_with('installed-package manifest lacks qtbase-plugins', package=True)
 
-    def test_big_endian_elf_validation(self):
-        big = b'\x7fELF' + bytes((2, 2, 1)) + b'\x00' * 11 + (183).to_bytes(2, 'big')
+    def test_big_endian_target_rejected(self):
         fixture = Path(self.tmp.name) / 'big.elf'
+        big = bytearray(elf())
+        big[5] = 2  # ELF big-endian, not this Watch3 target
         fixture.write_bytes(big)
-        self.assertTrue(elf_aarch64(fixture)[0])
+        success, reason = elf_aarch64(fixture)
+        self.assertFalse(success)
+        self.assertIn('little-endian', reason)
 
+    def test_truncated_elf_header_rejected(self):
+        fixture = Path(self.tmp.name) / 'short.elf'
+        fixture.write_bytes(elf()[:20])
+        success, reason = elf_aarch64(fixture)
+        self.assertFalse(success)
+        self.assertIn('complete ELF64', reason)
+
+    def test_actual_yocto_three_column_manifest_is_parsed(self):
+        self.manifest.write_text(''.join(
+            f'{name} cortexa53 6.11.3\n' for name in sorted(REQUIRED_MANIFEST)
+        ))
+        self.assertEqual(validate(self.root, self.manifest), [])
 
 if __name__ == '__main__':
     unittest.main()
