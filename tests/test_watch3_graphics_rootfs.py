@@ -18,7 +18,12 @@ def elf(machine=183, bits=2):
     header[18:20] = machine.to_bytes(2, 'little')
     header[20:24] = (1).to_bytes(4, 'little')
     header[52:54] = (64).to_bytes(2, 'little')
-    return bytes(header)
+    header[32:40] = (64).to_bytes(8, 'little')  # program header offset
+    header[54:56] = (56).to_bytes(2, 'little')  # ELF64 phdr size
+    header[56:58] = (1).to_bytes(2, 'little')   # number of phdrs
+    phdr = bytearray(56)
+    phdr[0:4] = (1).to_bytes(4, 'little')  # PT_LOAD
+    return bytes(header + phdr)
 
 class TestGraphicsRootfs(unittest.TestCase):
     def setUp(self):
@@ -105,6 +110,18 @@ class TestGraphicsRootfs(unittest.TestCase):
         success, reason = elf_aarch64(fixture)
         self.assertFalse(success)
         self.assertIn('complete ELF64', reason)
+
+    def test_fake_arm64_header_without_program_table_rejected(self):
+        fixture = Path(self.tmp.name) / 'header-only.elf'
+        fixture.write_bytes(elf()[:64])
+        self.assertIn('extends beyond file', elf_aarch64(fixture)[1])
+
+    def test_incomplete_program_header_table_rejected(self):
+        fixture = Path(self.tmp.name) / 'short-phdr.elf'
+        invalid = bytearray(elf())
+        invalid[56:58] = (2).to_bytes(2, 'little')  # claims 2 phdrs; has only one
+        fixture.write_bytes(invalid)
+        self.assertIn('extends beyond file', elf_aarch64(fixture)[1])
 
     def test_actual_yocto_three_column_manifest_is_parsed(self):
         self.manifest.write_text(''.join(
