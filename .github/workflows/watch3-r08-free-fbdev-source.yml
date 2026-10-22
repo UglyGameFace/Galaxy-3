@@ -1,0 +1,80 @@
+name: Watch3 R08 pinned Exynos DECON fbdev source gate
+
+# Host-only source verification. No kernel build, rootfs, or watch access.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-free-fbdev-source.yml'
+      - 'meta-noblesse/recipes-kernel/linux/linux-noblesse_4.9.59.bb'
+      - 'meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs/10-platform.conf'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-fbdev:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Galaxy-3
+        uses: actions/checkout@v4
+
+      - name: Confirm repository still pins audited Watch3 fbdev-capable source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          kernel = Path("meta-noblesse/recipes-kernel/linux/linux-noblesse_4.9.59.bb").read_text()
+          machine = Path("meta-noblesse/conf/machine/noblesse-r08.conf").read_text()
+          display = Path("meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs/10-platform.conf").read_text()
+          assert 'SRCREV = "ec258e12887d37362b59e3291c1d3e5363c24bff"' in kernel
+          assert 'tizen_noblesse_defconfig' in kernel
+          assert 'tizen_noblesse_large_defconfig' in kernel
+          assert 'CONFIG_SOC_EXYNOS9110=y' in kernel
+          assert 'KERNEL_DEVICETREE = "exynos/exynos9110-tizen_noblesse_large_bt-r08.dtb"' in machine
+          for line in ('QT_QPA_PLATFORM=linuxfb', 'QT_QUICK_BACKEND=software', 'QT_QPA_FB_DRM=0'):
+              assert line in display.splitlines(), f'Missing LinuxFB compositor setting: {line}'
+          print('PASS[recipe]: pinned kernel source, R08 device tree and LinuxFB platform match')
+          PY
+
+      - name: Read pinned reference kernel display configs and DECON driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fbdev"
+          rev='ec258e12887d37362b59e3291c1d3e5363c24bff'
+          base="https://raw.githubusercontent.com/UsrBinLuna/kernel_samsung_galileo/$rev"
+          curl --fail --location --show-error --silent --retry 2 --max-time 45 \
+            "$base/arch/arm64/configs/tizen_noblesse_defconfig" \
+            -o "$RUNNER_TEMP/fbdev/base.config"
+          curl --fail --location --show-error --silent --retry 2 --max-time 45 \
+            "$base/arch/arm64/configs/tizen_noblesse_large_defconfig" \
+            -o "$RUNNER_TEMP/fbdev/large.config"
+          curl --fail --location --show-error --silent --retry 2 --max-time 45 \
+            "$base/drivers/video/fbdev/exynos/dpu_9110/decon_core.c" \
+            -o "$RUNNER_TEMP/fbdev/decon_core.c"
+          python3 - "$RUNNER_TEMP/fbdev" <<'PY'
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1])
+          base = (root / 'base.config').read_text().splitlines()
+          large = (root / 'large.config').read_text().splitlines()
+          driver = (root / 'decon_core.c').read_text()
+          for flag in ('CONFIG_FB=y', 'CONFIG_FB_SIMPLE=y',
+                       'CONFIG_EXYNOS_DECON_9110=y', 'CONFIG_EXYNOS_DECON_FB=y'):
+              assert flag in base, f'Pinned base config omits {flag}'
+          for panel in ('CONFIG_EXYNOS_DECON_LCD_RM69091=y',
+                        'CONFIG_EXYNOS_DECON_LCD_S6E36W4X01_L=y'):
+              assert panel in large, f'Pinned large display config omits {panel}'
+          for disabled in ('# CONFIG_DRM_KMS_FB_HELPER is not set',
+                           '# CONFIG_DRM_FBDEV_EMULATION is not set'):
+              assert disabled in base, f'Unexpected DRM fbdev switch: {disabled}'
+          assert 'register_framebuffer(decon->win[decon->dt.dft_win]->fbinfo)' in driver
+          assert 'failed to register framebuffer' in driver
+          print('PASS[fbdev-source]: pinned Exynos 9110 DECON driver registers a Linux framebuffer')
+          print('PASS[fbdev-source]: R08 kernel enables native framebuffer and physical panel configs')
+          print('NOT TESTED: actual /dev/fb0 device, watch boot, display timings or panel output')
+          PY
