@@ -1,18 +1,12 @@
 name: Watch3 R08 off-device AsteroidOS graphical rootfs validation
 
-# Manual only: full AsteroidOS dependency compilation is large and expensive.
+# Manual only on a disposable, isolated 200GB+ Linux x86_64 runner.
+# GitHub's standard ubuntu-22.04 VM has only 14GB SSD and cannot run this.
+# PUBLIC REPO WARNING: use a disposable VM with NO secrets; remove runner after use.
 # No firmware packaging, signing, flashing, or on-device steps.
 on:
   workflow_dispatch:
     inputs:
-      runner:
-        description: 'Build host; standard must pass capacity gate; self-hosted needs watch3-yocto label'
-        type: choice
-        required: true
-        default: self-hosted
-        options:
-          - self-hosted
-          - standard
       confirm:
         description: 'Enter BUILD_OFF_DEVICE_ROOTFS_ONLY to acknowledge the expensive build'
         required: true
@@ -28,8 +22,8 @@ concurrency:
 jobs:
   graphics-rootfs:
     if: ${{ inputs.confirm == 'BUILD_OFF_DEVICE_ROOTFS_ONLY' }}
-    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted","linux","x64","watch3-yocto"]') || 'ubuntu-22.04' }}
-    timeout-minutes: ${{ inputs.runner == 'self-hosted' && 1440 || 360 }}
+    runs-on: [self-hosted, linux, x64, watch3-yocto]
+    timeout-minutes: 1440
     steps:
       - name: Checkout Galaxy-3
         uses: actions/checkout@v4
