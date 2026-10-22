@@ -11,6 +11,7 @@ on:
       - '.github/workflows/watch3-r08-asteroidos-machine-package.yml'
       - 'meta-noblesse/conf/machine/noblesse-r08.conf'
       - 'tools/validate_asteroid_machine_config.py'
+      - 'meta-noblesse/recipes-asteroid/asteroid-machine-config/**'
   workflow_dispatch:
 
 permissions:
@@ -23,7 +24,7 @@ concurrency:
 jobs:
   asteroid-metadata:
     runs-on: ubuntu-22.04
-    timeout-minutes: 50
+    timeout-minutes: 60
     steps:
       - name: Checkout Galaxy-3
         uses: actions/checkout@v4
@@ -111,6 +112,7 @@ jobs:
           BB_NUMBER_THREADS = "3"
           PARALLEL_MAKE = "-j3"
           EOF
+          echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},8G,200M"' >> build/conf/local.conf
       - name: Verify R08 package metadata
         shell: bash
         run: |
@@ -124,6 +126,26 @@ jobs:
           grep -Fxq 'MACHINE="noblesse-r08"' "$source_env"
           grep -Fxq 'DISTRO="asteroid"' "$source_env"
           grep -Fxq 'OLDEST_KERNEL="4.9.59"' "$source_env"
+          # This R08 package only writes a text machine.conf with Python.
+          # Refuse another needless glibc/gcc cold build before running BitBake.
+          python3 - "$source_env" <<'PY'
+          from pathlib import Path
+          import sys
+          data = {}
+          for line in Path(sys.argv[1]).read_text().splitlines():
+              for key in ('INHIBIT_DEFAULT_DEPS', 'BASEDEPENDS', 'DEPENDS'):
+                  if line.startswith(key + '='):
+                      raw = line.partition('=')[2]
+                      data[key] = raw[1:-1] if raw.startswith('"') and raw.endswith('"') else raw
+          if data.get('INHIBIT_DEFAULT_DEPS') != '1':
+              raise SystemExit('FAIL: R08 machine-config did not inhibit unnecessary compiler/libc dependencies')
+          unexpected = {'virtual/cross-cc', 'virtual/compilerlibs', 'virtual/libc'}
+          for key in ('BASEDEPENDS', 'DEPENDS'):
+              bad = unexpected.intersection(data.get(key, '').split())
+              if bad:
+                  raise SystemExit(f'FAIL: {key} still pulls full target toolchain: {sorted(bad)}')
+          print('PASS: effective BitBake R08 machine-config skips cross-gcc and glibc default dependencies')
+          PY
           grep -E '^(MACHINE|DISTRO|OLDEST_KERNEL|MACHINE_DISPLAY_ROUND|MACHINE_HAS_WLAN|MACHINE_HAS_SPEAKER)=' "$source_env" > "$GITHUB_WORKSPACE/machine-logs/machine-metadata.txt"
           rm -f "$source_env"
       - name: Build actual upstream AsteroidOS machine-configuration package
@@ -133,7 +155,9 @@ jobs:
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
-          timeout --signal=TERM --kill-after=5s 2100s \
+          echo 'Building target package with R08-only compiler/libc dependency inhibition'
+          df -h "$GITHUB_WORKSPACE"
+          timeout --signal=TERM --kill-after=5s 2700s \
             bitbake asteroid-machine-config 2>&1 | tee "$GITHUB_WORKSPACE/machine-logs/asteroid-machine-config-build.log"
       - name: Inspect generated Watch3 identity and capabilities
         shell: bash
