@@ -27,7 +27,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            qt6-base-dev pkg-config
+            qt6-base-dev cmake
       - name: Generate Qt keymap from pinned, real upstream AsteroidOS keys.kmap
         shell: bash
         run: |
@@ -81,6 +81,14 @@ jobs:
               return 0;
           }
           CPP
-          g++ -std=c++17 -fPIC "$RUNNER_TEMP/check.cpp" \
-            $(pkg-config --cflags --libs Qt6Core) -o "$RUNNER_TEMP/check-qmap"
-          "$RUNNER_TEMP/check-qmap" "$RUNNER_TEMP/keys.qmap"
+          cat > "$RUNNER_TEMP/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.22)
+          project(watch3_qmap_reader LANGUAGES CXX)
+          find_package(Qt6 6.2 REQUIRED COMPONENTS Core)
+          add_executable(check_qmap check.cpp)
+          target_link_libraries(check_qmap PRIVATE Qt6::Core)
+          CMAKE
+          cmake -S "$RUNNER_TEMP" -B "$RUNNER_TEMP/qmap-build" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/qmap-build" --parallel 2
+          "$RUNNER_TEMP/qmap-build/check_qmap" "$RUNNER_TEMP/keys.qmap"
