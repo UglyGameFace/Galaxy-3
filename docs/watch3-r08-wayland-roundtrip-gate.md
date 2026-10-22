@@ -80,6 +80,50 @@ Neither stage compiles target QtWayland nor produces an image. The next
 expensive stage should be planned from measured disk usage and a realistic
 free cache budget, never by assuming the full image is already ready.
 
+## Actual R08 AsteroidOS machine package passed (October 22, 2026)
+
+The **free, hosted** [GitHub Actions run #39830173492](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39830173492)
+**completed successfully**, including actual BitBake install, package creation,
+IPK output, and package QA. The job log records:
+
+```text
+NOTE: Tasks Summary: Attempted 571 tasks of which 0 didn't need to be rerun and all succeeded.
+PASS: Display.ROUND=true
+PASS: Capabilities.HAS_WLAN=true
+PASS: Capabilities.HAS_SPEAKER=true
+PASS: Identity.MACHINE=noblesse-r08
+PASS: validated actual R08 machine identity in packaged target payload
+```
+
+The workflow compared `do_install` output against the actual packaged
+`etc/asteroid/machine.conf` and independently validated both. Its
+[diagnostic artifact](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39830173492/artifacts/12449103629)
+includes the generated identity file and logs (not a firmware image).
+
+Two R08-only build safety improvements were necessary: the upstream
+`asteroid-machine-config` recipe creates its file using Python, so
+`INHIBIT_DEFAULT_DEPS:noblesse-r08 = "1"` avoids unnecessary cross-gcc/glibc
+toolchain dependencies; the free hosted build uses an 8 GiB free-disk
+and 100K free-inode stop threshold after the accidental 200M-inode guard
+blocked a previous run. The workflow also explicitly fetches the pinned
+historical AsteroidOS commit before checkout to avoid master-branch drift.
+
+**Next blocker / build budget decision:** Upstream
+`asteroid-launcher-configs_git.bb` has `DEPENDS += "qttools-native"`
+because it invokes `kmap2qmap` to convert `keys.kmap` into a Qt
+keymap, even though the R08 LinuxFB environment is just a text file.
+The compositor environment **source** and effective BitBake unpack
+were already verified in the free AsteroidOS preflight, but the actual
+`asteroid-launcher-configs` target package has **not** been built.
+Before running it, determine whether the `qttools-native` dependency
+can fit the measured free runner's disk and six-hour bounds or be
+reused from a proven sstate cache. Do not silently skip the Qt keymap
+or replace the upstream recipe with an untested alternative.
+
+The successful machine package does **not** prove any Qt compositor
+binary, installed graphical root filesystem, framebuffer device,
+boot chain, or on-watch display. No flashing is authorized.
+
 ## R08 target image graphics dependency gate (2026-10-21)
 
 After host Qt 6.2.4 `wl_shm` round-trip success, the next task is target
