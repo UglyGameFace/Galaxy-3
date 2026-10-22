@@ -1,0 +1,67 @@
+name: Watch3 R08 free Yocto sstate checkpoint and restore
+
+# Synthetic sstate task archives with correct filename/sidecar layout.
+# Prove snapshot helper plus Actions cache reuse across fresh hosted runners.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-sstate-checkpoint-tests.yml'
+      - 'tools/watch3_yocto_sstate_checkpoint.py'
+      - 'tests/test_watch3_yocto_sstate_checkpoint.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checkpoint:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run local sstate tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/watch3_yocto_sstate_checkpoint.py
+          python3 -m unittest discover -s tests -p test_watch3_yocto_sstate_checkpoint.py -v
+      - name: Create an isolated mock Yocto signature archive and checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mock-sstate/a1/b2"
+          archive="$RUNNER_TEMP/mock-sstate/a1/b2/sstate:qtbase:aarch64-oe-linux:6.11.3:r0:aarch64:14:abcdef_do_populate_sysroot.tar.zst"
+          printf 'no-binary-mock-yocto-task\n' > "$archive"
+          printf 'mock-task-signature\n' > "$archive.siginfo"
+          python3 tools/watch3_yocto_sstate_checkpoint.py checkpoint \
+            "$RUNNER_TEMP/mock-sstate" "$HOME/.cache/watch3-yocto/sstate-snapshot" --max-mib 1
+      - name: Store mock snapshot in GitHub cache
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/watch3-yocto/sstate-snapshot
+          key: galaxy3-r08-sstate-helper-v1-${{ github.run_id }}
+
+  restore:
+    needs: checkpoint
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore existing cache onto a fresh runner
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/watch3-yocto/sstate-snapshot
+          key: galaxy3-r08-sstate-helper-v1-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - name: Verify BitBake layout is restored with matching signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/watch3_yocto_sstate_checkpoint.py restore \
+            "$HOME/.cache/watch3-yocto/sstate-snapshot" "$RUNNER_TEMP/restored-sstate"
+          archive="$RUNNER_TEMP/restored-sstate/a1/b2/sstate:qtbase:aarch64-oe-linux:6.11.3:r0:aarch64:14:abcdef_do_populate_sysroot.tar.zst"
+          test "$(cat "$archive")" = "no-binary-mock-yocto-task"
+          test "$(cat "$archive.siginfo")" = "mock-task-signature"
+          echo 'PASS: free Actions runner restored paired Yocto sstate archive and signature'
+          echo 'NOT TESTED: real BitBake cache hit or ARM64 Qt runtime build'
