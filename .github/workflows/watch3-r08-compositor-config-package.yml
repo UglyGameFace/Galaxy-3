@@ -1,0 +1,241 @@
+name: Watch3 R08 free AsteroidOS compositor configuration IPK
+
+# Builds only the R08 config+keyboard-map package on the free standard runner.
+# Hard refusal if a heavy Qt native dependency returns. No firmware or watch access.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-compositor-config-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: galaxy3-r08-compositor-config-package
+  cancel-in-progress: false
+
+jobs:
+  asteroid-metadata:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Galaxy-3
+        uses: actions/checkout@v4
+      - name: Check free runner capacity before fetching pinned sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h "$GITHUB_WORKSPACE"
+          free -h
+          disk_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+          mem_kib="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+          if (( disk_kib < 30 * 1024 * 1024 || mem_kib < 4 * 1024 * 1024 )); then
+            echo "::error title=Runner capacity below package gate::Need >=30 GiB free disk and >=4 GiB RAM for small metadata package task. No build started."
+            exit 1
+          fi
+          echo 'PASS: available free runner supports bounded machine configuration package stage'
+      - name: Install metadata parsing prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git python3 python3-packaging python3-setuptools gawk diffstat chrpath
+      - name: Fetch the upstream AsteroidOS metadata layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src preflight-logs
+          get_layer() {
+            local dest="$1" url="$2" branch="$3"
+            git clone --depth=1 --single-branch --branch "$branch" "$url" "src/$dest"
+            printf '%s %s %s\n' "$dest" "$branch" "$(git -C "src/$dest" rev-parse HEAD)" | tee -a preflight-logs/upstream-commits.txt
+          }
+          get_layer oe-core https://github.com/openembedded/openembedded-core.git whinlatter
+          get_layer oe-core/bitbake https://github.com/openembedded/bitbake.git 2.16
+          # Reuse the same known-good core revisions as the successful R08 Linux rootfs.
+          git -C src/oe-core fetch --depth=1 origin 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core checkout --detach 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core/bitbake fetch --depth=1 origin 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          git -C src/oe-core/bitbake checkout --detach 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          get_layer meta-openembedded https://github.com/openembedded/meta-openembedded.git whinlatter
+          get_layer meta-qt6 https://code.qt.io/yocto/meta-qt6.git 6.11
+          get_layer meta-smartphone https://github.com/shr-distribution/meta-smartphone.git whinlatter
+          get_layer meta-clang https://github.com/kraj/meta-clang.git whinlatter
+          get_layer meta-asteroid https://github.com/AsteroidOS/meta-asteroid.git master
+          get_layer meta-asteroid-community https://github.com/AsteroidOS/meta-asteroid-community.git master
+          get_layer meta-virtualization https://git.yoctoproject.org/meta-virtualization whinlatter
+          git -C src/meta-openembedded checkout --detach f52f32952cb9717949f8bc3d3ccf6c4c5a59521f
+          git -C src/meta-qt6 checkout --detach ec98b3ab1c8deeab9412ef6cbfd55729dc567b01
+          git -C src/meta-smartphone checkout --detach 0ef4e8979fbf3403ff8aef977874496dc312d913
+          git -C src/meta-clang checkout --detach cf20f8bd1366d41094c945597b95dd746e87b871
+          # master can advance after the shallow clone; explicitly fetch our tested commit.
+          git -C src/meta-asteroid fetch --depth=1 origin 1af66a6188f7909303cfcec779c8475be1bc4679
+          git -C src/meta-asteroid checkout --detach 1af66a6188f7909303cfcec779c8475be1bc4679
+          git -C src/meta-asteroid-community checkout --detach f911d8900b2da887d1486416a8c16b8f8f15dd35
+          git -C src/meta-virtualization checkout --detach 8f03a0cc8950ef5d5e4f11d9ae494946d1991e45
+          { echo 'PINNED CORE:'; git -C src/oe-core rev-parse HEAD; git -C src/oe-core/bitbake rev-parse HEAD; } | tee -a preflight-logs/upstream-commits.txt
+          echo 'AsteroidOS source layers downloaded; no kernel or operating system built.'
+      - name: Configure actual AsteroidOS distro with R08 machine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/conf preflight-logs
+          cat > build/conf/bblayers.conf <<'EOF'
+          BBPATH = "${TOPDIR}"
+          BBLAYERS = " \
+            ${TOPDIR}/../src/oe-core/meta \
+            ${TOPDIR}/../src/meta-qt6 \
+            ${TOPDIR}/../src/meta-asteroid \
+            ${TOPDIR}/../src/meta-asteroid-community \
+            ${TOPDIR}/../src/meta-openembedded/meta-oe \
+            ${TOPDIR}/../src/meta-openembedded/meta-multimedia \
+            ${TOPDIR}/../src/meta-openembedded/meta-gnome \
+            ${TOPDIR}/../src/meta-openembedded/meta-networking \
+            ${TOPDIR}/../src/meta-smartphone/meta-android \
+            ${TOPDIR}/../src/meta-openembedded/meta-python \
+            ${TOPDIR}/../src/meta-openembedded/meta-filesystems \
+            ${TOPDIR}/../src/meta-clang \
+            ${TOPDIR}/../src/meta-virtualization \
+            ${TOPDIR}/../meta-noblesse \
+          "
+          EOF
+          cat > build/conf/local.conf <<'EOF'
+          MACHINE = "noblesse-r08"
+          DISTRO = "asteroid"
+          PACKAGE_CLASSES = "package_ipk"
+          BB_NUMBER_THREADS = "3"
+          PARALLEL_MAKE = "-j3"
+          EOF
+          echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},8G,100K"' >> build/conf/local.conf
+      - name: Check that inode safety limit fits this free runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The previous 200M free-inode threshold meant 209,715,200
+          # inodes and stopped the build with ~18 million actually free.
+          df -h "$GITHUB_WORKSPACE"
+          df -i "$GITHUB_WORKSPACE"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          config = Path('build/conf/local.conf').read_text()
+          limits = [line for line in config.splitlines() if line.startswith('BB_DISKMON_DIRS = ')]
+          assert len(limits) == 1 and limits[0].endswith(',8G,100K"'), 'Unsafe BitBake disk/inode limit'
+          st = os.statvfs('build')
+          disk_gib = st.f_bavail * st.f_frsize / 1024**3
+          print(f'Free disk: {disk_gib:.1f} GiB; stop limit: 8 GiB')
+          assert disk_gib >= 20, 'Free disk too low for this build'
+          if st.f_files > 0 and st.f_favail >= 0:
+              print(f'Free inodes: {st.f_favail:,}; stop limit: 102,400')
+              assert st.f_favail >= 500_000, 'Free inodes too low for this build'
+          print('PASS: BitBake inode guard is realistic and filesystem has headroom')
+          PY
+      - name: Prove effective R08 keymap recipe has no QtTools or target toolchain dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p compositor-logs
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e asteroid-launcher-configs > "$GITHUB_WORKSPACE/compositor-logs/config-env.tmp"
+          python3 - "$GITHUB_WORKSPACE/compositor-logs/config-env.tmp" <<'PY'
+          from pathlib import Path
+          import sys
+          keys = ('PN', 'MACHINE', 'DISTRO', 'INHIBIT_DEFAULT_DEPS', 'DEPENDS', 'BASEDEPENDS', 'SRC_URI')
+          vals = {}
+          for line in Path(sys.argv[1]).read_text().splitlines():
+              for key in keys:
+                  if line.startswith(key + '='):
+                      val = line.partition('=')[2]
+                      vals[key] = val[1:-1] if val.startswith('"') and val.endswith('"') else val
+          for key, expected in {'PN': 'asteroid-launcher-configs',
+                                'MACHINE': 'noblesse-r08', 'DISTRO': 'asteroid',
+                                'INHIBIT_DEFAULT_DEPS': '1'}.items():
+              assert vals.get(key) == expected, f'{key} differs: {vals.get(key)}'
+          deps = set(vals.get('DEPENDS', '').split())
+          forbidden = {'qttools-native', 'virtual/cross-cc', 'virtual/compilerlibs', 'virtual/libc'}
+          assert not deps & forbidden, f'Blocked unnecessary build dependency: {deps & forbidden}'
+          assert not set(vals.get('BASEDEPENDS', '').split()) & forbidden
+          assert 'file://r08-qmap.py' in vals.get('SRC_URI', '')
+          assert 'file://keys.kmap' in vals.get('SRC_URI', '')
+          print('PASS: effective R08 recipe uses the tested keymap encoder, not QtTools native')
+          PY
+          rm -f "$GITHUB_WORKSPACE/compositor-logs/config-env.tmp"
+          timeout --signal=TERM --kill-after=5s 900s bitbake -g asteroid-launcher-configs \
+            2>&1 | tee "$GITHUB_WORKSPACE/compositor-logs/01-graph.log"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          packages = set(Path('pn-buildlist').read_text().splitlines())
+          tasks = set(re.findall(r'"([^"]+\.do_[^"]+)"', Path('task-depends.dot').read_text()))
+          forbidden = {'qttools-native', 'qtbase-native', 'qtdeclarative-native'}
+          assert not (packages & forbidden), f'Expensive Qt native tree is still required: {packages & forbidden}'
+          assert len(tasks) <= 800, f'Target graph is too big for bounded free build: {len(tasks)} tasks'
+          print(f'PASS: conservative free-runner budget gate: {len(packages)} recipes, {len(tasks)} tasks')
+          PY
+          df -h "$GITHUB_WORKSPACE"
+          df -i "$GITHUB_WORKSPACE"
+
+      - name: Build only real upstream R08 compositor configuration package
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          timeout --signal=TERM --kill-after=5s 2700s \
+            bitbake asteroid-launcher-configs 2>&1 \
+            | tee "$GITHUB_WORKSPACE/compositor-logs/02-build.log"
+
+      - name: Inspect actual staged IPK payload and Qt6 keymap bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e asteroid-launcher-configs > "$GITHUB_WORKSPACE/compositor-logs/package-env.tmp"
+          envfile="$GITHUB_WORKSPACE/compositor-logs/package-env.tmp"
+          pkgdest="$(awk -F'"' '$1=="PKGDEST=" {print $2}' "$envfile" | tail -n 1)"
+          rm -f "$envfile"
+          test -n "$pkgdest" || { echo "::error::No PKGDEST resolved"; exit 1; }
+          pkg="$pkgdest/asteroid-launcher-configs"
+          linuxfb="$pkg/var/lib/environment/compositor/10-platform.conf"
+          keymap="$pkg/usr/share/qt6/keymaps/keys.qmap"
+          for file in \
+            "$pkg/var/lib/environment/compositor/00-default.conf" \
+            "$linuxfb" \
+            "$pkg/var/lib/environment/compositor/20-device.conf" \
+            "$keymap"; do
+            test -s "$file" || { echo "::error::Missing actual package file: $file"; exit 1; }
+          done
+          grep -Fxq 'QT_QPA_PLATFORM=linuxfb' "$linuxfb"
+          grep -Fxq 'QT_QUICK_BACKEND=software' "$linuxfb"
+          grep -Fxq 'QT_QPA_FB_DRM=0' "$linuxfb"
+          test "$(stat -c %s "$keymap")" -eq 88
+          python3 - "$keymap" <<'PY'
+          from pathlib import Path
+          import hashlib
+          import sys
+          payload = Path(sys.argv[1]).read_bytes()
+          expected = '480250ec53e8a65e5bac7566597a957fcb96b59f0439602c0591da14cb49c767'
+          assert hashlib.sha256(payload).hexdigest() == expected, 'Packaged Watch3 keymap differs from host-Qt6-validated six-key golden'
+          print('PASS: actual R08 IPK payload includes all six Qt6-compatible button mappings')
+          PY
+          sha256sum "$keymap" > "$GITHUB_WORKSPACE/compositor-logs/03-qmap-sha256.txt"
+          cp "$linuxfb" "$GITHUB_WORKSPACE/compositor-logs/04-linuxfb-platform.conf"
+          echo 'PASS: actual R08 compositor configuration package has LinuxFB, software QtQuick and six-button keymap'
+          echo 'NOT TESTED: full QtWayland compositor, rootfs, device boot or display'
+
+      - name: Upload diagnostics only, never firmware
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-compositor-package
+          retention-days: 7
+          if-no-files-found: warn
+          path: compositor-logs/
