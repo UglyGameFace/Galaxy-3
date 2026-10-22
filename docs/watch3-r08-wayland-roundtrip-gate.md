@@ -84,7 +84,7 @@ target image. That is a separate gate, not a license to flash the watch.
 
 [The post-build file validator](../tools/validate_watch3_graphics_rootfs.py)
 can inspect an **already-extracted** R08 AsteroidOS root filesystem. Its
-[twelve regression tests](../tests/test_watch3_graphics_rootfs.py) ran
+[sixteen regression tests](../tests/test_watch3_graphics_rootfs.py) ran
 successfully against synthetic fixtures before committing. This tool is
 **now wired into a separately guarded, manual-only graphical rootfs
 build workflow**. The workflow executes `bitbake -c rootfs asteroid-image`
@@ -100,6 +100,12 @@ runs on changes to the rootfs checker and graphical workflow, without
 building Qt or an image. Its first CI result is not yet verified.
 **No full graphical rootfs build has been run in this task**, and its
 real ARM64 artifacts remain unverified.
+
+The validator additionally checks ELF64 little-endian executable/shared-object
+types and a real, in-file program-header table. Two new fixture tests reject
+a fake ARM64 file containing only an ELF identification header or a truncated
+program-header table. The updated 16-test suite passed locally against files
+whose Git blob hashes matched the committed source and tests.
 
 It verifies the existence and ELF64 AArch64 machine ID of the
 `/usr/bin/asteroid-launcher` program, LinuxFB `libqlinuxfb.so` QPA
