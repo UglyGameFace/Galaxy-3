@@ -261,9 +261,26 @@ stages must pass their target architecture/package validators; completed
 binaries are archived separately. Warm-up/cutoff outcomes represent
 **partial compilation**, not a finished binary.
 
-The initial [warm-up run #39871045746](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39871045746)
-was **still running when this milestone note was added**; no real sstate
-reuse success is claimed yet.
+The initial [real QtBase warm-up #39871045746](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39871045746)
+**passed its bounded-checkpoint workflow**. After its deliberately limited
+12-minute BitBake compilation, the runner saved **108 complete sstate
+archive + siginfo pairs, totaling 20,199,562 bytes**, under immutable
+cache key `galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-39871045746`.
+The complete QtBase target package did **not** build.
+
+The [fresh-runner real-signature replay workflow](../.github/workflows/watch3-r08-real-sstate-reuse.yml)
+restores that **exact original cache key** and confirms the stored 108
+archive pairs before asking actual pinned BitBake for a dry-run
+`Sstate summary`. Its first [run #39874596692](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39874596692)
+had successfully restored all 108 pairs, but was still resolving the
+signature-match check at the time of this note. A successful cache
+download alone is not proof BitBake will hit those signatures.
+
+A second [short QtBase warm-up #39874828416](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39874828416)
+started using the existing cache restore keys. That workflow now makes
+**PARTIAL** versus **completed and package-validated** status explicit.
+Neither a second warm-up success nor a complete QtBase target package
+has yet been verified.
 
 **Cost boundary:** GitHub's default Actions cache allowance is **10 GB
 per repository**; increasing it can incur charges. The project does not
