@@ -19,20 +19,25 @@ REQUIRED_MANIFEST = frozenset({
 def elf_aarch64(path: Path) -> tuple[bool, str]:
     try:
         with path.open('rb') as stream:
-            header = stream.read(20)
+            header = stream.read(64)
     except OSError as exc:
         return False, f'unreadable: {exc}'
-    if len(header) < 20 or header[:4] != b'\x7fELF':
-        return False, 'not an ELF file'
+    if len(header) < 64 or header[:4] != b'\\x7fELF':
+        return False, 'not a complete ELF64 header'
     if header[4] != 2:
         return False, 'not ELF64'
-    if header[5] not in (1, 2):
-        return False, 'invalid ELF endianness'
-    machine = struct.unpack('<H' if header[5] == 1 else '>H', header[18:20])[0]
+    # This Watch3's Cortex-A53 target is aarch64 little-endian, not BE8.
+    if header[5] != 1 or header[6] != 1:
+        return False, 'not little-endian ELF version 1'
+    elf_type, machine = struct.unpack_from('<HH', header, 16)
     if machine != ARM64:
         return False, f'wrong ELF machine e_machine={machine}; expected AArch64=183'
-    return True, 'ELF64 AArch64'
-
+    if elf_type not in (2, 3):
+        return False, f'ELF type {elf_type} is not executable or shared-object'
+    header_size = struct.unpack_from('<H', header, 52)[0]
+    if header_size != 64:
+        return False, f'ELF64 header size is {header_size}, expected 64'
+    return True, 'ELF64 little-endian AArch64 executable/shared-object'
 
 def matching_files(rootfs: Path, pattern: str) -> list[Path]:
     """Find real in-rootfs files while preventing misleading outbound symlinks."""
@@ -109,7 +114,13 @@ def validate(rootfs: Path, package_manifest: Path | None = None) -> list[str]:
             errors.append(f'missing installed-package manifest: {package_manifest}')
         else:
             # Yocto installed-package-names.txt: one package name per line.
-            packages = set(package_manifest.read_text(errors='replace').split())
+            # Yocto IMAGE_MANIFEST lines are: package arch version; a
+            # one-name-per-line manifest is also accepted for fixture tests.
+            packages = {
+                line.split()[0]
+                for line in package_manifest.read_text(errors='replace').splitlines()
+                if line.strip() and not line.lstrip().startswith('#')
+            }
             for name in sorted(REQUIRED_MANIFEST - packages):
                 errors.append(f'installed-package manifest lacks {name}')
     return errors
