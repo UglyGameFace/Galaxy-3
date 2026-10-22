@@ -1,4 +1,37 @@
-# Galaxy Watch3 R08: run the off-device graphical filesystem build
+# Galaxy Watch3 R08: choose a free build route first
+
+## Free GitHub Actions is the default, not a paid server
+
+**No payment or cloud server is needed for the current stage.** The
+[free runner feasibility probe](../.github/workflows/watch3-r08-free-build-probe.yml)
+runs automatically on its own workflow changes (or manually from Actions).
+It measures actual available disk space and RAM on the free `ubuntu-22.04`
+runner without building anything.
+
+Crucial historical evidence: the [successful QtBase run #39593317503](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39593317503/job/119199411734)
+reported `/dev/root 146G 60G 86G` free before starting 2,171 build tasks,
+which completed successfully on October 21, 2026. GitHub's published runner
+storage specification is smaller, so **do not assume** every fresh runner
+will repeat that observation. Use the new probe to measure the available
+runner at execution time. All standard Actions minutes on the public repo
+are free; each hosted job is still limited to six hours. The full image
+has not been proven to fit or finish inside those bounds.
+
+**Next no-cost build strategy:** use the probe, then add narrowly scoped,
+disk-guarded package builds in separate jobs after reviewing measured
+capacity. Preserve the successful host Wayland round-trip and avoid
+starting a single cold full-image compile. The separate
+[manual full-rootfs workflow](../.github/workflows/watch3-r08-graphical-rootfs.yml)
+currently requires a large self-hosted runner, but **using that workflow
+is not necessary to continue this project for free.**
+
+---
+
+## Optional advanced build host (not required and not recommended now)
+
+The setup below is retained only for someone who already has access to
+a suitable isolated Linux VM. **Do not rent a VM merely to follow this guide.**
+
 
 ## What is actually needed
 
@@ -11,7 +44,7 @@ It does not generate a signed or flashable firmware image or contact the watch.
 
 GitHub's standard `ubuntu-22.04` runner has only **14 GB SSD**, so it
 cannot meet this project's 120 GiB free-space safety gate.
-A temporary Linux **x86-64** server is required; the workflow no longer offers
+For the optional manual full-rootfs workflow, a Linux **x86-64** server is required; that workflow no longer offers
 the unusable standard runner choice. GitHub larger managed runners are
 primarily available on eligible organization/enterprise plans, not a
 personal-account repository.
