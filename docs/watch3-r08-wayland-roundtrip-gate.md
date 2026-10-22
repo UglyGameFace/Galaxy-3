@@ -74,7 +74,7 @@ actual BitBake-unpacked `qwaylandquickitem.cpp` for the `wl_shm` software
 texture conversion. The target-source test is capped at 20 minutes and
 the entire job at 45 minutes. Its first run is
 [39774432709](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39774432709);
-**outcome not yet verified when this note was written**.
+**passed** with real pinned QtWayland source unpack and the source-level wl_shm software-rendering assertions.
 
 Neither stage compiles target QtWayland nor produces an image. The next
 expensive stage should be planned from measured disk usage and a realistic
@@ -107,6 +107,17 @@ toolchain dependencies; the free hosted build uses an 8 GiB free-disk
 and 100K free-inode stop threshold after the accidental 200M-inode guard
 blocked a previous run. The workflow also explicitly fetches the pinned
 historical AsteroidOS commit before checkout to avoid master-branch drift.
+
+**Current free dependency-budget experiment:** The R08-only
+[launcher-config bbappend](../meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs_%.bbappend)
+now sets `INHIBIT_DEFAULT_DEPS:noblesse-r08 = "1"` because the recipe
+contains no ARM64 compilation. This removes only automatic target GCC/libc
+dependencies, not the upstream `qttools-native` build dependency or
+`keys.kmap` conversion. The [free graph-only workflow](../.github/workflows/watch3-r08-compositor-graph.yml)
+resolves its **real** BitBake dependency graph on the pinned R08 environment
+and reports recipe/task counts; it does not compile anything. Its first
+[run #39843007333](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39843007333)
+was still in progress when this documentation was updated.
 
 **Next blocker / build budget decision:** Upstream
 `asteroid-launcher-configs_git.bb` has `DEPENDS += "qttools-native"`
@@ -168,11 +179,14 @@ BitBake environment before invoking the validator. It does not run on pushes,
 cannot proceed without `BUILD_OFF_DEVICE_ROOTFS_ONLY` confirmation, and
 requires at least 120 GiB free disk and 12 GiB available memory. The optional
 `watch3-yocto` self-hosted runner keeps Yocto caches between builds.
-Standard hosted runners must pass the same capacity gate.
+That full-rootfs workflow is self-hosted-only due its 120 GiB capacity gate;
+it is **not** required for the free source/package checks.
 
 The separate [five-minute regression workflow](../.github/workflows/watch3-r08-graphics-validator-check.yml)
 runs on changes to the rootfs checker and graphical workflow, without
-building Qt or an image. Its first CI result is not yet verified.
+building Qt or an image. Its corrected
+[October 22 run #39773769137](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39773769137)
+**passed**.
 **No full graphical rootfs build has been run in this task**, and its
 real ARM64 artifacts remain unverified.
 
