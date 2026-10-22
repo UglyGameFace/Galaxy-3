@@ -48,8 +48,13 @@ safer for repeat builds.
    integrity-check and registration commands. Run those commands in the
    cloud VM's browser-accessible console **as a dedicated non-root user**.
    Registration requires a short-lived token which stays on your VM.
-3. Add the custom runner label `watch3-yocto`. The workflow expects all
-   of `self-hosted`, `linux`, `x64`, `watch3-yocto`.
+3. When running GitHub's generated `./config.sh` registration command,
+   append `--ephemeral --labels watch3-yocto`. This makes the runner take
+   **one job only** and automatically deregister after it runs, reducing
+   exposure on a public repository. The workflow expects all of
+   `self-hosted`, `linux`, `x64`, `watch3-yocto`. Start the registered
+   runner with `./run.sh` and leave its VM console running while the build
+   executes.
 4. The workflow installs dependencies via `sudo apt-get`. The runner user
    therefore needs suitable non-interactive sudo permission for apt on this
    throwaway machine. Do not use a personal machine or share its credentials.
@@ -81,3 +86,4 @@ References:
 - [GitHub runner hardware limits](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
 - [GitHub adding self-hosted runners](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners)
 - [GitHub security warning for public-repo self-hosted runners](https://docs.github.com/en/actions/reference/security/secure-use)
+- [GitHub one-job ephemeral self-hosted runners](https://docs.github.com/en/actions/reference/runners/self-hosted-runners)
