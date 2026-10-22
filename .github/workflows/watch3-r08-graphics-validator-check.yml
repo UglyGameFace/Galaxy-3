@@ -37,6 +37,7 @@ jobs:
           text = p.read_text()
           required = (
               "on:\n  workflow_dispatch:",
+              "runs-on: [self-hosted, linux, x64, watch3-yocto]",
               "inputs.confirm == 'BUILD_OFF_DEVICE_ROOTFS_ONLY'",
               "bitbake -c rootfs asteroid-image",
               "validate_watch3_graphics_rootfs.py",
@@ -49,6 +50,8 @@ jobs:
           for item in required:
               assert item in text, f"Missing rootfs workflow safety requirement: {item}"
           assert "\n  push:" not in text, "Expensive graphical rootfs workflow must not auto-run"
+          assert "ubuntu-22.04" not in text, "Standard 14GB runner cannot meet 120GiB storage gate"
+          assert "          - standard" not in text, "Dead-end runner choice should stay removed"
           assert "bitbake asteroid-image 2>&1" not in text, "Must stop at do_rootfs"
           print("PASS: manual-only graphical rootfs workflow and post-build validator are wired")
           PY
