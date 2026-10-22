@@ -1,0 +1,90 @@
+name: Watch3 R08 audit real archived compositor IPK
+
+# Independently audit an already-built IPK archive. Zero BitBake builds.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-audit-built-ipk.yml'
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Successful compositor-package GitHub Actions run ID'
+        required: true
+        default: '39855122250'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit-existing-ipk:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout existing R08 validator
+        uses: actions/checkout@v4
+
+      - name: Run compositor-package regression tests (no compilation)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_watch3_compositor_ipk.py -v
+
+      - name: Download earlier successful compositor IPK from GitHub
+        uses: actions/download-artifact@v4
+        with:
+          name: galaxy3-r08-compositor-package
+          repository: UglyGameFace/Galaxy-3
+          run-id: ${{ inputs.run_id || '39855122250' }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/prior-build
+
+      - name: Inspect compiled .ipk and validate its actual compressed contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          for binary in ar tar zstd python3; do
+            command -v "$binary" >/dev/null || {
+              echo "::error::Free runner missing package-audit utility: $binary"
+              exit 1
+            }
+          done
+          pkgdir="$RUNNER_TEMP/prior-build/packaged-ipk"
+          count="$(find "$pkgdir" -type f -name 'asteroid-launcher-configs_*.ipk' | wc -l)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected exactly one compositor .ipk, found $count"
+            exit 1
+          fi
+          ipk="$(find "$pkgdir" -type f -name 'asteroid-launcher-configs_*.ipk' -print -quit)"
+          echo "Inspecting real IPK: $(basename "$ipk")"
+          ar t "$ipk"
+          for member in debian-binary control.tar.gz data.tar.zst; do
+            ar t "$ipk" | grep -Fxq "$member" || {
+              echo "::error::Unexpected .ipk layout; missing $member"
+              exit 1
+            }
+          done
+          ar p "$ipk" debian-binary | grep -Fxq '2.0'
+          ar p "$ipk" control.tar.gz > "$RUNNER_TEMP/control.tar.gz"
+          control="$(tar -xzOf "$RUNNER_TEMP/control.tar.gz" ./control)"
+          printf '%s\n' "$control"
+          grep -Fxq 'Package: asteroid-launcher-configs' <<< "$control"
+          grep -Fxq 'Architecture: noblesse_r08' <<< "$control"
+          grep -Fxq 'Version: git-r0' <<< "$control"
+          ar p "$ipk" data.tar.zst > "$RUNNER_TEMP/data.tar.zst"
+          mkdir -p "$RUNNER_TEMP/extracted"
+          tar --zstd -xf "$RUNNER_TEMP/data.tar.zst" -C "$RUNNER_TEMP/extracted"
+          python3 "$GITHUB_WORKSPACE/tools/validate_watch3_compositor_ipk.py" \
+            "$RUNNER_TEMP/extracted"
+          echo 'PASS: actual compressed IPK payload validated independently of original BitBake runner'
+          sha256sum "$ipk"
+          {
+            echo '## Actual R08 compositor IPK archive audit'
+            echo '- Prior successful build: **${{ inputs.run_id || '39855122250' }}**'
+            echo '- Package architecture: **noblesse_r08**'
+            echo '- All four packaged files inspected directly from data.tar.zst'
+            echo '- LinuxFB, software Qt Quick, zero-byte device placeholder, and six Qt key mappings verified'
+            echo '- No Yocto/Qt compilation, firmware or watch access'
+          } >> "$GITHUB_STEP_SUMMARY"
