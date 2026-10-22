@@ -1,0 +1,73 @@
+name: Watch3 R08 free GitHub runner feasibility probe
+
+# Zero-cost public GitHub-hosted VM: gathers actual storage/RAM details.
+# Does not install dependencies, build BitBake, or touch the watch.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-free-build-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: watch3-r08-free-runner-probe
+  cancel-in-progress: true
+
+jobs:
+  capacity:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Inspect the actual free GitHub Actions runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'GitHub-hosted public-repository runner: no paid resources used'
+          echo '--- Actual disk availability ---'
+          df -h "$GITHUB_WORKSPACE"
+          df -Pk "$GITHUB_WORKSPACE"
+          echo '--- RAM / CPUs ---'
+          free -h
+          nproc
+          echo '--- Actual disk type and work directory ---'
+          uname -a
+          lsblk -o NAME,SIZE,TYPE,MOUNTPOINTS || true
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          disk = os.statvfs(os.environ["GITHUB_WORKSPACE"])
+          free_gib = disk.f_bavail * disk.f_frsize / (1024**3)
+          total_gib = disk.f_blocks * disk.f_frsize / (1024**3)
+          mem_kib = next(
+              int(line.split()[1])
+              for line in Path("/proc/meminfo").read_text().splitlines()
+              if line.startswith("MemAvailable:")
+          )
+          free_mem_gib = mem_kib / 1024**2
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          baseline = (
+              "## Watch3 R08: actual free GitHub runner\n\n"
+              f"- Total filesystem: **{total_gib:.1f} GiB**\n"
+              f"- Disk available at job start: **{free_gib:.1f} GiB**\n"
+              f"- RAM available at job start: **{free_mem_gib:.1f} GiB**\n"
+              "- Cost: **$0** for standard GitHub Actions in a public repository\n"
+              "- Compiled packages: **none**; this is a capacity probe only\n\n"
+          )
+          if free_gib >= 60 and free_mem_gib >= 8:
+              assessment = (
+                  "Candidate for **bounded targeted package builds**, with "
+                  "continuous disk monitoring and task time limits. "
+                  "**Not proof** that full AsteroidOS fits or finishes within six hours."
+              )
+          else:
+              assessment = (
+                  "Avoid cold Qt/full-image builds on this runner. "
+                  "Continue no-cost metadata, source, and host Wayland checks."
+              )
+          summary.write_text(baseline + "**Result:** " + assessment + "\n")
+          print(baseline + "**Result:** " + assessment)
+          PY
+          echo 'PASS: runner inspected without building anything'
