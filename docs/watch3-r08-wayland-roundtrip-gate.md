@@ -218,8 +218,10 @@ binary in `qtwayland-plugins`, and real little-endian ELF64 AArch64
 headers for both. It rejects missing package components and escaping symlinks.
 The matching [regression workflow](../.github/workflows/watch3-r08-qtwayland-package-validator.yml)
 runs only synthetic fixtures **without building any target binaries**.
-Its initial [run #39866261256](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39866261256)
-had not yet been verified when this note was authored.
+Its [run #39866261256](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39866261256)
+**passed all 11 regression tests** on free GitHub Actions. The checks use
+synthetic ELF fixtures and are not falsely presented as a completed
+QtWayland runtime compilation.
 
 The full target QtWayland build, complete Qt runtime package set, on-device
 fbdev/Wayland rendering, and boot/recovery remain **unverified**. Preserve
