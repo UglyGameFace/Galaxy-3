@@ -49,6 +49,37 @@ The log includes a failed EGL-display initialization warning, yet the verified s
 
 **Scope limit:** This pass used Ubuntu 22.04's host Qt 6.2.4 packages under Xvfb, not cross-compiled target Qt 6.11.3, the actual ARM64 rootfs, the Watch3 framebuffer device, its boot chain, or on-device display. Do not authorize flashing on the strength of this result.
 
+## R08 target image graphics dependency gate (2026-10-21)
+
+After host Qt 6.2.4 `wl_shm` round-trip success, the next task is target
+**package closure**, not another host Wayland prototype or cold QtBase build.
+
+New [graphics-image metadata checker](../tools/check_watch3_graphics_image_env.py)
+and [regression tests](../tests/test_watch3_graphics_image_env.py)
+run in the existing [AsteroidOS BitBake preflight](../.github/workflows/watch3-r08-asteroidos-preflight.yml).
+The checker examines effective `bitbake -e` values for `asteroid-image`,
+`asteroid-launcher`, `qtbase`, `qtwayland`, and `qtdeclarative` using
+`MACHINE=noblesse-r08` and `DISTRO=asteroid`.
+
+It fails if the image omits the launcher or the Wayland distro feature;
+if the launcher drops hard runtime dependencies on `qtbase-plugins`,
+`qtwayland-plugins`, `qtdeclarative-qmlplugins`, or
+`asteroid-launcher-configs`; if one of those plugin/QML packages is not in
+the corresponding Qt module's effective `PACKAGES`; or if its `FILES`
+split does not cover the plugin/QML installation directory.
+It also requires QtBase's `gui` and `linuxfb` PACKAGECONFIG.
+
+**Ten local regression tests passed.** The *actual BitBake environment
+result is not yet confirmed*. The validator tests metadata only; it does
+not inspect target `.ipk` payloads, prove final rootfs package installation,
+or run target Qt 6.11.3 binaries. The existing six-hour QtBase LinuxFB
+build remains manual-only.
+
+Future physical file/rootfs inspection must establish the ARM64 LinuxFB
+plugin, Wayland client QPA plugin, QtWayland compositor library, launcher
+binary, launcher configuration and actual Qt Quick QML imports inside one
+target image. That is a separate gate, not a license to flash the watch.
+
 ## Real end-to-end acceptance criteria
 
 Validate the separate, **off-device only** QtWayland prototype against these criteria:
