@@ -2,8 +2,15 @@ name: Galaxy Watch3 R08 AsteroidOS machine package
 
 # Build only the small upstream AsteroidOS machine-identity package on the R08 machine.
 # Never produces signed, bootable or flashable firmware.
-# Expensive BitBake package build is manual. Fast validator runs on metadata edits.
+# Bounded small-package job on the free public-repo GitHub runner.
+# Changes to the R08 identity or this workflow trigger it; never builds Qt/firmware.
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-asteroidos-machine-package.yml'
+      - 'meta-noblesse/conf/machine/noblesse-r08.conf'
+      - 'tools/validate_asteroid_machine_config.py'
   workflow_dispatch:
 
 permissions:
@@ -16,10 +23,23 @@ concurrency:
 jobs:
   asteroid-metadata:
     runs-on: ubuntu-22.04
-    timeout-minutes: 55
+    timeout-minutes: 50
     steps:
       - name: Checkout Galaxy-3
         uses: actions/checkout@v4
+      - name: Check free runner capacity before fetching pinned sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h "$GITHUB_WORKSPACE"
+          free -h
+          disk_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+          mem_kib="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+          if (( disk_kib < 30 * 1024 * 1024 || mem_kib < 4 * 1024 * 1024 )); then
+            echo "::error title=Runner capacity below package gate::Need >=30 GiB free disk and >=4 GiB RAM for small metadata package task. No build started."
+            exit 1
+          fi
+          echo 'PASS: available free runner supports bounded machine configuration package stage'
       - name: Install metadata parsing prerequisites
         shell: bash
         run: |
@@ -113,7 +133,8 @@ jobs:
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
-          bitbake asteroid-machine-config 2>&1 | tee "$GITHUB_WORKSPACE/machine-logs/asteroid-machine-config-build.log"
+          timeout --signal=TERM --kill-after=5s 2100s \
+            bitbake asteroid-machine-config 2>&1 | tee "$GITHUB_WORKSPACE/machine-logs/asteroid-machine-config-build.log"
       - name: Inspect generated Watch3 identity and capabilities
         shell: bash
         run: |
@@ -122,6 +143,25 @@ jobs:
           test -n "$config" && test -s "$config" || { echo '::error::Missing installed AsteroidOS machine.conf'; exit 1; }
           cp "$config" "$GITHUB_WORKSPACE/machine-logs/asteroid-machine.conf"
           python3 "$GITHUB_WORKSPACE/tools/validate_asteroid_machine_config.py" "$config"
+          # Also inspect real package staging rather than only do_install's image.
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e asteroid-machine-config > "$GITHUB_WORKSPACE/machine-logs/package-env.tmp"
+          pkgdest="$(awk -F'"' '$1=="PKGDEST=" {print $2}' "$GITHUB_WORKSPACE/machine-logs/package-env.tmp" | tail -n 1)"
+          rm -f "$GITHUB_WORKSPACE/machine-logs/package-env.tmp"
+          packaged="$pkgdest/asteroid-machine-config/etc/asteroid/machine.conf"
+          test -n "$pkgdest" && test -s "$packaged" || {
+            echo "::error title=Target package missing::Expected asteroid-machine-config package file at $packaged"
+            exit 1
+          }
+          cmp -s "$config" "$packaged" || {
+            echo "::error::Packaged machine.conf differs from do_install output"
+            exit 1
+          }
+          python3 "$GITHUB_WORKSPACE/tools/validate_asteroid_machine_config.py" "$packaged"
+          echo 'PASS: validated actual R08 machine identity in packaged target payload'
+          echo 'NOT TESTED: Qt compositor, full rootfs or Watch3 hardware'
       - name: Upload package metadata and diagnostic logs
         if: always()
         uses: actions/upload-artifact@v4
