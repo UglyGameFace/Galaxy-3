@@ -1,14 +1,14 @@
 name: Watch3 R08 free compositor config dependency graph
 
-# Build only the small upstream AsteroidOS machine-identity package on the R08 machine.
-# Never produces signed, bootable or flashable firmware.
-# Bounded small-package job on the free public-repo GitHub runner.
-# Changes to the R08 identity or this workflow trigger it; never builds Qt/firmware.
+# Free graph-only check for the R08 Qt6-validated six-button keymap alternative.
+# Preserves original upstream behavior on every other machine. No compilation.
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/watch3-r08-compositor-graph.yml'
+      - 'meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs_%.bbappend'
+      - 'meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs/r08-qmap.py'
   workflow_dispatch:
 
 permissions:
@@ -159,20 +159,21 @@ jobs:
               assert vals.get(key) == value, f'{key} expected {value}, got {vals.get(key)}'
           deps = set(vals.get('DEPENDS', '').split())
           forbidden = {'virtual/cross-cc', 'virtual/compilerlibs', 'virtual/libc'}
-          assert 'qttools-native' in deps, 'Lost native Qt keymap tool'
+          assert 'qttools-native' not in deps, 'R08 still pulls unnecessary native QtTools'
           assert not (deps & forbidden), f'Unexpected target compiler dependencies: {deps & forbidden}'
           assert not (set(vals.get('BASEDEPENDS', '').split()) & forbidden)
           assert 'file://keys.kmap' in vals.get('SRC_URI', '')
+          assert 'file://r08-qmap.py' in vals.get('SRC_URI', ''), 'Strict R08 Qt keymap generator not unpacked'
           upstream = Path(sys.argv[2]) / 'src/meta-asteroid/recipes-asteroid/asteroid-launcher/asteroid-launcher-configs_git.bb'
           recipe = upstream.read_text()
           assert 'DEPENDS += "qttools-native"' in recipe
           assert 'kmap2qmap ' in recipe and 'keys.qmap' in recipe
-          print('PASS: target compiler defaults avoided; native Qt keymap conversion preserved')
+          print('PASS: R08 recipe skips QtTools native but keeps original keys.kmap, with host Qt6-validated encoder')
           print('NOT TESTED: generated keyboard map or target binary package')
           PY
           rm -f "$GITHUB_WORKSPACE/graph-logs/effective.env.tmp"
 
-      - name: Map actual QtTools dependency graph without compilation
+      - name: Prove QtTools-heavy dependency chain was eliminated without compilation
         shell: bash
         run: |
           set -euo pipefail
@@ -194,14 +195,14 @@ jobs:
           graph = Path('task-depends.dot').read_text()
           tasks = set(re.findall(r'"([^"]+\.do_[^"]+)"', graph))
           assert recipes and tasks, 'Empty BitBake dependency graph'
-          assert 'qttools-native' in recipes, 'QtTools native missing from recipe dependency graph'
+          assert 'qttools-native' not in recipes, 'Unnecessary QtTools native rebuild remains in graph'
           expensive = [n for n in ('qtbase-native', 'qttools-native', 'qtdeclarative-native',
                                    'glibc', 'gcc-cross-aarch64') if n in recipes]
           report = ('## R08 compositor package dependency budget (no compilation)\n\n'
                     f'- Recipe count: {len(recipes)}\n'
                     f'- Task IDs: {len(tasks)}\n'
                     f'- Relevant Qt/toolchain recipes: {", ".join(expensive) or "none"}\n'
-                    '- Native Qt keymap conversion: preserved\n'
+                    '- R08 strict Qt6-compatible six-button keymap generation: enabled; actual package NOT yet built\n'
                     '- No IPK, Qt binary, or firmware was built\n')
           (Path(sys.argv[1]) / '02-budget.txt').write_text(report)
           Path(sys.argv[2]).write_text(report)
