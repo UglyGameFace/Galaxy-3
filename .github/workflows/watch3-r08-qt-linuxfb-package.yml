@@ -26,7 +26,8 @@ concurrency:
 jobs:
   qtbase-linuxfb:
     # The self-hosted option must be explicitly configured by the repository owner.
-    # Standard GitHub runners have limited disk; the capacity gate below fails early.
+    # A public GitHub Ubuntu runner previously built QtBase with ~86 GiB free;
+    # always measure available disk before authorizing another cold rebuild.
     runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted","linux","x64","watch3-yocto"]') || 'ubuntu-22.04' }}
     timeout-minutes: 360
     steps:
@@ -67,6 +68,8 @@ jobs:
           git -C src/meta-qt6 checkout --detach ec98b3ab1c8deeab9412ef6cbfd55729dc567b01
           git -C src/meta-smartphone checkout --detach 0ef4e8979fbf3403ff8aef977874496dc312d913
           git -C src/meta-clang checkout --detach cf20f8bd1366d41094c945597b95dd746e87b871
+          # master may advance beyond this tested SHA on shallow clone.
+          git -C src/meta-asteroid fetch --depth=1 origin 1af66a6188f7909303cfcec779c8475be1bc4679
           git -C src/meta-asteroid checkout --detach 1af66a6188f7909303cfcec779c8475be1bc4679
           git -C src/meta-asteroid-community checkout --detach f911d8900b2da887d1486416a8c16b8f8f15dd35
           git -C src/meta-virtualization checkout --detach 8f03a0cc8950ef5d5e4f11d9ae494946d1991e45
@@ -195,12 +198,31 @@ jobs:
           test -n "$plugin"
           sha256sum "$plugin" | tee "$GITHUB_WORKSPACE/qt-logs/qt-linuxfb-plugin-sha256.txt"
           file "$plugin" | tee "$GITHUB_WORKSPACE/qt-logs/qt-linuxfb-plugin-architecture.txt"
-          echo 'Package inspection only; no compositor launch or watch screen test.'
-      - name: Archive Qt plugin diagnostics (never the binary)
+          # Preserve the real compiled ARM64 plugin, not just its hash.
+          # The successful 2026-10-21 run only saved text diagnostics,
+          # making the six-hour compiler work impossible to reuse later.
+          mkdir -p "$GITHUB_WORKSPACE/qt-logs/arm64-platform-plugin"
+          cp -L "$plugin" "$GITHUB_WORKSPACE/qt-logs/arm64-platform-plugin/libqlinuxfb.so"
+          cmp -s "$plugin" "$GITHUB_WORKSPACE/qt-logs/arm64-platform-plugin/libqlinuxfb.so" || {
+            echo "::error::Archived ARM64 plugin differs from package staging"
+            exit 1
+          }
+          file "$GITHUB_WORKSPACE/qt-logs/arm64-platform-plugin/libqlinuxfb.so" |
+            grep -Eq 'ELF 64-bit LSB shared object, ARM aarch64' || {
+              echo "::error::Captured artifact is not an ARM64 LinuxFB plugin"
+              exit 1
+            }
+          sha256sum "$GITHUB_WORKSPACE/qt-logs/arm64-platform-plugin/libqlinuxfb.so" |
+            tee "$GITHUB_WORKSPACE/qt-logs/arm64-platform-plugin/SHA256SUMS"
+          echo 'PASS: actual ARM64 LinuxFB .so retained for off-device package integration'
+          echo 'NOT TESTED: target QtWayland compositor, final rootfs, device framebuffer or boot'
+      - name: Archive Qt plugin and build diagnostics (including real ARM64 binary)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: galaxy3-r08-qt-linuxfb-${{ github.run_number }}
           if-no-files-found: warn
           retention-days: 14
+          # Qt build artifacts now include the actual ARM64 LinuxFB .so.
+          # GitHub-hosted runner storage is ephemeral; keep reusable output.
           path: qt-logs/
