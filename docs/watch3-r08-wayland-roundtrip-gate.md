@@ -195,6 +195,36 @@ compositor configuration IPK. Do not infer bootability or actual
 framebuffer output from any of these off-device package results. No
 watch flashing or paid VM is required for the completed tests.
 
+## QtWayland runtime dependencies and next package gate (October 22, 2026)
+
+The free [pinned-R08 runtime graph run #39865351781](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39865351781)
+**passed**, measuring actual BitBake recipe and task dependency graphs:
+
+| Target | Recipes | Task IDs | Heavy compilation dependencies |
+| --- | ---: | ---: | --- |
+| `qtwayland` | **212** | **2,671** | `qtbase`, `qtbase-native`, `qtdeclarative`, `qtdeclarative-native`, gcc, glibc |
+| `asteroid-launcher` | **270** | **3,480** | QtBase, QtWayland, QtDeclarative, `qttools-native`, gcc, glibc |
+
+These are graph counts, **not** completed builds or a duration estimate. The previously
+successful QtBase package ran nearly six hours on a standard GitHub runner,
+so cold-compiling these remaining targets in a single run is not proven
+to fit a free six-hour job. The already-completed compositor **configuration
+IPK** is separate and remains verified.
+
+A new [QtWayland post-package validator](../tools/validate_watch3_qtwayland_package.py)
+requires an actual ABI-versioned `libQt6WaylandCompositor.so.*` in the
+`qtwayland` package, at least one `plugins/platforms/libqwayland*.so`
+binary in `qtwayland-plugins`, and real little-endian ELF64 AArch64
+headers for both. It rejects missing package components and escaping symlinks.
+The matching [regression workflow](../.github/workflows/watch3-r08-qtwayland-package-validator.yml)
+runs only synthetic fixtures **without building any target binaries**.
+Its initial [run #39866261256](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39866261256)
+had not yet been verified when this note was authored.
+
+The full target QtWayland build, complete Qt runtime package set, on-device
+fbdev/Wayland rendering, and boot/recovery remain **unverified**. Preserve
+the existing firmware and continue the zero-cost, staged build path.
+
 ## R08 target image graphics dependency gate (2026-10-21)
 
 After host Qt 6.2.4 `wl_shm` round-trip success, the next task is target
