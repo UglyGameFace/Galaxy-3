@@ -1,9 +1,12 @@
 """Tests for bounded portable Yocto shared-state cache pair snapshots."""
+import errno
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from watch3_yocto_sstate_checkpoint import checkpoint, restore
@@ -36,6 +39,26 @@ class CacheTest(unittest.TestCase):
         restored = self.warm / package.relative_to(self.source)
         self.assertEqual(restored.read_bytes(), package.read_bytes())
         self.assertEqual(restored.with_name(restored.name + ".siginfo").read_bytes(), b"sig")
+
+    def test_checkpoint_and_restore_use_hardlinks_on_same_filesystem(self):
+        archive = self.create("qtmultimedia")
+        checkpoint(self.source, self.saved, 1024)
+        snapshot = self.saved / archive.relative_to(self.source)
+        self.assertEqual(archive.stat().st_ino, snapshot.stat().st_ino)
+        self.assertEqual(archive.stat().st_dev, snapshot.stat().st_dev)
+        restore(self.saved, self.warm)
+        restored = self.warm / archive.relative_to(self.source)
+        self.assertEqual(snapshot.stat().st_ino, restored.stat().st_ino)
+        self.assertEqual(archive.read_bytes(), restored.read_bytes())
+
+    def test_fallback_copy_when_hardlinks_cross_filesystems(self):
+        archive = self.create("qtbase")
+        with mock.patch("watch3_yocto_sstate_checkpoint.os.link",
+                        side_effect=OSError(errno.EXDEV, "cross-device link")):
+            checkpoint(self.source, self.saved, 1024)
+        snapshot = self.saved / archive.relative_to(self.source)
+        self.assertEqual(archive.read_bytes(), snapshot.read_bytes())
+        self.assertNotEqual(archive.stat().st_ino, snapshot.stat().st_ino)
 
     def test_prioritize_qt_over_misc_under_budget(self):
         other = self.create("zlib", length=800)
