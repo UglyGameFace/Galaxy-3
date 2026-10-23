@@ -325,18 +325,24 @@ It saved a new checkpoint of **548 complete .tar.zst + .siginfo pairs,
 `galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-39884432214`.
 No QtBase package completion or ARM64 plugin validation was claimed.
 
-An independent [548-pair BitBake replay #39896644648](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39896644648)
-now requires all 548 real task signatures to match on a fresh runner
-before it passes. The next [90-minute QtBase stage #39896690811](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39896690811)
-restores the latest compatible snapshot, executes at most 5,400
-seconds of real BitBake tasks, then preserves complete signed sstate
-pairs in a 4 GiB-cap checkpoint. The GitHub job cap is 120 minutes;
-the manual five-hour cutoff, tested source pins, disk/inode checks and
-no-firmware/no-flashing scope remain unchanged.
+The independent [548-pair BitBake replay #39896644648](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39896644648)
+**passed**, matching **all 548 saved signed task archives** against
+pinned R08 BitBake on a fresh free runner: **Wanted 719 / Local 548 /
+Mirrors 0 / Missed 171 / Current 0 (76% sstate match)**. Its dry-run
+scheduler reported 2,171 tasks attempted, 1,507 of which did not require
+rerunning; this is **not** actual QtBase compilation or package validation.
 
-**Both newer runs were in progress when this documentation was updated.**
-Do not treat their initialization as a tested replay, cache growth,
-completed QtBase binary, or usable watch firmware.
+The next [90-minute QtBase stage #39896690811](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39896690811)
+has already restored the latest compatible snapshot, passed machine and
+dependency checks, and was **in the actual bounded ARM64 compilation step**
+when checked. The compile step is capped at 5,400 seconds, with a
+120-minute GitHub job cap for setup, package validation and checkpoint
+upload. The existing 4 GiB-cap signed-sstate snapshot, manual five-hour
+cutoff, source pins, disk/inode checks, and no-flashing scope remain.
+
+**The 90-minute build outcome is not yet verified**: do not infer that
+QtBase has finished, another checkpoint exists, or watch graphics work
+until its final package validation and upload steps pass.
 
 Both Qt build workflows now use **one common pinned cache restore prefix**
 (`galaxy3-r08-oe8751-qt611-v1-sstate-`) rather than preferring a
