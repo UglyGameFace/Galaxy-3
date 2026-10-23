@@ -12,7 +12,7 @@ IMAGE = MACHINE + ('DISTRO="asteroid"\nDISTRO_FEATURES="wayland bluetooth"\n'
 LAUNCHER = MACHINE + (
     'RDEPENDS:asteroid-launcher="qtbase-plugins qtwayland-plugins '
     'qtdeclarative-qmlplugins asteroid-launcher-configs qml-asteroid"\n')
-BASE = MACHINE + ('PACKAGECONFIG="gui linuxfb widgets"\n'
+BASE = MACHINE + ('PACKAGECONFIG="gui linuxfb wayland widgets"\n'
                   'PACKAGES="qtbase-plugins qtbase"\n'
                   'FILES:qtbase-plugins="/usr/lib/qt6/plugins/*/*.so"\n')
 WAYLAND = MACHINE + ('REQUIRED_DISTRO_FEATURES="wayland"\n'
@@ -59,21 +59,21 @@ class TestGraphicsImageClosure(unittest.TestCase):
             'RRECOMMENDS:asteroid-launcher="qtwayland-plugins"\n'
         self.assertTrue(any('qtwayland-plugins' in e for e in check(launcher=different)))
 
-    def test_package_split_required(self):
+    def test_qtwayland_compositor_package_required(self):
         self.assertTrue(any('qtwayland PACKAGES' in e for e in
-                            check(wayland=WAYLAND.replace('qtwayland-plugins ', ''))))
+                            check(wayland=WAYLAND.replace(' qtwayland"', '"'))))
 
     def test_plugin_files_must_map_to_plugins(self):
         self.assertTrue(any('qtbase-plugins FILES' in e for e in
                             check(base=BASE.replace('/plugins/', '/nowhere/'))))
-        self.assertTrue(any('qtwayland-plugins FILES' in e for e in
-                            check(wayland=WAYLAND.replace('/plugins/', '/nowhere/'))))
         self.assertTrue(any('qtdeclarative-qmlplugins FILES' in e for e in
                             check(decl=DECL.replace('/qml', '/nowhere'))))
 
-    def test_linuxfb_feature_is_not_optional(self):
-        self.assertTrue(any('PACKAGECONFIG' in e for e in
-                            check(base=BASE.replace(' linuxfb', ''))))
+    def test_linuxfb_and_qtbase_wayland_features_are_required(self):
+        for feature in ('linuxfb', 'wayland'):
+            with self.subTest(feature=feature):
+                self.assertTrue(any('PACKAGECONFIG' in e for e in
+                                    check(base=BASE.replace(' ' + feature, ''))))
 
     def test_bitbake_history_comment_is_ignored(self):
         self.assertEqual(read_variable('# PACKAGECONFIG="bad"\n' + BASE,
