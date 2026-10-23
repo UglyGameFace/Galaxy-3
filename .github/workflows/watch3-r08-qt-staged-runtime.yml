@@ -150,6 +150,12 @@ jobs:
             # Keep more than enough free space for a GitHub cache upload even
             # if BitBake must stop to protect the runner.
             echo 'INHERIT += "rm_work"' >> build/conf/local.conf
+            # Keep rm_work for dependencies, but NEVER for asteroid-image:
+            # rm_work deletes IMAGE_ROOTFS and the WORKDIR manifest before the
+            # post-build real ARM64 rootfs validator can inspect them.
+            # The pinned OE-Core rm_work class also deletes rootfs via its
+            # do_image_complete postfunc unless the image PN is excluded.
+            echo 'RM_WORK_EXCLUDE += "asteroid-image"' >> build/conf/local.conf
             echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},20G,100K"' >> build/conf/local.conf
           else
             echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},8G,100K"' >> build/conf/local.conf
@@ -217,7 +223,7 @@ jobs:
           import sys
           values = {}
           for line in Path(sys.argv[1]).read_text().splitlines():
-              for name in ('PN', 'MACHINE', 'DISTRO', 'PV', 'IMAGE_FSTYPES'):
+              for name in ('PN', 'MACHINE', 'DISTRO', 'PV', 'IMAGE_FSTYPES', 'RM_WORK_EXCLUDE'):
                   if line.startswith(name + '='):
                       raw = line.partition('=')[2]
                       values[name] = raw[1:-1] if raw.startswith('"') and raw.endswith('"') else raw
@@ -228,6 +234,9 @@ jobs:
               assert values.get('PV') == '6.11.3', f'Unexpected Qt PV: {values.get("PV")}'
           if target == 'asteroid-image':
               assert 'ext4' in values.get('IMAGE_FSTYPES', '').split(), 'Missing ext4 image output'
+              assert 'asteroid-image' in values.get('RM_WORK_EXCLUDE', '').split(), (
+                  'Image rootfs/manifest will be deleted by rm_work; '
+                  'add asteroid-image to RM_WORK_EXCLUDE before building')
           print(f'PASS: pinned R08 {target} recipe (offline only)')
           PY
           rm -f "$GITHUB_WORKSPACE/stage-logs/target.env"
@@ -309,7 +318,7 @@ jobs:
           with Path(__import__('os').environ['GITHUB_STEP_SUMMARY']).open('a') as out:
               out.write(summary)
           print(f"CHECKPOINT: {state['archive_pairs']} complete task archives, "
-                f"{state['bytes']/1024**3:.2f} GiB (max 4 GiB)")
+                f"{state['bytes']/1024**3:.2f} GiB (max 6 GiB)")
           PY
 
       - name: Save reusable task outputs to default free GitHub cache
@@ -343,7 +352,11 @@ jobs:
           rootfs = Path(variables['IMAGE_ROOTFS'])
           manifest = Path(variables['IMAGE_MANIFEST'])
           deploy = Path(variables['DEPLOY_DIR_IMAGE'])
-          assert rootfs.is_dir() and manifest.is_file(), 'Actual image rootfs/manifest not found'
+          print(f'Image rootfs: {rootfs} (directory={rootfs.is_dir()})')
+          print(f'Image manifest: {manifest} (file={manifest.is_file()})')
+          print(f'Image deploy directory: {deploy} (directory={deploy.is_dir()})')
+          assert rootfs.is_dir(), f'Actual extracted rootfs missing: {rootfs}'
+          assert manifest.is_file(), f'Actual installed-package manifest missing: {manifest}'
           images = [p for p in deploy.glob('asteroid-image*.ext4') if p.is_file() and p.stat().st_size > 0]
           assert images, 'No generated non-empty AsteroidOS ext4 image'
           with Path(sys.argv[2]).open('w') as out:
