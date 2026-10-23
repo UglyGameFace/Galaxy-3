@@ -77,7 +77,7 @@ class TestGraphicsImageClosure(unittest.TestCase):
 
     def test_bitbake_history_comment_is_ignored(self):
         self.assertEqual(read_variable('# PACKAGECONFIG="bad"\n' + BASE,
-                                       'PACKAGECONFIG'), 'gui linuxfb widgets')
+                                       'PACKAGECONFIG'), 'gui linuxfb wayland widgets')
 
 
 if __name__ == '__main__':
