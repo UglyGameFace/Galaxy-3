@@ -30,16 +30,26 @@ class TestQtWaylandPackage(unittest.TestCase):
         self.root = Path(temp.name) / "packages-split"
         self.lib = self.root / "qtwayland/usr/lib/libQt6WaylandCompositor.so.6.11.3"
         self.plugin = self.root / "qtwayland-plugins/usr/lib/qt6/plugins/platforms/libqwayland-generic.so"
-        for path in (self.lib, self.plugin):
-            path.parent.mkdir(parents=True)
-            path.write_bytes(elf())
+        self.lib.parent.mkdir(parents=True)
+        self.lib.write_bytes(elf())
 
     def assert_problem(self, expected):
         errors = validate_package(self.root)
         self.assertTrue(any(expected in e for e in errors), errors)
 
-    def test_actual_layout_passes_with_aarch64_elf(self):
+    def test_compositor_only_package_passes_with_aarch64_elf(self):
+        # Since Qt 6.10, the Wayland client QPA is built in QtBase.
         self.assertEqual(validate_package(self.root), [])
+
+    def test_optional_qtwayland_plugin_is_checked_when_present(self):
+        self.plugin.parent.mkdir(parents=True)
+        self.plugin.write_bytes(elf())
+        self.assertEqual(validate_package(self.root), [])
+
+    def test_optional_plugin_wrong_architecture_rejected(self):
+        self.plugin.parent.mkdir(parents=True)
+        self.plugin.write_bytes(elf(machine=62))
+        self.assert_problem("QtWayland plugin is not ARM64")
 
     def test_valid_versioned_so_symlink_does_not_duplicate_or_leave_pkg(self):
         (self.lib.parent / "libQt6WaylandCompositor.so.6").symlink_to(self.lib.name)
@@ -62,30 +72,18 @@ class TestQtWaylandPackage(unittest.TestCase):
         self.lib.write_bytes(elf()[:64])
         self.assert_problem("compositor library has no valid ARM64")
 
-    def test_missing_platform_plugin(self):
-        self.plugin.unlink()
-        self.assert_problem("missing plugins/platforms")
-
-    def test_plugin_outside_platforms(self):
-        alternate = self.plugin.parent.parent / "imageformats" / self.plugin.name
-        alternate.parent.mkdir(parents=True)
-        self.plugin.rename(alternate)
-        self.assert_problem("missing plugins/platforms")
-
-    def test_wrong_cpu_plugin(self):
-        self.plugin.write_bytes(elf(machine=62))
-        self.assert_problem("plugins have no valid ARM64")
-
     def test_external_symlink_is_rejected(self):
+        self.plugin.parent.mkdir(parents=True)
         escaping = self.plugin.parent / "external.so"
         escaping.symlink_to("/etc/passwd")
         self.assert_problem("external packaged symlink")
 
     def test_not_confused_by_host_elf(self):
         self.lib.write_bytes(elf(machine=62))
+        self.plugin.parent.mkdir(parents=True)
         self.plugin.write_bytes(elf(machine=62))
         self.assert_problem("compositor library has no valid ARM64")
-        self.assert_problem("plugins have no valid ARM64")
+        self.assert_problem("QtWayland plugin is not ARM64")
 
 
 if __name__ == "__main__":
