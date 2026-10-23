@@ -11,6 +11,15 @@ on:
       - 'tests/test_watch3_qtwayland_package.py'
       - 'tools/check_watch3_graphics_image_env.py'
       - 'tests/test_watch3_graphics_image_env.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-qtwayland-package-validator.yml'
+      - 'tools/validate_watch3_qtwayland_package.py'
+      - 'tools/validate_watch3_graphics_rootfs.py'
+      - 'tests/test_watch3_qtwayland_package.py'
+      - 'tools/check_watch3_graphics_image_env.py'
+      - 'tests/test_watch3_graphics_image_env.py'
   workflow_dispatch:
 
 permissions:
