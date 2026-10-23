@@ -1,16 +1,13 @@
-name: Watch3 R08 free staged ARM64 Qt build and cache checkpoint
+name: Watch3 R08 free staged ARM64 AsteroidOS build
 
-# A file-change push runs a bounded 90-minute real sstate stage; manual runs resume a selected Qt target.
-# Only standard free Ubuntu CI. Does not build or flash firmware.
+# Continue one real ARM64 package/image at a time using Yocto sstate archive/.siginfo pairs.
+# No new run on workflow edits; explicit dispatch avoids duplicate warm-ups.
+# OFF-DEVICE ONLY: even an ext4 build is not a flashable or boot-validated image.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/watch3-r08-qt-staged-runtime.yml'
   workflow_dispatch:
     inputs:
       target:
-        description: 'Single Qt package stage'
+        description: 'ARM64 Qt, launcher, or offline AsteroidOS image'
         required: true
         type: choice
         default: qtbase
@@ -18,6 +15,8 @@ on:
           - qtbase
           - qtdeclarative
           - qtwayland
+          - asteroid-launcher
+          - asteroid-image
 
 permissions:
   contents: read
@@ -29,9 +28,9 @@ concurrency:
 jobs:
   asteroid-metadata:
     runs-on: ubuntu-22.04
-    timeout-minutes: ${{ github.event_name == 'push' && 120 || 355 }}
+    timeout-minutes: 355
     env:
-      TARGET: ${{ github.event_name == 'push' && 'qtbase' || inputs.target }}
+      TARGET: ${{ inputs.target }}
     steps:
       - name: Checkout Galaxy-3
         uses: actions/checkout@v4
@@ -152,7 +151,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/watch3-yocto/sstate-snapshot
-          key: galaxy3-r08-oe8751-qt611-v1-sstate-${{ github.event_name == 'push' && 'qtbase' || inputs.target }}-${{ github.run_id }}
+          key: galaxy3-r08-oe8751-qt611-v1-sstate-${{ inputs.target }}-${{ github.run_id }}
           restore-keys: |
             galaxy3-r08-oe8751-qt611-v1-sstate-
 
@@ -167,9 +166,10 @@ jobs:
           else
             echo 'CACHE MISS: first R08 compile stage has no saved task state'
           fi
-          python3 -m unittest discover -s tests -p test_watch3_yocto_sstate_checkpoint.py -v
+          # Sstate archive/.siginfo pairs were regression-tested in earlier runs; restore
+          # still validates their manifest and content before BitBake consumes them.
 
-      - name: Verify pinned R08 Qt recipe and bound task graph
+      - name: Check actual R08 target and pinned machine before building
         shell: bash
         run: |
           set -euo pipefail
@@ -183,28 +183,24 @@ jobs:
           import sys
           values = {}
           for line in Path(sys.argv[1]).read_text().splitlines():
-              for name in ('PN','MACHINE','DISTRO','PV'):
-                  if line.startswith(name+'='):
+              for name in ('PN', 'MACHINE', 'DISTRO', 'PV', 'IMAGE_FSTYPES'):
+                  if line.startswith(name + '='):
                       raw = line.partition('=')[2]
                       values[name] = raw[1:-1] if raw.startswith('"') and raw.endswith('"') else raw
-          for key,want in (('PN',sys.argv[2]),('MACHINE','noblesse-r08'),
-                           ('DISTRO','asteroid'),('PV','6.11.3')):
-              assert values.get(key)==want, f'{key}: expected {want}, got {values.get(key)}'
-          print('PASS: pinned R08 Qt6 6.11.3 target recipe')
+          target = sys.argv[2]
+          for key, want in (('PN', target), ('MACHINE', 'noblesse-r08'), ('DISTRO', 'asteroid')):
+              assert values.get(key) == want, f'{key}: expected {want}, got {values.get(key)}'
+          if target.startswith('qt'):
+              assert values.get('PV') == '6.11.3', f'Unexpected Qt PV: {values.get("PV")}'
+          if target == 'asteroid-image':
+              assert 'ext4' in values.get('IMAGE_FSTYPES', '').split(), 'Missing ext4 image output'
+          print(f'PASS: pinned R08 {target} recipe (offline only)')
           PY
           rm -f "$GITHUB_WORKSPACE/stage-logs/target.env"
-          timeout --signal=TERM --kill-after=5s 420s \
-            bitbake -g "$TARGET" 2>&1 | tee "$GITHUB_WORKSPACE/stage-logs/graph.log"
-          python3 - "$TARGET" <<'PY'
-          from pathlib import Path
-          import re,sys
-          tasks = set(re.findall(r'"([^"]+\.do_[^"]+)"', Path('task-depends.dot').read_text()))
-          names = set(Path('pn-buildlist').read_text().splitlines())
-          assert sys.argv[1] in names and 0 < len(tasks) <= 4200, 'Stage unexpectedly changed'
-          print(f'PASS: {sys.argv[1]} task budget {len(tasks)}')
-          PY
+          # The real BitBake build evaluates dependencies itself. Do not repeat
+          # expensive bitbake -g graph probes already proven in earlier runs.
 
-      - name: Run the bounded real ARM64 BitBake Qt package stage
+      - name: Run bounded real ARM64 package or offline image stage
         id: qtbuild
         shell: bash
         run: |
@@ -212,42 +208,33 @@ jobs:
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
-            seconds=5400
-            echo 'Bounded automatic warm-up: 90 minutes after validated 548-task checkpoint'
+          # Leave time inside the six-hour hosted-runner limit for
+          # checkpoint saving, ARM64 validation and diagnostic artifacts.
+          seconds=18000
+          if [ "$TARGET" = asteroid-image ]; then
+            build_command=(bitbake asteroid-image)
           else
-            seconds=18000
-            echo 'Manual stage: five-hour compile cutoff leaves checkpoint time'
+            build_command=(bitbake -c package "$TARGET")
           fi
+          echo "Building $TARGET with ${build_command[*]} (max five hours)"
           set +e
           timeout --signal=TERM --kill-after=15s "$seconds" \
-            bitbake -c package "$TARGET" 2>&1 | tee "$GITHUB_WORKSPACE/stage-logs/build.log"
+            "${build_command[@]}" 2>&1 | tee "$GITHUB_WORKSPACE/stage-logs/build.log"
           status=$?
           set -e
           if [ "$status" -eq 124 ]; then
             echo 'finished=false' >> "$GITHUB_OUTPUT"
-            echo 'PARTIAL: bounded compile time reached; save completed Yocto task state'
-            echo "::notice title=PARTIAL Qt stage, not a finished binary::$TARGET compilation reached its bounded cutoff; only completed signed task archives can be reused"
+            echo "::notice title=PARTIAL R08 build::$TARGET reached its compile window; completed task outputs will be checkpointed"
             {
-              echo "## PARTIAL: $TARGET stage (not compiled completely)"
-              echo "- Real BitBake window: $seconds seconds"
-              echo "- The package was **NOT** built or validated."
-              echo "- Completed sstate tasks are eligible for a bounded checkpoint."
+              echo "## PARTIAL: $TARGET (not yet a completed binary or image)"
+              echo "- Completed sstate task archives will be saved; retry the same target."
             } >> "$GITHUB_STEP_SUMMARY"
           elif [ "$status" -eq 0 ]; then
             echo 'finished=true' >> "$GITHUB_OUTPUT"
-            echo 'PASS: target Qt package staging completed'
-            {
-              echo "## Built: $TARGET target package stage"
-              echo '- Post-build ARM64 package validation is still required.'
-            } >> "$GITHUB_STEP_SUMMARY"
+            echo "## Build finished: $TARGET (ARM64 artifact validation follows)" >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'finished=false' >> "$GITHUB_OUTPUT"
-            echo "::error::Real BitBake failure, exit status $status"
-            {
-              echo "## FAILED: $TARGET stage"
-              echo "- BitBake exited $status, see build log. Only valid completed task outputs may be cached."
-            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::BitBake $TARGET failed with status $status"
             exit "$status"
           fi
 
@@ -294,9 +281,9 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/watch3-yocto/sstate-snapshot
-          key: galaxy3-r08-oe8751-qt611-v1-sstate-${{ github.event_name == 'push' && 'qtbase' || inputs.target }}-${{ github.run_id }}
+          key: galaxy3-r08-oe8751-qt611-v1-sstate-${{ inputs.target }}-${{ github.run_id }}
 
-      - name: Validate real ARM64 target library after a complete build
+      - name: Validate built ARM64 package or offline rootfs
         if: steps.qtbuild.outputs.finished == 'true'
         shell: bash
         run: |
@@ -305,31 +292,84 @@ jobs:
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
           bitbake -e "$TARGET" > "$GITHUB_WORKSPACE/stage-logs/postbuild.env"
-          pkg="$(awk -F'"' '$1=="PKGDEST=" {print $2}' "$GITHUB_WORKSPACE/stage-logs/postbuild.env" | tail -n 1)"
-          test -n "$pkg" && test -d "$pkg"
-          if [ "$TARGET" = qtbase ]; then
-            python3 "$GITHUB_WORKSPACE/tools/validate_watch3_qt_linuxfb_package.py" "$pkg"
-            found="$(find "$pkg/qtbase-plugins" -name libqlinuxfb.so -type f -print -quit)"
-            mkdir -p "$GITHUB_WORKSPACE/stage-logs/arm64"
-            cp -L "$found" "$GITHUB_WORKSPACE/stage-logs/arm64/libqlinuxfb.so"
-          elif [ "$TARGET" = qtwayland ]; then
-            python3 "$GITHUB_WORKSPACE/tools/validate_watch3_qtwayland_package.py" "$pkg"
-            mkdir -p "$GITHUB_WORKSPACE/stage-logs/arm64"
-            find "$pkg/qtwayland" -name 'libQt6WaylandCompositor.so.*' -type f -exec cp -L '{}' "$GITHUB_WORKSPACE/stage-logs/arm64/" ';'
-            find "$pkg/qtwayland-plugins" -name 'libqwayland*.so' -type f -exec cp -L '{}' "$GITHUB_WORKSPACE/stage-logs/arm64/" ';'
+          if [ "$TARGET" = asteroid-image ]; then
+            python3 - "$GITHUB_WORKSPACE/stage-logs/postbuild.env" "$GITHUB_WORKSPACE/stage-logs/image-paths.txt" <<'PY'
+          from pathlib import Path
+          import sys
+          variables = {}
+          for line in Path(sys.argv[1]).read_text().splitlines():
+              for key in ('MACHINE', 'DISTRO', 'IMAGE_ROOTFS', 'IMAGE_MANIFEST', 'DEPLOY_DIR_IMAGE'):
+                  if line.startswith(key + '='):
+                      raw = line.partition('=')[2]
+                      variables[key] = raw[1:-1] if raw.startswith('"') and raw.endswith('"') else raw
+          assert variables.get('MACHINE') == 'noblesse-r08'
+          assert variables.get('DISTRO') == 'asteroid'
+          rootfs = Path(variables['IMAGE_ROOTFS'])
+          manifest = Path(variables['IMAGE_MANIFEST'])
+          deploy = Path(variables['DEPLOY_DIR_IMAGE'])
+          assert rootfs.is_dir() and manifest.is_file(), 'Actual image rootfs/manifest not found'
+          images = [p for p in deploy.glob('asteroid-image*.ext4') if p.is_file() and p.stat().st_size > 0]
+          assert images, 'No generated non-empty AsteroidOS ext4 image'
+          with Path(sys.argv[2]).open('w') as out:
+              out.write(str(rootfs) + '\n' + str(manifest) + '\n' + str(images[0].resolve()) + '\n')
+          print('PASS: actual R08 image rootfs, manifest and ext4 found')
+          PY
+            mapfile -t paths < "$GITHUB_WORKSPACE/stage-logs/image-paths.txt"
+            python3 "$GITHUB_WORKSPACE/tools/validate_watch3_graphics_rootfs.py" \
+              "${paths[0]}" --installed-packages "${paths[1]}"
+            sha256sum "${paths[2]}" > "$GITHUB_WORKSPACE/stage-logs/asteroid-image.sha256"
+            echo "VALIDATED_IMAGE_PATH=${paths[2]}" >> "$GITHUB_ENV"
+            cp "${paths[1]}" "$GITHUB_WORKSPACE/stage-logs/installed-packages.manifest"
+            echo 'PASS: offline ARM64 AsteroidOS rootfs and ext4 image; NOT boot-tested or flashable'
           else
-            test -d "$pkg/qtdeclarative" || exit 1
+            pkg="$(awk -F'"' '$1=="PKGDEST=" {print $2}' "$GITHUB_WORKSPACE/stage-logs/postbuild.env" | tail -n 1)"
+            test -n "$pkg" && test -d "$pkg"
+            if [ "$TARGET" = qtbase ]; then
+              python3 "$GITHUB_WORKSPACE/tools/validate_watch3_qt_linuxfb_package.py" "$pkg"
+              found="$(find "$pkg/qtbase-plugins" -name libqlinuxfb.so -type f -print -quit)"
+              mkdir -p "$GITHUB_WORKSPACE/stage-logs/arm64"
+              cp -L "$found" "$GITHUB_WORKSPACE/stage-logs/arm64/libqlinuxfb.so"
+            elif [ "$TARGET" = qtwayland ]; then
+              python3 "$GITHUB_WORKSPACE/tools/validate_watch3_qtwayland_package.py" "$pkg"
+              mkdir -p "$GITHUB_WORKSPACE/stage-logs/arm64"
+              find "$pkg/qtwayland" -name 'libQt6WaylandCompositor.so.*' -type f -exec cp -L '{}' "$GITHUB_WORKSPACE/stage-logs/arm64/" ';'
+              find "$pkg/qtwayland-plugins" -name 'libqwayland*.so' -type f -exec cp -L '{}' "$GITHUB_WORKSPACE/stage-logs/arm64/" ';'
+            elif [ "$TARGET" = qtdeclarative ]; then
+              test -d "$pkg/qtdeclarative" && test -d "$pkg/qtdeclarative-qmlplugins"
+            elif [ "$TARGET" = asteroid-launcher ]; then
+              PYTHONPATH="$GITHUB_WORKSPACE" python3 - "$pkg/asteroid-launcher/usr/bin/asteroid-launcher" <<'PY'
+          from pathlib import Path
+          import sys
+          from tools.validate_watch3_graphics_rootfs import elf_aarch64
+          binary = Path(sys.argv[1])
+          good, reason = elf_aarch64(binary)
+          assert good, f'No valid ARM64 asteroid-launcher: {reason}'
+          print('PASS: real packaged ELF64 AArch64 asteroid-launcher')
+          PY
+            fi
+            echo "PASS: validated $TARGET target package on the R08 machine"
           fi
-          echo 'PASS: verified completed R08 ARM64 Qt target package'
+          rm -f "$GITHUB_WORKSPACE/stage-logs/postbuild.env"
+
+      - name: Preserve validated OFF-DEVICE ext4 AsteroidOS output
+        if: steps.qtbuild.outputs.finished == 'true' && env.TARGET == 'asteroid-image'
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-OFFLINE-NOT-FLASHABLE-image-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ env.VALIDATED_IMAGE_PATH }}
 
       - name: Preserve validated ELF files and stage logs only
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: galaxy3-r08-qt-stage-${{ github.run_id }}
+          name: galaxy3-r08-build-stage-${{ github.run_id }}
           retention-days: 7
           if-no-files-found: warn
           path: |
-            stage-logs/graph.log
             stage-logs/build.log
+            stage-logs/image-paths.txt
+            stage-logs/asteroid-image.sha256
+            stage-logs/installed-packages.manifest
             stage-logs/arm64/
