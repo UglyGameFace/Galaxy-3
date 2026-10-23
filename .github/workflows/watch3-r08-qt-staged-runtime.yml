@@ -1,6 +1,6 @@
 name: Watch3 R08 free staged ARM64 AsteroidOS build
 
-# Continue one real ARM64 package/image at a time using signed Yocto sstate.
+# Continue one real ARM64 package/image at a time using Yocto sstate archive/.siginfo pairs.
 # No new run on workflow edits; explicit dispatch avoids duplicate warm-ups.
 # OFF-DEVICE ONLY: even an ext4 build is not a flashable or boot-validated image.
 on:
@@ -166,7 +166,7 @@ jobs:
           else
             echo 'CACHE MISS: first R08 compile stage has no saved task state'
           fi
-          # Signed cache pairs were regression-tested in earlier runs; restore
+          # Sstate archive/.siginfo pairs were regression-tested in earlier runs; restore
           # still validates their manifest and content before BitBake consumes them.
 
       - name: Check actual R08 target and pinned machine before building
@@ -224,7 +224,7 @@ jobs:
           set -e
           if [ "$status" -eq 124 ]; then
             echo 'finished=false' >> "$GITHUB_OUTPUT"
-            echo "::notice title=PARTIAL R08 build::$TARGET reached its compile window; signed task outputs will be checkpointed"
+            echo "::notice title=PARTIAL R08 build::$TARGET reached its compile window; completed task outputs will be checkpointed"
             {
               echo "## PARTIAL: $TARGET (not yet a completed binary or image)"
               echo "- Completed sstate task archives will be saved; retry the same target."
