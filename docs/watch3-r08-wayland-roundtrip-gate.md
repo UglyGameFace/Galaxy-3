@@ -308,17 +308,35 @@ pairs / 270,797,636 bytes** under
 This does **not** mean 406 of 2,171 overall tasks are necessarily complete
 or that QtBase package assembly passed; the ARM64 plugin validator was skipped.
 
-A [fresh-runner 406-pair BitBake signature replay #39884316255](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39884316255)
-was started to verify the larger snapshot against actual BitBake dry-run
-task hashes, rather than assuming that archive restoration alone implies
-a matching cache.
+The [fresh-runner 406-pair BitBake signature replay #39884316255](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39884316255)
+**passed**: pinned BitBake on a separate free runner reported
+**Wanted 719 / Local 406 / Mirrors 0 / Missed 313 / Current 0
+(56% sstate match)**. All 406 signatures matched.
 
 The fifth [60-minute bounded QtBase stage #39884432214](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39884432214)
-was started with the goal of completing LLVM and other dependency tasks.
-Its total GitHub job cap is 90 minutes (including setup/checkpoint time).
-Both runs were **still in progress when this entry was updated**. The
-manual five-hour cutoff, 4 GiB snapshot cap, pinned source revisions,
-free runner, disk/inode checks and nonflashable scope remain unchanged.
+also **passed its bounded checkpoint workflow**. It restored 406 pairs,
+confirmed those 406 BitBake matches, and successfully completed
+`llvm-tblgen-native` compilation, installation and sysroot population.
+During the same run, native ICU and target Wayland completed their
+compile and sysroot tasks. The stage was interrupted by the planned
+3,600-second compile cutoff, **not a BitBake build failure**.
+It saved a new checkpoint of **548 complete .tar.zst + .siginfo pairs,
+582,168,674 bytes** under cache key
+`galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-39884432214`.
+No QtBase package completion or ARM64 plugin validation was claimed.
+
+An independent [548-pair BitBake replay #39896644648](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39896644648)
+now requires all 548 real task signatures to match on a fresh runner
+before it passes. The next [90-minute QtBase stage #39896690811](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39896690811)
+restores the latest compatible snapshot, executes at most 5,400
+seconds of real BitBake tasks, then preserves complete signed sstate
+pairs in a 4 GiB-cap checkpoint. The GitHub job cap is 120 minutes;
+the manual five-hour cutoff, tested source pins, disk/inode checks and
+no-firmware/no-flashing scope remain unchanged.
+
+**Both newer runs were in progress when this documentation was updated.**
+Do not treat their initialization as a tested replay, cache growth,
+completed QtBase binary, or usable watch firmware.
 
 Both Qt build workflows now use **one common pinned cache restore prefix**
 (`galaxy3-r08-oe8751-qt611-v1-sstate-`) rather than preferring a
