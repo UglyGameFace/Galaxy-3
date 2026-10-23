@@ -9,6 +9,8 @@ on:
       - 'tools/validate_watch3_qtwayland_package.py'
       - 'tools/validate_watch3_graphics_rootfs.py'
       - 'tests/test_watch3_qtwayland_package.py'
+      - 'tools/check_watch3_graphics_image_env.py'
+      - 'tests/test_watch3_graphics_image_env.py'
   workflow_dispatch:
 
 permissions:
@@ -24,19 +26,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile tools/validate_watch3_qtwayland_package.py tests/test_watch3_qtwayland_package.py
+          python3 -m py_compile \
+            tools/validate_watch3_qtwayland_package.py \
+            tools/check_watch3_graphics_image_env.py \
+            tests/test_watch3_qtwayland_package.py \
+            tests/test_watch3_graphics_image_env.py
           python3 -m unittest discover -s tests -p 'test_watch3_qtwayland_package.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_graphics_image_env.py' -v
           python3 - <<'PY'
           from pathlib import Path
           source = Path('tools/validate_watch3_qtwayland_package.py').read_text()
           required = (
               'qtwayland-plugins',
               'libQt6WaylandCompositor.so.*',
-              'libqwayland*.so',
+              'QtBase',
               'elf_aarch64',
               'external packaged symlink',
           )
           for phrase in required:
               assert phrase in source, f'Missing QtWayland target package contract: {phrase}'
-          print('PASS: QtWayland target post-build validation is ready, no ARM64 build requested')
+          print('PASS: QtWayland compositor package and QtBase-owned QPA contract covered by regression tests')
           PY
