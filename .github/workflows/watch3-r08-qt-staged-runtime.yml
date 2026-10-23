@@ -373,3 +373,18 @@ jobs:
             stage-logs/asteroid-image.sha256
             stage-logs/installed-packages.manifest
             stage-logs/arm64/
+
+      # A timed-out package is not a successful build. Keep this AFTER the
+      # always() checkpoint and artifact steps so partial work is preserved.
+      - name: Mark unfinished target as incomplete after saving checkpoint
+        if: ${{ always() && steps.qtbuild.outputs.finished == 'false' }}
+        shell: bash
+        run: |
+          echo "::error title=Incomplete ARM64 target::$TARGET did not complete within the bounded BitBake window; see checkpoint/cache steps before rerunning."
+          {
+            echo "## INCOMPLETE: $TARGET"
+            echo "- The target binary/image was not built or validated."
+            echo "- Completed task archives were checkpointed if the cache steps succeeded."
+            echo "- Re-run the same target to continue from available compatible sstate."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
