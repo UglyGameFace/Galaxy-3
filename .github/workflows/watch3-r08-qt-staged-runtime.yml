@@ -47,6 +47,28 @@ jobs:
             exit 1
           fi
           echo 'PASS: available free runner supports bounded machine configuration package stage'
+      # Yocto builds its own toolchain. These preinstalled SDKs are unrelated
+      # to R08 and occupied disk we need for 7,584 image dependency tasks.
+      - name: Reclaim unused GitHub-hosted SDK space for offline image
+        if: env.TARGET == 'asteroid-image'
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h "$GITHUB_WORKSPACE"
+          for directory in \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /usr/local/share/powershell \
+            /usr/local/share/boost \
+            /opt/hostedtoolcache; do
+            if [ -d "$directory" ] && [ ! -L "$directory" ]; then
+              echo "Removing unused preinstalled SDK: $directory"
+              sudo rm -rf -- "$directory"
+            fi
+          done
+          df -h "$GITHUB_WORKSPACE"
+          # No kernel, firmware, Yocto layer, Actions runner or sstate path removed.
+
       - name: Install metadata parsing prerequisites
         shell: bash
         run: |
@@ -123,7 +145,15 @@ jobs:
           mkdir -p "$HOME/.cache/watch3-yocto/sstate-cache" "$HOME/.cache/watch3-yocto/downloads"
           printf 'SSTATE_DIR = "%s/.cache/watch3-yocto/sstate-cache"\n' "$HOME" >> build/conf/local.conf
           printf 'DL_DIR = "%s/.cache/watch3-yocto/downloads"\n' "$HOME" >> build/conf/local.conf
-          echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},8G,100K"' >> build/conf/local.conf
+          if [ "$TARGET" = 'asteroid-image' ]; then
+            # Drop completed recipe workdirs after packaging, not task archives.
+            # Keep more than enough free space for a GitHub cache upload even
+            # if BitBake must stop to protect the runner.
+            echo 'INHERIT += "rm_work"' >> build/conf/local.conf
+            echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},20G,100K"' >> build/conf/local.conf
+          else
+            echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},8G,100K"' >> build/conf/local.conf
+          fi
       - name: Check that inode safety limit fits this free runner
         shell: bash
         run: |
@@ -137,10 +167,14 @@ jobs:
           import os
           config = Path('build/conf/local.conf').read_text()
           limits = [line for line in config.splitlines() if line.startswith('BB_DISKMON_DIRS = ')]
-          assert len(limits) == 1 and limits[0].endswith(',8G,100K"'), 'Unsafe BitBake disk/inode limit'
+          image = os.environ['TARGET'] == 'asteroid-image'
+          stop_gib = 20 if image else 8
+          assert len(limits) == 1 and limits[0].endswith(f',{stop_gib}G,100K"'), 'Unsafe BitBake disk/inode limit'
+          if image:
+              assert 'INHERIT += "rm_work"' in config, 'Image recipe workdir cleanup not enabled'
           st = os.statvfs('build')
           disk_gib = st.f_bavail * st.f_frsize / 1024**3
-          print(f'Free disk: {disk_gib:.1f} GiB; stop limit: 8 GiB')
+          print(f'Free disk: {disk_gib:.1f} GiB; stop limit: {stop_gib} GiB')
           assert disk_gib >= 20, 'Free disk too low for this build'
           if st.f_files > 0 and st.f_favail >= 0:
               print(f'Free inodes: {st.f_favail:,}; stop limit: 102,400')
@@ -238,7 +272,7 @@ jobs:
             exit "$status"
           fi
 
-      - name: Checkpoint up to 4 GiB of completed signature-matched tasks
+      - name: Checkpoint up to 6 GiB of completed signature-matched tasks
         id: checkpoint
         if: always()
         shell: bash
@@ -252,13 +286,15 @@ jobs:
             exit 0
           fi
           free_kib="$(df -Pk "$HOME" | awk 'NR==2 {print $4}')"
-          if (( free_kib < 10 * 1024 * 1024 )); then
+          # The checkpoint helper hardlinks immutable archive/sidecar pairs
+          # instead of copying them, preserving disk for Actions cache upload.
+          if (( free_kib < 12 * 1024 * 1024 )); then
             echo 'present=false' >> "$GITHUB_OUTPUT"
             echo 'Skipping cache duplication with insufficient free disk'
             exit 0
           fi
           python3 "$GITHUB_WORKSPACE/tools/watch3_yocto_sstate_checkpoint.py" \
-            checkpoint "$source" "$dest" --max-mib 4096
+            checkpoint "$source" "$dest" --max-mib 6144
           python3 - "$dest/watch3-sstate-manifest.json" "$GITHUB_OUTPUT" <<'PY'
           import json
           from pathlib import Path
@@ -267,7 +303,7 @@ jobs:
           with Path(sys.argv[2]).open('a') as f:
               f.write("present=" + ("true" if state['archive_pairs'] else "false") + "\n")
           summary = (f"- Real completed sstate pairs saved: **{state['archive_pairs']}**\\n"
-                     f"- Portable snapshot: **{state['bytes']/1024**2:.1f} MiB** (4 GiB cap)\\n"
+                     f"- Portable snapshot: **{state['bytes']/1024**2:.1f} MiB** (6 GiB cap)\\n"
                      f"- Omitted for size: **{state['skipped_pairs']}** pairs\\n"
                      "- A saved checkpoint is **not** a completed Qt binary.\\n")
           with Path(__import__('os').environ['GITHUB_STEP_SUMMARY']).open('a') as out:
@@ -382,7 +418,7 @@ jobs:
         if: ${{ always() && steps.qtbuild.outputs.finished == 'false' }}
         shell: bash
         run: |
-          echo "::error title=Incomplete ARM64 target::$TARGET did not complete within the bounded BitBake window; see checkpoint/cache steps before rerunning."
+          echo "::error title=Incomplete ARM64 target::$TARGET did not complete; inspect BitBake errors, disk guard, timeout and cache steps before retrying."
           {
             echo "## INCOMPLETE: $TARGET"
             echo "- The target binary/image was not built or validated."

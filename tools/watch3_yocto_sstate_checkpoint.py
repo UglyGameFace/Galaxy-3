@@ -8,7 +8,9 @@ is never modified. A snapshot is a *subset*, not a proof of warm build.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
+import os
 from pathlib import Path
 import shutil
 
@@ -17,6 +19,9 @@ import shutil
 PREFERRED = (
     "qtbase", "qtdeclarative", "qtwayland", "qtshadertools",
     "qttools-native", "gcc-cross", "glibc", "binutils-cross",
+    # Keep expensive image-stage recipes that demonstrably compile on R08.
+    "asteroid-launcher", "qtmultimedia", "librsvg", "spirv-tools",
+    "gstreamer1.0", "systemd", "mesa", "linux-noblesse",
 )
 
 
@@ -51,6 +56,22 @@ def pairs(root: Path):
         yield file, sidecar
 
 
+def _stage_file(source: Path, target: Path) -> None:
+    """Hardlink immutable signature-addressed files on one filesystem.
+
+    Restoring/copying a multi-GiB Yocto snapshot once per run consumed
+    the last disk headroom on the free runner. Hardlinks preserve both paths
+    for cache upload without duplicating data blocks. Fall back on copies
+    for filesystems that do not support hardlinks.
+    """
+    try:
+        os.link(source, target)
+    except OSError as error:
+        if error.errno not in (errno.EXDEV, errno.EOPNOTSUPP, errno.EPERM):
+            raise
+        shutil.copy2(source, target)
+
+
 def checkpoint(source: Path, destination: Path, max_bytes: int) -> dict:
     source, destination = _validate_dirs(source, destination)
     if max_bytes < 1024:
@@ -75,7 +96,7 @@ def checkpoint(source: Path, destination: Path, max_bytes: int) -> dict:
         for file in (archive, siginfo):
             target = destination / file.relative_to(source)
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(file, target)
+            _stage_file(file, target)
         selected += 1
         total += size
     stats = {
@@ -104,7 +125,7 @@ def restore(source: Path, destination: Path) -> dict:
         for file in (archive, siginfo):
             target = destination / file.relative_to(source)
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(file, target)
+            _stage_file(file, target)
         copied += 1
     return {"restored_pairs": copied}
 
