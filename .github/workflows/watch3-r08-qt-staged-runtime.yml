@@ -1,4 +1,4 @@
-name: Watch3 R08 free staged ARM64 Qt build and cache checkpoint
+name: Watch3 R08 free staged ARM64 AsteroidOS build
 
 # Continue one real ARM64 package/image at a time using signed Yocto sstate.
 # No new run on workflow edits; explicit dispatch avoids duplicate warm-ups.
@@ -311,13 +311,14 @@ jobs:
           images = [p for p in deploy.glob('asteroid-image*.ext4') if p.is_file() and p.stat().st_size > 0]
           assert images, 'No generated non-empty AsteroidOS ext4 image'
           with Path(sys.argv[2]).open('w') as out:
-              out.write(str(rootfs) + '\n' + str(manifest) + '\n' + str(images[0]) + '\n')
+              out.write(str(rootfs) + '\n' + str(manifest) + '\n' + str(images[0].resolve()) + '\n')
           print('PASS: actual R08 image rootfs, manifest and ext4 found')
           PY
             mapfile -t paths < "$GITHUB_WORKSPACE/stage-logs/image-paths.txt"
             python3 "$GITHUB_WORKSPACE/tools/validate_watch3_graphics_rootfs.py" \
               "${paths[0]}" --installed-packages "${paths[1]}"
             sha256sum "${paths[2]}" > "$GITHUB_WORKSPACE/stage-logs/asteroid-image.sha256"
+            echo "VALIDATED_IMAGE_PATH=${paths[2]}" >> "$GITHUB_ENV"
             cp "${paths[1]}" "$GITHUB_WORKSPACE/stage-logs/installed-packages.manifest"
             echo 'PASS: offline ARM64 AsteroidOS rootfs and ext4 image; NOT boot-tested or flashable'
           else
@@ -357,13 +358,13 @@ jobs:
           name: galaxy3-r08-OFFLINE-NOT-FLASHABLE-image-${{ github.run_id }}
           retention-days: 7
           if-no-files-found: error
-          path: build/tmp/deploy/images/noblesse-r08/asteroid-image*.ext4
+          path: ${{ env.VALIDATED_IMAGE_PATH }}
 
       - name: Preserve validated ELF files and stage logs only
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: galaxy3-r08-qt-stage-${{ github.run_id }}
+          name: galaxy3-r08-build-stage-${{ github.run_id }}
           retention-days: 7
           if-no-files-found: warn
           path: |
