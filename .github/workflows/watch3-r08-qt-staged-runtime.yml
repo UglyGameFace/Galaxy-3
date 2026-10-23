@@ -333,7 +333,9 @@ jobs:
               python3 "$GITHUB_WORKSPACE/tools/validate_watch3_qtwayland_package.py" "$pkg"
               mkdir -p "$GITHUB_WORKSPACE/stage-logs/arm64"
               find "$pkg/qtwayland" -name 'libQt6WaylandCompositor.so.*' -type f -exec cp -L '{}' "$GITHUB_WORKSPACE/stage-logs/arm64/" ';'
-              find "$pkg/qtwayland-plugins" -name 'libqwayland*.so' -type f -exec cp -L '{}' "$GITHUB_WORKSPACE/stage-logs/arm64/" ';'
+              # Qt 6.11 builds Wayland client QPA in qtbase-plugins, not here.
+            # The actual final rootfs gate verifies both QtBase's QPA and this
+            # QtWayland compositor library on ARM64.
             elif [ "$TARGET" = qtdeclarative ]; then
               test -d "$pkg/qtdeclarative" && test -d "$pkg/qtdeclarative-qmlplugins"
             elif [ "$TARGET" = asteroid-launcher ]; then

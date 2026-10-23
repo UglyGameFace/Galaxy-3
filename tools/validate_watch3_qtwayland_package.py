@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Check real staged QtWayland target packages, never run ARM64 code on CI.
+"""Validate real ARM64 QtWayland compositor packages after BitBake packaging.
 
-Input is BitBake PKGDEST from 'bitbake -e qtwayland'.  The pinned meta-qt6
-recipe uses qt6.inc, which splits native platform plugins into
-qtwayland-plugins and shared libraries into qtwayland.  This gate is meant
-to run AFTER target packaging; metadata-only success is insufficient.
+In Qt 6.11 the Wayland *client QPA plugin* is built by QtBase, not QtWayland.
+QtWayland owns the compositor library; its optional plugin split can be empty.
+The final rootfs validator separately requires the client QPA in the image.
 """
 from __future__ import annotations
 
@@ -31,8 +30,6 @@ def validate_package(pkgdest: Path) -> list[str]:
     plugins = pkgdest / "qtwayland-plugins"
     if not runtime.is_dir():
         problems.append(f"missing qtwayland runtime package directory: {runtime}")
-    if not plugins.is_dir():
-        problems.append(f"missing qtwayland-plugins package directory: {plugins}")
 
     libs = [
         p for p in _files_within(runtime, "libQt6WaylandCompositor.so.*")
@@ -45,15 +42,13 @@ def validate_package(pkgdest: Path) -> list[str]:
         if not any(elf_aarch64(p)[0] for p in libs):
             problems.append("QtWayland compositor library has no valid ARM64 ELF64 binary")
 
-    platform_plugins = [
-        p for p in _files_within(plugins, "libqwayland*.so")
-        if p.parent.name == "platforms" and p.parent.parent.name == "plugins"
-    ]
-    if not platform_plugins:
-        problems.append("missing plugins/platforms/libqwayland*.so in qtwayland-plugins")
-    else:
-        if not any(elf_aarch64(p)[0] for p in platform_plugins):
-            problems.append("QtWayland QPA plugins have no valid ARM64 ELF64 binary")
+    # Qt 6.11 moved libqwayland*.so to QtBase. Do not require it here.
+    # If this recipe does ship other optional QtWayland plugins, verify their
+    # architecture rather than treating an empty ALLOW_EMPTY split as a failure.
+    if plugins.is_dir():
+        for plugin in _files_within(plugins, "*.so"):
+            if not elf_aarch64(plugin)[0]:
+                problems.append(f"QtWayland plugin is not ARM64 ELF64: {plugin}")
 
     # Reject deceptive symlinks leaving the staged package tree. Since BitBake
     # packages contain relative symlinks, a symlink resolving outside its
@@ -78,8 +73,8 @@ def main() -> int:
         for error in errors:
             print("FAIL[qtwayland]: " + error, file=sys.stderr)
         return 1
-    print("PASS[qtwayland]: packaged compositor lib + QPA Wayland plugin are ELF64 AArch64")
-    print("PASS[qtwayland]: required packages contain real files, not merely BitBake metadata")
+    print("PASS[qtwayland]: packaged compositor library is ELF64 AArch64")
+    print("PASS[qtwayland]: optional QtWayland plugins checked; client QPA belongs to QtBase")
     print("NOT TESTED: watch framebuffer, QPA plugin loading, graphical rootfs or boot")
     return 0
 

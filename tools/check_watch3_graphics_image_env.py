@@ -50,9 +50,11 @@ def check_graphics_image_closure(
         if pkg not in runtime:
             errors.append(f'asteroid-launcher RDEPENDS lacks {pkg}')
 
+    # Qt >= 6.10 moved the Wayland client QPA into QtBase. The QtWayland
+    # compositor is still required, but its -plugins package may be empty.
+    # The final rootfs check verifies real binaries of both components.
     for name, env, package, expected_path in (
         ('qtbase', qtbase, 'qtbase-plugins', '/plugins/'),
-        ('qtwayland', qtwayland, 'qtwayland-plugins', '/plugins/'),
         ('qtdeclarative', qtdeclarative, 'qtdeclarative-qmlplugins', '/qml'),
     ):
         if package not in words(env, 'PACKAGES'):
@@ -61,8 +63,10 @@ def check_graphics_image_closure(
         if expected_path not in files:
             errors.append(f'{package} FILES does not cover {expected_path}')
 
-    if not {'gui', 'linuxfb'}.issubset(words(qtbase, 'PACKAGECONFIG')):
-        errors.append('qtbase PACKAGECONFIG must include gui and linuxfb')
+    if not {'gui', 'linuxfb', 'wayland'}.issubset(words(qtbase, 'PACKAGECONFIG')):
+        errors.append('qtbase PACKAGECONFIG must include gui, linuxfb and wayland')
+    if 'qtwayland' not in words(qtwayland, 'PACKAGES'):
+        errors.append('qtwayland PACKAGES must contain its compositor library package')
     if 'wayland' not in words(qtwayland, 'REQUIRED_DISTRO_FEATURES'):
         errors.append('qtwayland REQUIRED_DISTRO_FEATURES lacks wayland')
     return errors
@@ -87,8 +91,9 @@ def main() -> int:
     if issues:
         return 1
     print('PASS[metadata]: R08 AsteroidOS image requests asteroid-launcher and Wayland')
-    print('PASS[metadata]: launcher hard-depends on LinuxFB, Wayland and QML plugin packages')
-    print('PASS[metadata]: effective Qt recipes split QPA and QML files into those packages')
+    print('PASS[metadata]: launcher has its upstream runtime dependencies')
+    print('PASS[metadata]: QtBase enables LinuxFB and Wayland client QPA; QtWayland supplies compositor')
+    print('PASS[metadata]: QtBase/QML runtime plugin packages have matching file mappings')
     print('NOT TESTED: target IPK contents, ARM64 image rootfs, watch framebuffer or boot')
     return 0
 
