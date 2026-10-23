@@ -296,13 +296,29 @@ was skipped correctly, because QtBase compilation was still incomplete.
 
 The preceding twelve-minute warm-ups repeatedly started major native
 toolchain compilation but stopped before some long tasks could finish.
-The next [bounded 35-minute real QtBase stage #39880334840](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39880334840)
-extends only the **automatic warm-up compile window** (from 720 to 2100
-seconds, total job cap 60 minutes) so tasks like `gcc-cross-aarch64`
-have more time to complete and become cacheable. This stage **was still
-running when the note was written**. The manual five-hour cutoff,
-4 GiB sstate snapshot cap, pinned sources, disk/inode checks and
-nonflashable scope are unchanged.
+The fourth [35-minute QtBase stage #39880334840](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39880334840)
+**passed its bounded checkpoint workflow**. The job restored all 186
+pairs, and BitBake reported **186 local matches of 719 sought (25%)**.
+Crucially, `gcc-cross-aarch64` finished `do_compile`, `do_install`
+and `do_populate_sysroot`. The stage time limit interrupted compilation
+later, after `llvm-tblgen-native` started its `do_compile` task.
+The final checkpoint successfully saved **406 complete signed sstate task
+pairs / 270,797,636 bytes** under
+`galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-39880334840`.
+This does **not** mean 406 of 2,171 overall tasks are necessarily complete
+or that QtBase package assembly passed; the ARM64 plugin validator was skipped.
+
+A [fresh-runner 406-pair BitBake signature replay #39884316255](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39884316255)
+was started to verify the larger snapshot against actual BitBake dry-run
+task hashes, rather than assuming that archive restoration alone implies
+a matching cache.
+
+The fifth [60-minute bounded QtBase stage #39884432214](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39884432214)
+was started with the goal of completing LLVM and other dependency tasks.
+Its total GitHub job cap is 90 minutes (including setup/checkpoint time).
+Both runs were **still in progress when this entry was updated**. The
+manual five-hour cutoff, 4 GiB snapshot cap, pinned source revisions,
+free runner, disk/inode checks and nonflashable scope remain unchanged.
 
 Both Qt build workflows now use **one common pinned cache restore prefix**
 (`galaxy3-r08-oe8751-qt611-v1-sstate-`) rather than preferring a
