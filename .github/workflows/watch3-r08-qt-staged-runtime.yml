@@ -208,7 +208,7 @@ jobs:
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
-          # Leave time inside the six-hour hosted-runner limit for signed
+          # Leave time inside the six-hour hosted-runner limit for
           # checkpoint saving, ARM64 validation and diagnostic artifacts.
           seconds=18000
           if [ "$TARGET" = asteroid-image ]; then
