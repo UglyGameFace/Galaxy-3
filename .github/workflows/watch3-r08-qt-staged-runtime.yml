@@ -154,9 +154,7 @@ jobs:
           path: ~/.cache/watch3-yocto/sstate-snapshot
           key: galaxy3-r08-oe8751-qt611-v1-sstate-${{ github.event_name == 'push' && 'qtbase' || inputs.target }}-${{ github.run_id }}
           restore-keys: |
-            galaxy3-r08-oe8751-qt611-v1-sstate-qtwayland-
-            galaxy3-r08-oe8751-qt611-v1-sstate-qtdeclarative-
-            galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-
+            galaxy3-r08-oe8751-qt611-v1-sstate-
 
       - name: Restore paired sstate archives to the active BitBake cache
         shell: bash
