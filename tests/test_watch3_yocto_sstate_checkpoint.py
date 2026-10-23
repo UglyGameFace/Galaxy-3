@@ -1,7 +1,6 @@
 """Tests for bounded portable Yocto shared-state cache pair snapshots."""
 import errno
 import json
-import os
 from pathlib import Path
 import sys
 import tempfile
@@ -59,6 +58,18 @@ class CacheTest(unittest.TestCase):
         snapshot = self.saved / archive.relative_to(self.source)
         self.assertEqual(archive.read_bytes(), snapshot.read_bytes())
         self.assertNotEqual(archive.stat().st_ino, snapshot.stat().st_ino)
+
+    def test_image_build_keeps_disk_headroom_for_checkpoint_upload(self):
+        # Cheap static guard: the disk-recovery fix must remain wired into
+        # the actual manual ARM64 workflow, not just this helper module.
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/watch3-r08-qt-staged-runtime.yml").read_text()
+        self.assertIn("Reclaim unused GitHub-hosted SDK space for offline image", workflow)
+        self.assertIn("INHERIT += \"rm_work\"", workflow)
+        self.assertIn('STOPTASKS,${TMPDIR},20G,100K', workflow)
+        self.assertIn("--max-mib 6144", workflow)
+        self.assertIn("if (( free_kib < 12 * 1024 * 1024 ))", workflow)
+        self.assertIn("if: always()", workflow)
 
     def test_prioritize_qt_over_misc_under_budget(self):
         other = self.create("zlib", length=800)
