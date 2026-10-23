@@ -64,7 +64,7 @@ def check_graphics_image_closure(
             errors.append(f'{package} FILES does not cover {expected_path}')
 
     if not {'gui', 'linuxfb', 'wayland'}.issubset(words(qtbase, 'PACKAGECONFIG')):
-        errors.append('qtbase PACKAGECONFIG must include gui and linuxfb')
+        errors.append('qtbase PACKAGECONFIG must include gui, linuxfb and wayland')
     if 'qtwayland' not in words(qtwayland, 'PACKAGES'):
         errors.append('qtwayland PACKAGES must contain its compositor library package')
     if 'wayland' not in words(qtwayland, 'REQUIRED_DISTRO_FEATURES'):
