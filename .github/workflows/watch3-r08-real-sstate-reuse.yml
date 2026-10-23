@@ -1,6 +1,6 @@
 name: Watch3 R08 verify real QtBase sstate reuse on fresh runner
 
-# Restore 108 task outputs from actual QtBase warm-up #39871045746.
+# Restore 406 real signed-task archives from QtBase warm-up #39880334840.
 # Validate BitBake cache matches on a separate free runner, without building.
 on:
   push:
@@ -140,10 +140,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/watch3-yocto/sstate-snapshot
-          key: galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-39871045746
+          key: galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-39880334840
           fail-on-cache-miss: true
 
-      - name: Check 108 previously compiled task archives and restore them intact
+      - name: Check 406 previously completed task archives and restore them intact
         shell: bash
         run: |
           set -euo pipefail
@@ -156,8 +156,8 @@ jobs:
           root = Path(sys.argv[1])
           data = json.loads((root / 'watch3-sstate-manifest.json').read_text())
           print('Snapshot from actual QtBase compile:', json.dumps(data, sort_keys=True))
-          assert data.get('archive_pairs') == 108, 'Original real QtBase checkpoint changed'
-          assert data.get('bytes') == 20199562, 'Original warm-up byte count changed'
+          assert data.get('archive_pairs') == 406, 'Original real QtBase checkpoint changed'
+          assert data.get('bytes') == 270797636, 'Original warm-up byte count changed'
           assert data.get('skipped_pairs') == 0
           PY
           python3 tools/watch3_yocto_sstate_checkpoint.py restore "$cache" "$active"
@@ -166,10 +166,10 @@ jobs:
           import sys
           archives = list(Path(sys.argv[1]).rglob('*.tar.zst'))
           with_sidecars = sum(p.with_name(p.name + '.siginfo').is_file() for p in archives)
-          assert len(archives) == 108 and with_sidecars == 108, (
+          assert len(archives) == 406 and with_sidecars == 406, (
               f'Wrong real restore count: {len(archives)} archives, {with_sidecars} signatures'
           )
-          print('PASS: restored original 108 real BitBake task archives and signatures')
+          print('PASS: restored 406 real BitBake task archives and signatures')
           PY
 
       - name: Ask actual BitBake whether restored real task state matches
@@ -209,12 +209,12 @@ jobs:
           wanted, local, mirrors, missed, current = map(int, reports[-1])
           print(f'Actual BitBake shared-state summary: Wanted={wanted} Local={local} '
                 f'Mirrors={mirrors} Missed={missed} Current={current}')
-          if local == 0:
-              raise SystemExit('FAIL: restored archives exist, but BitBake matched NONE; sstate replay not proven')
+          if local < 406:
+              raise SystemExit(f'FAIL: expected 406 local signature hits after restoring 406 paired archives; only got {local}')
           text = (
               '## Watch3 R08 real sstate reuse on fresh free GitHub runner\n\n'
-              '- Original QtBase warm-up: [#39871045746](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39871045746)\n'
-              '- Restored real completed task pairs: **108**\n'
+              '- Source checkpoint: [#39880334840](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39880334840)\n'
+              '- Restored real completed task pairs: **406**\n'
               f'- Real BitBake signature matches: **{local} local tasks**\n'
               f'- Remaining missed tasks: **{missed}**\n'
               '- Mode: **dry-run only, no target compilation or firmware**\n'
