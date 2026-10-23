@@ -276,11 +276,33 @@ Mirrors 0 / Missed 611 / Current 0 (15% cache match)**. This is verified
 *BitBake task-signature reuse*, not a claim that QtBase was compiled
 or that the 2,171 tasks were all satisfied from cache.
 
-The second [short QtBase warm-up #39874828416](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39874828416)
-is intended to extend the completed-task snapshot. Its result and
-incremental archive count had **not yet been verified** at this update;
-do not record more than 108 verified reusable task pairs until the
-second cache upload and signature check pass.
+The second [QtBase warm-up #39874828416](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39874828416)
+**completed its bounded run and saved 153 valid sstate archive + siginfo pairs**
+(36,162,243 bytes) under cache key
+`galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-39874828416`.
+Its BitBake initial `Sstate summary` confirmed **108 matching local
+tasks out of 719 sought**, and it ended after the planned twelve-minute
+compile window. No QtBase target package was completed.
+
+The third [QtBase warm-up #39875647454](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39875647454)
+then successfully restored **all 153 pairs** from that second snapshot.
+BitBake reported **153 / 719 matching local tasks (21% match)**,
+and the third workflow completed with **186 signed task archive pairs**
+(38,181,012 bytes) successfully saved under
+`galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-39875647454`.
+These are verified completed `sstate` tasks, *not* a percentage of
+the complete `qtbase` package build. Final ARM64 binary validation
+was skipped correctly, because QtBase compilation was still incomplete.
+
+The preceding twelve-minute warm-ups repeatedly started major native
+toolchain compilation but stopped before some long tasks could finish.
+The next [bounded 35-minute real QtBase stage #39880334840](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39880334840)
+extends only the **automatic warm-up compile window** (from 720 to 2100
+seconds, total job cap 60 minutes) so tasks like `gcc-cross-aarch64`
+have more time to complete and become cacheable. This stage **was still
+running when the note was written**. The manual five-hour cutoff,
+4 GiB sstate snapshot cap, pinned sources, disk/inode checks and
+nonflashable scope are unchanged.
 
 Both Qt build workflows now use **one common pinned cache restore prefix**
 (`galaxy3-r08-oe8751-qt611-v1-sstate-`) rather than preferring a
