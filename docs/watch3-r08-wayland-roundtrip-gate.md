@@ -269,18 +269,27 @@ cache key `galaxy3-r08-oe8751-qt611-v1-sstate-qtbase-39871045746`.
 The complete QtBase target package did **not** build.
 
 The [fresh-runner real-signature replay workflow](../.github/workflows/watch3-r08-real-sstate-reuse.yml)
-restores that **exact original cache key** and confirms the stored 108
-archive pairs before asking actual pinned BitBake for a dry-run
-`Sstate summary`. Its first [run #39874596692](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39874596692)
-had successfully restored all 108 pairs, but was still resolving the
-signature-match check at the time of this note. A successful cache
-download alone is not proof BitBake will hit those signatures.
+**passed** in [run #39874596692](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39874596692):
+a second standard free runner restored the **same 108 real signed-task
+archive pairs**, then pinned BitBake reported **Wanted 719 / Local 108 /
+Mirrors 0 / Missed 611 / Current 0 (15% cache match)**. This is verified
+*BitBake task-signature reuse*, not a claim that QtBase was compiled
+or that the 2,171 tasks were all satisfied from cache.
 
-A second [short QtBase warm-up #39874828416](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39874828416)
-started using the existing cache restore keys. That workflow now makes
-**PARTIAL** versus **completed and package-validated** status explicit.
-Neither a second warm-up success nor a complete QtBase target package
-has yet been verified.
+The second [short QtBase warm-up #39874828416](https://github.com/UglyGameFace/Galaxy-3/actions/runs/39874828416)
+is intended to extend the completed-task snapshot. Its result and
+incremental archive count had **not yet been verified** at this update;
+do not record more than 108 verified reusable task pairs until the
+second cache upload and signature check pass.
+
+Both Qt build workflows now use **one common pinned cache restore prefix**
+(`galaxy3-r08-oe8751-qt611-v1-sstate-`) rather than preferring a
+potentially older stage-specific snapshot over a newer one.
+Snapshots remain scoped to the tested machine, pinned OpenEmbedded
+revision, and Qt version, with no cross-target reuse.
+The build summary distinguishes **PARTIAL** completion from a fully built
+and ARM64-validated Qt binary; a successful *workflow* that only
+saved sstate is not a completed QtBase package.
 
 **Cost boundary:** GitHub's default Actions cache allowance is **10 GB
 per repository**; increasing it can incur charges. The project does not
