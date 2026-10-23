@@ -1,6 +1,6 @@
 name: Watch3 R08 free staged ARM64 Qt build and cache checkpoint
 
-# A file-change push runs a bounded 35-minute real sstate stage; manual runs resume a selected Qt target.
+# A file-change push runs a bounded 60-minute real sstate stage; manual runs resume a selected Qt target.
 # Only standard free Ubuntu CI. Does not build or flash firmware.
 on:
   push:
@@ -29,7 +29,7 @@ concurrency:
 jobs:
   asteroid-metadata:
     runs-on: ubuntu-22.04
-    timeout-minutes: ${{ github.event_name == 'push' && 60 || 355 }}
+    timeout-minutes: ${{ github.event_name == 'push' && 90 || 355 }}
     env:
       TARGET: ${{ github.event_name == 'push' && 'qtbase' || inputs.target }}
     steps:
@@ -213,8 +213,8 @@ jobs:
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            seconds=2100
-            echo 'Bounded automatic warm-up: 35 minutes to complete expensive gcc-cross and native tasks'
+            seconds=3600
+            echo 'Bounded automatic warm-up: 60 minutes to finish LLVM and other QtBase prerequisites'
           else
             seconds=18000
             echo 'Manual stage: five-hour compile cutoff leaves checkpoint time'
