@@ -68,11 +68,21 @@ class LegacyExt4Tests(unittest.TestCase):
         all(shutil.which(c) for c in ("mkfs.ext4", "dumpe2fs", "e2fsck")),
         "e2fsprogs unavailable")
     def test_old_e2fsck_inspects_mkfs_without_orphan_without_modifying(self):
+        import re
+        mkfs_version = subprocess.run(
+            ["mkfs.ext4", "-V"], capture_output=True, text=True, check=False)
+        match = re.search(r"mke2fs (\d+)\.(\d+)", mkfs_version.stdout + mkfs_version.stderr)
+        self.assertIsNotNone(match, "Cannot determine test mkfs.ext4 version")
+        major, minor = int(match[1]), int(match[2])
+        # e2fsprogs 1.46 does not recognize the new orphan_file flag at
+        # all. It already makes a legacy-compatible filesystem by default.
+        # 1.47+ recognizes it, so explicitly disable the modern default.
+        args = ["mkfs.ext4", "-F", "-q", "-i", "4096"]
+        if (major, minor) >= (1, 47):
+            args += ["-O", "^orphan_file"]
+        args.append(str(self.image))
         subprocess.run(["truncate", "-s", "32M", str(self.image)], check=True)
-        subprocess.run(
-            ["mkfs.ext4", "-F", "-q", "-i", "4096", "-O", "^orphan_file",
-             str(self.image)],
-            check=True, capture_output=True, text=True)
+        subprocess.run(args, check=True, capture_output=True, text=True)
         before = self.image.read_bytes()
         report = inspect(self.image)
         self.assertEqual(report["status"], "PASS_OFF_DEVICE_LEGACY_EXT4")
