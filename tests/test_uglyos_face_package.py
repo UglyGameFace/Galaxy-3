@@ -43,6 +43,24 @@ class UgLyOSPackageTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data if isinstance(data, bytes) else data.encode())
 
+    def test_workflow_creates_logdir_before_each_bitbake_redirect(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/watch3-r08-uglyos-face-package.yml").read_text()
+        steps = [
+            "Confirm real BitBake recipe and image dependency metadata",
+            "Build only UgLyOS watchface asset IPK (no Qt or full system)",
+            "Verify actual installed files and package staging against source",
+        ]
+        for name in steps:
+            with self.subTest(step=name):
+                head = "      - name: " + name
+                section = workflow.split(head, 1)[1].split("      - name:", 1)[0]
+                create = 'mkdir -p "$GITHUB_WORKSPACE/uglyos-logs"'
+                self.assertIn(create, section)
+                self.assertLess(section.index(create),
+                                section.index('source src/oe-core/oe-init-build-env'))
+                self.assertIn('"$GITHUB_WORKSPACE/uglyos-logs/', section)
+
     def test_unchanged_payload_is_verified(self):
         inspect_package(self.info, self.source)
 
