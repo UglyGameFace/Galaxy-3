@@ -8,6 +8,40 @@ The historical reference [CI #40112813921](https://github.com/UglyGameFace/Galax
 found KEXEC disabled and historical initramfs root=/dev/ram0, but did not
 prove the installed R840X uses those settings.
 
+## Actual Watch3 shell stream trace and protocol correction
+
+The October 24 physical Watch3 experiment reached:
+- TCP/26101 **PASS**; SDB `CNXN` **PASS**.
+- First read-only `/proc/version` opened an SDB stream using local ID 2,
+  then received `OKAY(remote_id=9, local_id=2)` followed by
+  `CLSE(sender_id=0, receiver_id=2)`, with **no readable WRTE data**.
+- Alternate `shell:0 cat /proc/version` attempt **timed out**. These are
+  two distinct symptoms. Neither proves access to the watch's shell.
+
+The ADB-family wire protocol traditionally reserves a zero-sender
+`CLSE` for refused `OPEN`, but the Android ADB implementation explicitly
+notes a legacy bug where `CLSE(0,local)` can also indicate a normal close
+*after a stream was opened*. Consequently **`CLSE(0,2)` after an `OKAY`
+is not by itself malformed**, and our original "invalid stream close"
+message was misleading. **Zero output is still not a successful command.**
+
+The revised client accepts that legacy close **only when actual `WRTE`
+content has arrived**; otherwise it reports that the watch acknowledged
+and closed the shell without providing any data. If a shell request times
+out it records only whether the stream opened and the number of payload
+frames and bytes received. No private command output is exposed.
+
+Sources:
+- https://android.googlesource.com/platform/packages/modules/adb/+/f35fe9f743e862149942c8713e9e5086ecbf903f/protocol.txt
+- https://android.googleid.googlesource.com/platform/packages/modules/adb/+/cfd2bdab2566dc69dea807f9c9690e19d9808a06/adb.cpp
+- https://github.com/RoboA-PLAYZ/blue-penny/blob/main/docs/tizen-sdb-protocol.md
+
+**Next physical action:** retry only the read-only diagnosis; if the watch
+again closes without data, record that precise response. Do not flash,
+bypass retail shell permissions, or claim that the first boot problem has
+been solved. An official SDB client transport would then be a more useful
+cross-check than inventing unlimited service names.
+
 ## Samsung shell-close compatibility note
 
 An **actual R840X SDB handshake** succeeded from Android/Termux on
