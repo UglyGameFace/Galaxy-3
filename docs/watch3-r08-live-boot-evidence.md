@@ -8,6 +8,57 @@ The historical reference [CI #40112813921](https://github.com/UglyGameFace/Galax
 found KEXEC disabled and historical initramfs root=/dev/ram0, but did not
 prove the installed R840X uses those settings.
 
+## Phone hotspot setup and connection diagnosis
+
+**Samsung explicitly supports using a mobile hotspot** for Tizen Galaxy Watch
+development. A hotspot-generated address (often 10.x.x.x instead of 192.168.x.x)
+is valid as long as it is the currently displayed **WATCH** Wi-Fi IP. Do not use
+your phone's hotspot gateway address or the example IP from this document.
+
+Before trying again:
+1. Watch: **Settings > About watch > Debugging = ON** (Tizen; not Wear OS ADB).
+2. Watch: **Settings > Connections > Wi-Fi > Always on**, connected directly
+   to your phone's active hotspot. Samsung recommends this only for debugging;
+   change back to Auto later to save battery.
+3. **Normally restart the watch once after enabling debugging**, as Samsung's
+   Tizen developer instructions recommend, then reconnect watch to hotspot.
+   Confirm the current watch IP again because it can change on reconnect.
+4. Keep the phone's hotspot enabled and Termux in the foreground.
+
+On Android/Termux with the latest Galaxy-3 code:
+
+```sh
+cd ~/Galaxy-3
+git pull --ff-only
+python tools/watch3_r08_android_sdb.py --watch-ip WATCH_IP --diagnose-only
+```
+
+Replace WATCH_IP with the actual numeric address shown on the watch.
+The diagnosis checks three phases individually: **TCP 26101**, **SDB protocol
+and authorization**, and a read-only /proc/version shell. It never prints the
+raw response, device IP, serial, RSA secret or unfiltered kernel command line.
+
+- **FAIL[tcp-refused]:** A watch or another endpoint actively refused port
+  26101. Check enabled Tizen debugging and normal restart.
+- **FAIL[tcp-timeout]:** No TCP reply. Verify the watch's current hotspot IP,
+  Wi-Fi connection, and whether the phone hotspot permits phone-to-client
+  connections. A hotspot does not guarantee client reachability.
+- **PASS[tcp] + FAIL[sdb]:** The port is open; investigate the experimental
+  SDB protocol or watch authorization rather than changing IP addresses.
+- **PASS[sdb] + FAIL[shell]:** SDB handshake worked but the read-only shell
+  was rejected, unavailable or returned unrecognized output.
+- **All PASS:** Run the same command *without* --diagnose-only to generate
+  ~/watch3-r08-boot-redacted.json (redacted report). Do not paste raw SDB
+  packets or secret outputs into a GitHub issue.
+
+If hotspot routing remains blocked, an ordinary shared Wi-Fi router is a
+possible alternative. No PC, root or firmware modification is needed for
+these read-only checks.
+
+Official sources:
+- https://developer.samsung.com/sdp/blog/en/2021/04/12/remote-device-manager-an-easy-way-to-launch-your-application-with-tizen-studio
+- https://developer.samsung.com/galaxy-watch-tizen/testing-your-app-on-galaxy-watch.html
+
 ## Method 0: Android-only direct SDB without a computer (experimental)
 
 We now have a **pure-Python SDB protocol client** in

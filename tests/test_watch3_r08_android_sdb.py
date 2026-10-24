@@ -11,7 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from watch3_r08_android_sdb import (
     Connection, HEADER, PORT, SdbError, VERSION, adb_public_key,
-    collect, frame, private_watch_ip, read_exact, receive,
+    collect, diagnose, frame, private_watch_ip, read_exact, receive,
 )
 from watch3_r08_live_boot_probe import PROBES, summarize
 
@@ -183,6 +183,61 @@ class AndroidSdbTests(unittest.TestCase):
         self.assertNotIn("192.168.1.34", payload)
         self.assertEqual(len(watched), len(PROBES))
         self.assertFalse(report["flashing_authorized"])
+
+    def test_hotspot_diagnosis_identifies_tcp_refused(self):
+        with patch("watch3_r08_android_sdb.socket.create_connection",
+                   side_effect=ConnectionRefusedError("private address hidden")):
+            with self.assertRaisesRegex(SdbError, r"FAIL\[tcp-refused\].*26101"):
+                diagnose("10.54.86.131", Path("/unused"))
+        # Never embed private watch IP or socket error in the exception.
+        try:
+            with patch("watch3_r08_android_sdb.socket.create_connection",
+                       side_effect=ConnectionRefusedError("10.54.86.131")):
+                diagnose("10.54.86.131", Path("/unused"))
+        except SdbError as exc:
+            self.assertNotIn("10.54.86.131", str(exc))
+
+    def test_hotspot_diagnosis_identifies_timeout(self):
+        with patch("watch3_r08_android_sdb.socket.create_connection",
+                   side_effect=socket.timeout):
+            with self.assertRaisesRegex(SdbError, r"FAIL\[tcp-timeout\]"):
+                diagnose("10.54.86.131", Path("/unused"))
+
+    def test_diagnosis_isolates_sdb_protocol_failure_after_tcp(self):
+        messages = []
+        fake = FakeSocket(frame(b"AUTH", 99, 0, b"private"))
+        with patch("watch3_r08_android_sdb.socket.create_connection",
+                   return_value=fake):
+            with self.assertRaisesRegex(SdbError, r"FAIL\[sdb\]"):
+                diagnose("10.54.86.131", Path("/unused"),
+                         output=messages.append)
+        self.assertEqual(len(messages), 1)
+        self.assertTrue(messages[0].startswith("PASS[tcp]"))
+
+    def test_diagnosis_never_prints_raw_shell_output(self):
+        messages = []
+        fake = FakeSocket(peer("private raw serialABC\n"))
+        with patch("watch3_r08_android_sdb.socket.create_connection",
+                   return_value=fake):
+            with self.assertRaisesRegex(SdbError, r"FAIL\[shell\]") as caught:
+                diagnose("10.54.86.131", Path("/unused"),
+                         output=messages.append)
+        self.assertNotIn("serialABC", str(caught.exception))
+        self.assertNotIn("serialABC", "\n".join(messages))
+        outgoing = decode_all(bytes(fake.sent))
+        operations = [x[3] for x in outgoing if x[0] == b"OPEN"]
+        self.assertEqual(operations, [b"shell:cat /proc/version\x00"])
+
+    def test_hotspot_diagnosis_can_pass_mock_port_sdb_and_shell(self):
+        messages = []
+        fake = FakeSocket(peer("Linux version 4.9.59 builder@private\n"))
+        with patch("watch3_r08_android_sdb.socket.create_connection",
+                   return_value=fake):
+            diagnose("10.54.86.131", Path("/unused"),
+                     output=messages.append)
+        self.assertEqual([m.split(":")[0] for m in messages[:3]],
+                         ["PASS[tcp]", "PASS[sdb]", "PASS[shell]"])
+        self.assertNotIn("builder@private", "\n".join(messages))
 
     def test_no_unsafe_commands_or_watch_writes_in_direct_client(self):
         file = (Path(__file__).resolve().parents[1] /
