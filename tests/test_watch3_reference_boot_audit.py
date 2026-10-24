@@ -58,12 +58,12 @@ class ReferenceBootTests(unittest.TestCase):
     def test_no_root_ramdisk_or_missing_initrd_fails(self):
         with self.assertRaisesRegex(ValueError, "ramdisk root"):
             audit(BASE, ["", ""], DTS, DTSI.replace("root=/dev/ram0", "root=/dev/mmcblk0p1"))
-        with self.assertRaisesRegex(ValueError, "initrd address missing"):
+        with self.assertRaisesRegex(ValueError, "Historical DTS address missing"):
             audit(BASE, ["", ""], DTS, DTSI.replace("linux,initrd-start", "initrd-base"))
 
     def test_invalid_memory_range_fails(self):
         with self.assertRaisesRegex(ValueError, "outside declared memory"):
-            audit(BASE, ["", ""], DTS, DTSI.replace("0x84000000", "0xF4000000"))
+            audit(BASE, ["", ""], DTS, DTSI.replace("0x0 0x80000000 0x60000000", "0x0 0x90000000 0x60000000"))
 
     def test_reference_only_not_installer(self):
         script = (Path(__file__).resolve().parents[1] /
