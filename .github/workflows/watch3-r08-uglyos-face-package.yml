@@ -1,6 +1,7 @@
 name: UgLyOS R08 actual watchface package verification
 
-# Small, real BitBake package verification for UgLy|OS R08 using pinned upstream.
+# Verify the actual BitBake install/package split for UgLy|OS R08 using pinned upstream.
+# A complete do_build resolves launcher runtime dependencies and is intentionally excluded.
 # NEVER compiles Qt, full AsteroidOS image, boots or flashes a watch.
 on:
   pull_request:
@@ -159,7 +160,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_face_package.py" metadata \
             "$GITHUB_WORKSPACE/uglyos-logs/face-env.tmp" "$GITHUB_WORKSPACE/uglyos-logs/image-env.tmp"
           rm -f "$GITHUB_WORKSPACE/uglyos-logs/"*.env.tmp
-      - name: Build only UgLyOS watchface asset IPK (no Qt or full system)
+      - name: Build only UgLyOS watchface package split (no runtime dependency closure)
         shell: bash
         run: |
           set -euo pipefail
@@ -170,8 +171,13 @@ jobs:
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
-          timeout --signal=TERM --kill-after=5s 1200s \
-            bitbake watch3-faces 2>&1 | tee "$GITHUB_WORKSPACE/uglyos-logs/watch3-faces-bitbake.log"
+          # The default do_build target follows RDEPENDS and pulled 3,359 tasks
+          # including launcher dependencies on the failed cold run. do_package
+          # still performs the real do_install and package split (D + PKGDEST)
+          # without requiring complete launcher/Qt runtime package closure.
+          # This verifies packaged content, NOT a final .ipk or full image.
+          timeout --signal=TERM --kill-after=5s 1800s \
+            bitbake -c package watch3-faces 2>&1 | tee "$GITHUB_WORKSPACE/uglyos-logs/watch3-faces-bitbake.log"
       - name: Verify actual installed files and package staging against source
         shell: bash
         run: |
@@ -189,10 +195,10 @@ jobs:
             "$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/watch3-faces/watch3-faces"
           rm -f "$GITHUB_WORKSPACE/uglyos-logs/package-env.tmp"
           {
-            echo '## UgLy|OS actual R08 Yocto package passed'
+            echo '## UgLy|OS actual R08 Yocto package split passed'
             echo '- Three QML faces plus edition metadata match sources byte-for-byte'
             echo '- Actual BitBake metadata includes package in R08 asteroid-image'
-            echo '- NOT TESTED: Qt rendering, full rootfs, watch boot or flashing'
+            echo '- NOT TESTED: final IPK generation, runtime dependency closure, Qt rendering, full rootfs, watch boot or flashing'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload only bounded packaging logs
         if: always()
