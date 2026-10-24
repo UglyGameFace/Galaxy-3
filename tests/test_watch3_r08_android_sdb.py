@@ -11,7 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from watch3_r08_android_sdb import (
     Connection, HEADER, PORT, SdbError, VERSION, adb_public_key,
-    collect, diagnose, frame, private_watch_ip, read_exact, receive,
+    ShellCloseError, collect, diagnose, frame, private_watch_ip, read_exact, receive,
 )
 from watch3_r08_live_boot_probe import PROBES, summarize
 
@@ -110,8 +110,99 @@ class AndroidSdbTests(unittest.TestCase):
                           + frame(b"CLSE", 0, 2))
         client = Connection(sock, Path("/unused"))
         client.handshake()
-        with self.assertRaisesRegex(SdbError, "denied"):
+        with self.assertRaisesRegex(ShellCloseError, "refused"):
             client.shell("cmdline")
+
+    def test_early_close_receiver_mismatch_does_not_fake_shell_success(self):
+        sock = FakeSocket(
+            frame(b"CNXN", VERSION, 256 * 1024, b"device::\x00")
+            + frame(b"CLSE", 0, 0))
+        conn = Connection(sock, Path("/unused"))
+        conn.handshake()
+        with self.assertRaisesRegex(
+            ShellCloseError, r"sender_id=0, receiver_id=0"
+        ):
+            conn.shell("version")
+
+    def test_close_after_valid_data_with_bad_stream_ids_is_not_success(self):
+        sock = FakeSocket(
+            frame(b"CNXN", VERSION, 256 * 1024, b"device::\x00")
+            + frame(b"OKAY", 42, 2)
+            + frame(b"WRTE", 42, 2, b"Linux version 4.9.59 PRIVATE")
+            + frame(b"CLSE", 42, 0))
+        conn = Connection(sock, Path("/unused"))
+        conn.handshake()
+        with self.assertRaisesRegex(ShellCloseError, "unexpected stream IDs"):
+            conn.shell("version")
+
+    def test_diagnose_recovers_using_tizen_dispatcher_only_after_close(self):
+        first = FakeSocket(
+            frame(b"CNXN", VERSION, 256 * 1024, b"device::\x00")
+            + frame(b"CLSE", 0, 0))
+        second = FakeSocket(peer("Linux version 4.9.59 PRIVATE\n"))
+        messages = []
+        with patch("watch3_r08_android_sdb.socket.create_connection",
+                   side_effect=[first, second]) as connect:
+            diagnose("10.54.86.131", Path("/unused"), output=messages.append)
+        self.assertEqual(connect.call_count, 2)
+        self.assertIn("PASS[shell]", "\n".join(messages))
+        self.assertIn("format=tizen-command", "\n".join(messages))
+        self.assertNotIn("PRIVATE", "\n".join(messages))
+        sent = decode_all(bytes(second.sent))
+        self.assertEqual(
+            [entry[3] for entry in sent if entry[0] == b"OPEN"],
+            [b"shell:0 cat /proc/version\x00"]
+        )
+
+    def test_both_shell_variants_rejected_fail_closed_with_stream_context(self):
+        failures = [
+            FakeSocket(frame(b"CNXN", VERSION, 256 * 1024, b"device::\x00")
+                       + frame(b"CLSE", 0, 0)),
+            FakeSocket(frame(b"CNXN", VERSION, 256 * 1024, b"device::\x00")
+                       + frame(b"CLSE", 0, 2)),
+        ]
+        with patch("watch3_r08_android_sdb.socket.create_connection",
+                   side_effect=failures):
+            with self.assertRaisesRegex(
+                SdbError, "Both allowed read-only SDB shell forms failed"
+            ) as error:
+                diagnose("10.54.86.131", Path("/unused"), output=lambda _: None)
+        self.assertNotIn("10.54.86.131", str(error.exception))
+        self.assertIn("receiver_id=0", str(error.exception))
+
+    def test_collect_can_use_tizen_dispatcher_without_arbitrary_commands(self):
+        outputs = {
+            "cmdline": "root=/dev/ram0 PRIVATE_SERIAL=z\n",
+            "version": "Linux version 4.9.59 PRIVATE_BUILDER\n",
+            "partitions": "179 0 10000 mmcblk0\n",
+            "model": "NOBLESSE-LARGE-BT\n",
+        }
+        peers = []
+        for key in PROBES:
+            peers.append(FakeSocket(
+                frame(b"CNXN", VERSION, 256 * 1024, b"device::\x00")
+                + frame(b"CLSE", 0, 0)))
+            peers.append(FakeSocket(peer(
+                outputs.get(key, "No such file or directory"))))
+        with patch("watch3_r08_android_sdb.socket.create_connection",
+                   side_effect=peers) as connect:
+            data, missing = collect("10.54.86.131", Path("/unused"))
+        self.assertEqual(connect.call_count, len(PROBES) * 2)
+        self.assertIn("cmdline", data)
+        self.assertIn("version", data)
+        self.assertIn("partitions", data)
+        report = summarize(data, missing)
+        serialized = json.dumps(report)
+        self.assertEqual(report["facts"]["runtime_kernel_version"], "4.9.59")
+        self.assertNotIn("PRIVATE_SERIAL", serialized)
+        self.assertNotIn("PRIVATE_BUILDER", serialized)
+        for index, sock in enumerate(peers):
+            requests = [p[3] for p in decode_all(bytes(sock.sent))
+                        if p[0] == b"OPEN"]
+            key = list(PROBES)[index // 2]
+            expected = (b"shell:" if index % 2 == 0 else b"shell:0 ")
+            self.assertEqual(requests,
+                [expected + PROBES[key].encode() + b"\x00"])
 
     def test_unsolicited_auth_rejected_without_credentials(self):
         sock = FakeSocket(frame(b"AUTH", 99, 0, b"not auth"))
