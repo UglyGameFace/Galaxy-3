@@ -253,13 +253,17 @@ jobs:
           set -u
           # Leave time inside the six-hour hosted-runner limit for
           # checkpoint saving, ARM64 validation and diagnostic artifacts.
-          seconds=18000
+          # Job limit remains 355 minutes. For the full image reserve
+          # 25+ minutes after BitBake for cache, validation and ext4 upload.
+          # Run 40042744499 reached do_rootfs at the old 300-minute cutoff.
           if [ "$TARGET" = asteroid-image ]; then
+            seconds=19800  # 330 minutes (five and a half hours)
             build_command=(bitbake asteroid-image)
           else
+            seconds=18000  # keep the existing package-only bound
             build_command=(bitbake -c package "$TARGET")
           fi
-          echo "Building $TARGET with ${build_command[*]} (max five hours)"
+          echo "Building $TARGET with ${build_command[*]} (max $(( seconds / 60 )) minutes)"
           set +e
           timeout --signal=TERM --kill-after=15s "$seconds" \
             "${build_command[@]}" 2>&1 | tee "$GITHUB_WORKSPACE/stage-logs/build.log"
@@ -281,7 +285,7 @@ jobs:
             exit "$status"
           fi
 
-      - name: Checkpoint up to 6 GiB of completed signature-matched tasks
+      - name: Checkpoint up to 9 GiB of completed signature-matched tasks
         id: checkpoint
         if: always()
         shell: bash
@@ -303,7 +307,7 @@ jobs:
             exit 0
           fi
           python3 "$GITHUB_WORKSPACE/tools/watch3_yocto_sstate_checkpoint.py" \
-            checkpoint "$source" "$dest" --max-mib 6144
+            checkpoint "$source" "$dest" --max-mib 9216
           python3 - "$dest/watch3-sstate-manifest.json" "$GITHUB_OUTPUT" <<'PY'
           import json
           from pathlib import Path
@@ -312,13 +316,13 @@ jobs:
           with Path(sys.argv[2]).open('a') as f:
               f.write("present=" + ("true" if state['archive_pairs'] else "false") + "\n")
           summary = (f"- Real completed sstate pairs saved: **{state['archive_pairs']}**\\n"
-                     f"- Portable snapshot: **{state['bytes']/1024**2:.1f} MiB** (6 GiB cap)\\n"
+                     f"- Portable snapshot: **{state['bytes']/1024**2:.1f} MiB** (9 GiB cap)\\n"
                      f"- Omitted for size: **{state['skipped_pairs']}** pairs\\n"
                      "- A saved checkpoint is **not** a completed Qt binary.\\n")
           with Path(__import__('os').environ['GITHUB_STEP_SUMMARY']).open('a') as out:
               out.write(summary)
           print(f"CHECKPOINT: {state['archive_pairs']} complete task archives, "
-                f"{state['bytes']/1024**3:.2f} GiB (max 6 GiB)")
+                f"{state['bytes']/1024**3:.2f} GiB (max 9 GiB)")
           PY
 
       - name: Save reusable task outputs to default free GitHub cache

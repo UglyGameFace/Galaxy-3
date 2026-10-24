@@ -72,7 +72,11 @@ class CacheTest(unittest.TestCase):
         self.assertIn("Actual extracted rootfs missing:", workflow)
         self.assertIn("Actual installed-package manifest missing:", workflow)
         self.assertIn('STOPTASKS,${TMPDIR},20G,100K', workflow)
-        self.assertIn("--max-mib 6144", workflow)
+        self.assertIn("--max-mib 9216", workflow)
+        self.assertIn("seconds=19800", workflow)
+        self.assertIn("seconds=18000", workflow)
+        self.assertIn("timeout-minutes: 355", workflow)
+        self.assertIn("Checkpoint up to 9 GiB", workflow)
         self.assertIn("if (( free_kib < 12 * 1024 * 1024 ))", workflow)
         self.assertIn("if: always()", workflow)
 
