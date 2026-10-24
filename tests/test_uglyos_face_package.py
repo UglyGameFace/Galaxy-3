@@ -48,7 +48,7 @@ class UgLyOSPackageTests(unittest.TestCase):
                     ".github/workflows/watch3-r08-uglyos-face-package.yml").read_text()
         steps = [
             "Confirm real BitBake recipe and image dependency metadata",
-            "Build only UgLyOS watchface asset IPK (no Qt or full system)",
+            "Build only UgLyOS watchface package split (no runtime dependency closure)",
             "Verify actual installed files and package staging against source",
         ]
         for name in steps:
@@ -60,6 +60,20 @@ class UgLyOSPackageTests(unittest.TestCase):
                 self.assertLess(section.index(create),
                                 section.index('source src/oe-core/oe-init-build-env'))
                 self.assertIn('"$GITHUB_WORKSPACE/uglyos-logs/', section)
+
+    def test_bitbake_targets_package_split_not_full_build(self):
+        # Regression: invoking the default build target previously expanded
+        # into 3,359 tasks and exhausted the cold runner's time limit.
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/watch3-r08-uglyos-face-package.yml").read_text()
+        step = workflow.split(
+            "      - name: Build only UgLyOS watchface package split "
+            "(no runtime dependency closure)", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("bitbake -c package watch3-faces", step)
+        self.assertNotIn("bitbake watch3-faces 2>&1", step)
+        self.assertNotIn("bitbake -c package_write_ipk", step)
+        self.assertIn("timeout --signal=TERM --kill-after=5s", step)
+        self.assertIn("NOT a final .ipk", step)
 
     def test_unchanged_payload_is_verified(self):
         inspect_package(self.info, self.source)
