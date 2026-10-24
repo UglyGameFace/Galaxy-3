@@ -13,6 +13,7 @@ SRC_URI = " \
     file://900-watch3-orbit.qml \
     file://901-watch3-focus.qml \
     file://902-watch3-signal.qml \
+    file://uglyos-edition.json \
 "
 
 do_configure[noexec] = "1"
@@ -23,7 +24,9 @@ do_install() {
     for face in 900-watch3-orbit.qml 901-watch3-focus.qml 902-watch3-signal.qml; do
         install -m 0644 "${UNPACKDIR}/$face" "${D}${datadir}/asteroid-launcher/watchfaces/$face"
     done
+    install -d "${D}${datadir}/uglyos"
+    install -m 0644 "${UNPACKDIR}/uglyos-edition.json" "${D}${datadir}/uglyos/edition.json"
 }
 
-FILES:${PN} = "${datadir}/asteroid-launcher/watchfaces/*.qml"
+FILES:${PN} = "${datadir}/asteroid-launcher/watchfaces/*.qml ${datadir}/uglyos/edition.json"
 RDEPENDS:${PN} = "asteroid-launcher"
