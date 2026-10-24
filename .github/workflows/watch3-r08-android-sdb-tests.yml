@@ -44,7 +44,10 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           workflow = Path('.github/workflows/watch3-r08-android-sdb-tests.yml').read_text()
-          assert 'python tools/watch3_r08_android_sdb.py --watch-ip' not in workflow
+          # Only inspect lines actually invoking commands; never match this check.
+          executed_python = [line.strip() for line in workflow.splitlines()
+                             if line.lstrip().startswith('python tools/')]
+          assert all('--watch-ip' not in line for line in executed_python)
           assert 'NO WATCH' in workflow
           print('PASS: only in-memory fake SDB server used; no watch or LAN access')
           PY
