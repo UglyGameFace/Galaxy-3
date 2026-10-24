@@ -1,0 +1,28 @@
+name: Watch3 R08 AsteroidOS enhancements style-pack (NO DEVICE)
+
+# Fast host-side source and recipe contracts. No BitBake, hardware,
+# flashing, official AsteroidOS source modifications or mock "boot success".
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'meta-noblesse/recipes-asteroid/watch3-faces/**'
+      - 'meta-noblesse/recipes-core/images/asteroid-image.bbappend'
+      - 'tests/test_watch3_style_pack.py'
+      - '.github/workflows/watch3-r08-style-pack-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-style-package-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify additive machine-scoped QML watchface assets
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/test_watch3_style_pack.py
+          python3 -m unittest discover -s tests -p test_watch3_style_pack.py -v
