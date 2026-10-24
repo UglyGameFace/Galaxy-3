@@ -21,7 +21,9 @@ concurrency:
 
 jobs:
   audit-completed-image:
-    runs-on: ubuntu-22.04
+    # Ubuntu 22.04 has e2fsprogs 1.46.5; the saved ext4 contains
+    # orphan_file (FEATURE_C12), requiring e2fsprogs >=1.47 to inspect.
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - name: Checkout offline audit and unchanged Watch3 validators
@@ -36,6 +38,16 @@ jobs:
           command -v debugfs
           command -v e2fsck
           command -v dumpe2fs
+          e2fsck -V
+          python3 - <<'PY'
+          import re
+          import subprocess
+          r = subprocess.run(['e2fsck', '-V'], capture_output=True, text=True, check=False)
+          version = re.search(r'e2fsck (\d+)\.(\d+)(?:\.(\d+))?', r.stdout + r.stderr)
+          assert version, f'Cannot parse installed e2fsck: {r.stdout} {r.stderr}'
+          major, minor = int(version[1]), int(version[2])
+          assert (major, minor) >= (1, 47), 'Need e2fsprogs 1.47+ to read orphan_file ext4'
+          PY
 
       - name: Validate audit helper with fixture tests before fetching build
         shell: bash
