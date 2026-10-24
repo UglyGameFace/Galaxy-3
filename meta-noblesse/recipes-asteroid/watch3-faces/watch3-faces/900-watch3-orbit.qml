@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Galaxy Watch3 AsteroidOS enhancements: Orbit. Round-screen-safe, software Qt.
+// UgLy|OS edition for Galaxy Watch3: Orbit. Round-screen-safe, software Qt.
 // Existing watchface Settings discovers .qml files automatically.
 import QtQuick
 import Nemo.Mce
@@ -21,17 +21,17 @@ Item {
 
     Item {
         id: safe
-        width: parent.diameter * 0.80
+        width: face.diameter * 0.80
         height: width
         anchors.centerIn: parent
 
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             y: safe.height * 0.13
-            text: "ORBIT"
+            text: "UgLy|OS"
             color: face.dimmed ? "#76867D" : face.accent
             font.family: "Noto Sans"
-            font.pixelSize: safe.height * 0.065
+            font.pixelSize: safe.height * 0.073
             font.letterSpacing: safe.width * 0.012
             renderType: Text.NativeRendering
         }
