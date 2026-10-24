@@ -56,6 +56,31 @@ proven boot image. Keep the original successful image unchanged.
 - General Samsung secure boot notes:
   https://docs.samsungknox.com/admin/fundamentals/whitepaper/samsung-knox-mobile-security/system-security/trusted-boot/
 
+## New R08 boot contract evidence from pinned public source
+
+The [historical source audit workflow](../.github/workflows/watch3-r08-reference-boot-audit.yml)
+fetches five files from pinned vendor reference commit
+`ec258e12887d37362b59e3291c1d3e5363c24bff` and produces a tiny,
+read-only JSON report without recompiling or contacting the watch.
+
+- The reference `tizen_noblesse_defconfig` contains
+  `# CONFIG_KEXEC is not set`; neither recipe fragment overrides it.
+  There is **no evidence of a ready-made kexec jump** from running Tizen.
+- The historical R08 device-tree source's `/chosen/bootargs` includes
+  `root=/dev/ram0`, and an initrd memory range. A raw AsteroidOS ext4 is
+  therefore **not equivalent to a complete watch boot image**.
+- `CONFIG_BLK_DEV_INITRD=y`, `CONFIG_EXT4_FS=y`, and
+  `CONFIG_DM_VERITY=y` are present in the reference base.
+- These are historical source **inputs**, not a verified copy of the
+  running firmware's final `/proc/config.gz`, `/proc/cmdline` or boot
+  partition contents. Actual bootloader signature acceptance remains unknown.
+
+**Most informative next live comparison (read-only SDB only):**
+`/proc/cmdline` and visible device-tree `chosen/bootargs`, followed by
+`/proc/partitions`. They can confirm whether the installed firmware uses
+the same initramfs boot assumptions. Never collect serial numbers or
+private identifiers in public GitHub logs.
+
 ## Fastest evidence-first route to first boot
 
 **Gate A: stock baseline and observation, no writes.** Reuse the existing
