@@ -4,6 +4,7 @@ These tests do not render QML, run BitBake or demonstrate device boot.
 """
 from pathlib import Path
 import re
+import json
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,22 @@ class StyleTests(unittest.TestCase):
         self.assertIn('IMAGE_INSTALL:append:noblesse-r08 = " watch3-faces"', image)
         self.assertNotIn('IMAGE_INSTALL:append = " watch3-faces"', image)
         self.assertIn("-O ^orphan_file", image)
+
+    def test_exact_uglyos_brand_and_safe_identifier(self):
+        branding = ASSETS / "uglyos-edition.json"
+        info = json.loads(branding.read_text())
+        self.assertEqual(info["display_name"], "UgLy|OS")
+        self.assertEqual(info["slug"], "uglyos")
+        self.assertEqual(info["base_system"], "AsteroidOS")
+        self.assertEqual(info["boot_status"], "not-boot-tested")
+        self.assertEqual(info["install_status"], "not-flashable")
+        self.assertIn('text: "UgLy|OS"', (ASSETS / FILES[0]).read_text())
+        recipe = RECIPE.read_text()
+        self.assertIn("file://uglyos-edition.json", recipe)
+        self.assertIn("/uglyos/edition.json", recipe)
+        self.assertIn("UNPACKDIR", recipe)
+        self.assertNotIn("UgLy|OS", IMAGE.read_text(),
+                         "The user-facing brand must not corrupt BitBake identifiers")
 
     def test_watchfaces_use_upstream_bindings_no_gpu_effects(self):
         banned = ("ShaderEffect", "DropShadow", "FastBlur", "Canvas {",
