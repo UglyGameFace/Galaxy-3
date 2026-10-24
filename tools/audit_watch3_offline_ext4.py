@@ -123,8 +123,8 @@ def audit(image_dir: Path, stage_dir: Path) -> dict:
                                 "Filesystem features", "Block size",
                                 "Block count", "Inode count"):
                 fields[name.strip()] = value.strip()
-    if "extents" not in fields.get("Filesystem features", "").split():
-        raise ValueError("Ext4 expected extents feature is absent")
+    if "extent" not in fields.get("Filesystem features", "").split():
+        raise ValueError("Ext4 expected extent feature is absent")
 
     with tempfile.TemporaryDirectory(prefix="watch3-offline-audit-") as temporary:
         root = Path(temporary)
