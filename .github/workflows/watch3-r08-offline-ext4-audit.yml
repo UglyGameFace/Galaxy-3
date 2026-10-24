@@ -82,14 +82,27 @@ jobs:
             --image-dir retrieved/image \
             --stage-dir retrieved/stage \
             --report audit-results/watch3-r08-offline-ext4-audit.json
-          {
-            echo '## Galaxy Watch3 R08: existing ext4 audited OFF-DEVICE'
-            echo '- Original build: [#40095182440](https://github.com/UglyGameFace/Galaxy-3/actions/runs/40095182440)'
-            echo '- Matched original SHA256 and package manifest'
-            echo '- Inspected ext4 header and read-only filesystem consistency'
-            echo '- Extracted and checked ARM64 launcher, service and compositor config'
-            echo '- **NOT BOOT-TESTED. NOT FLASHABLE.**'
-          } >> "$GITHUB_STEP_SUMMARY"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          report = json.loads(Path('audit-results/watch3-r08-offline-ext4-audit.json').read_text())
+          lines = [
+              '## Galaxy Watch3 R08: exact artifact audited read-only',
+              '- Original build: [#40095182440](https://github.com/UglyGameFace/Galaxy-3/actions/runs/40095182440)',
+              '- Matched original SHA256 and original package manifest',
+              '- Clean e2fsck and valid ext4 metadata; inspected ARM64 launcher and compositor config',
+              '- Installed packages: **' + str(report['package_count']) + '**',
+          ]
+          if report['legacy_watch3_kernel_4_9_compatibility_risk']:
+              lines += [
+                  '- **BLOCKER: ext4 orphan_file is enabled**, newer than the pinned Linux 4.9.59 reference kernel.',
+                  '- Next: separately build an ext4 with legacy-compatible features and re-audit before device action.',
+              ]
+          lines += ['- **NOT BOOT-TESTED. NOT FLASHABLE.**']
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write('\n'.join(lines) + '\n')
+          PY
 
       - name: Keep only small read-only audit report, never re-upload firmware
         if: always()
