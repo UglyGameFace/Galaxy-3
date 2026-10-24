@@ -1,0 +1,53 @@
+name: Watch3 R08 Android SDB read-only socket tests (NO WATCH)
+
+# Synthetic in-memory SDB peer ONLY; no physical device connections,
+# network scanning, device boot, flashing, root or package installation.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/watch3_r08_android_sdb.py'
+      - 'tests/test_watch3_r08_android_sdb.py'
+      - 'docs/watch3-r08-live-boot-evidence.md'
+      - '.github/workflows/watch3-r08-android-sdb-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mock-tizen-watch:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install optional RSA authorization library for authentication tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            python3-cryptography
+          python3 -c 'import cryptography'
+
+      - name: Test Samsung SDB protocol parser, RSA, fake watch and privacy gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/watch3_r08_android_sdb.py
+          python3 -m unittest discover -s tests -p test_watch3_r08_android_sdb.py -v
+          python3 -m unittest discover -s tests -p test_watch3_r08_live_boot_probe.py -v
+          python3 - <<'PY'
+          from pathlib import Path
+          workflow = Path('.github/workflows/watch3-r08-android-sdb-tests.yml').read_text()
+          # Only inspect lines actually invoking commands; never match this check.
+          executed_python = [line.strip() for line in workflow.splitlines()
+                             if line.lstrip().startswith('python tools/')]
+          assert all('--watch-ip' not in line for line in executed_python)
+          assert 'NO WATCH' in workflow
+          print('PASS: only in-memory fake SDB server used; no watch or LAN access')
+          PY

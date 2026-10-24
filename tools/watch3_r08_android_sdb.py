@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""Termux-to-Tizen read-only SDB, without a computer or Samsung SDK.
+
+Only the seven fixed commands from watch3_r08_live_boot_probe may run.
+No root, reboot, device writes, partition reading, install or flashing.
+The Tizen Watch3 R840X handshake has not yet been verified on hardware.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import ipaddress
+import json
+import os
+from pathlib import Path
+import socket
+import struct
+import sys
+
+from watch3_r08_live_boot_probe import PROBES, summarize
+
+PORT = 26101
+VERSION = 0x00100000
+MAX_PAYLOAD = 256 * 1024
+MAX_OUTPUT = 64 * 1024
+HEADER = struct.Struct("<6I")
+KNOWN = {b"CNXN", b"AUTH", b"OPEN", b"OKAY", b"WRTE", b"CLSE"}
+
+
+class SdbError(ValueError):
+    pass
+
+
+def frame(kind: bytes, arg0=0, arg1=0, body=b""):
+    if kind not in KNOWN or len(body) > MAX_PAYLOAD:
+        raise SdbError("Invalid SDB frame command or payload size")
+    code = int.from_bytes(kind, "little")
+    return HEADER.pack(code, arg0, arg1, len(body), sum(body) & 0xffffffff,
+                       code ^ 0xffffffff) + body
+
+
+def read_exact(sock, amount):
+    data = bytearray()
+    while len(data) < amount:
+        chunk = sock.recv(amount - len(data))
+        if not chunk:
+            raise SdbError("Tizen SDB connection closed unexpectedly")
+        data.extend(chunk)
+    return bytes(data)
+
+
+def receive(sock):
+    code, arg0, arg1, size, checksum, magic = HEADER.unpack(read_exact(sock, 24))
+    if magic != (code ^ 0xffffffff) or size > MAX_PAYLOAD:
+        raise SdbError("Invalid SDB frame header")
+    kind = code.to_bytes(4, "little")
+    if kind not in KNOWN:
+        raise SdbError("Unsupported SDB frame type")
+    body = read_exact(sock, size)
+    if sum(body) & 0xffffffff != checksum:
+        raise SdbError("SDB checksum mismatch")
+    return kind, arg0, arg1, body
+
+
+def crypto_modules():
+    try:
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa, utils
+        return hashes, serialization, padding, rsa, utils
+    except ImportError as exc:
+        raise SdbError(
+            "Watch requested SDB RSA authentication. In Termux install "
+            "the optional package: pkg install python-cryptography"
+        ) from exc
+
+
+def local_private_key(path):
+    _, serialization, _, rsa, _ = crypto_modules()
+    if not path.exists():
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        private = key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption())
+        try:
+            with os.fdopen(
+                os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "wb"
+            ) as dest:
+                dest.write(private)
+        except FileExistsError:
+            pass
+    if (path.is_symlink() or not path.is_file()
+            or path.stat().st_mode & 0o077):
+        raise SdbError("SDB private key must be a regular private file (0600)")
+    try:
+        key = serialization.load_pem_private_key(path.read_bytes(), password=None)
+    except (ValueError, TypeError) as exc:
+        raise SdbError("Local SDB private key cannot be parsed") from exc
+    if not isinstance(key, rsa.RSAPrivateKey) or key.key_size != 2048:
+        raise SdbError("SDB private key must be RSA 2048")
+    return key
+
+
+def sign_auth_token(path, token):
+    if len(token) != 20:
+        raise SdbError("Unsupported Tizen SDB authorization token")
+    hashes, _, padding, _, utils = crypto_modules()
+    return local_private_key(path).sign(
+        token, padding.PKCS1v15(), utils.Prehashed(hashes.SHA1()))
+
+
+def adb_public_key(path):
+    numbers = local_private_key(path).public_key().public_numbers()
+    modulus = numbers.n
+    inv = (-pow(modulus, -1, 1 << 32)) & 0xffffffff
+    rr = pow(2, 4096, modulus)
+    data = (struct.pack("<II", 64, inv) +
+            modulus.to_bytes(256, "little") +
+            rr.to_bytes(256, "little") +
+            struct.pack("<I", numbers.e))
+    if len(data) != 524:
+        raise SdbError("Invalid SDB public key")
+    return base64.b64encode(data) + b" watch3-termux\x00"
+
+
+class Connection:
+    def __init__(self, sock, key_path):
+        self.sock = sock
+        self.key_path = key_path
+
+    def send(self, kind, arg0=0, arg1=0, body=b""):
+        self.sock.sendall(frame(kind, arg0, arg1, body))
+
+    def handshake(self):
+        self.send(b"CNXN", VERSION, MAX_PAYLOAD, b"host::\x00")
+        auth_count = 0
+        for _ in range(5):
+            kind, arg0, _arg1, body = receive(self.sock)
+            if kind == b"CNXN":
+                if not body.startswith(b"device:"):
+                    raise SdbError("Endpoint did not identify as SDB device")
+                return
+            if kind != b"AUTH" or arg0 != 1:
+                raise SdbError("Unexpected SDB authorization response")
+            auth_count += 1
+            if auth_count == 1:
+                self.send(b"AUTH", 2, 0, sign_auth_token(self.key_path, body))
+            elif auth_count == 2:
+                self.send(b"AUTH", 3, 0, adb_public_key(self.key_path))
+            else:
+                raise SdbError("Watch authorization failed; approve prompt on watch")
+        raise SdbError("Watch SDB handshake could not complete")
+
+    def shell(self, operation):
+        if operation not in PROBES:
+            raise SdbError("Operation not in the fixed read-only allowlist")
+        local = 2
+        self.send(b"OPEN", local, 0, ("shell:" + PROBES[operation]).encode() + b"\x00")
+        remote = None
+        output = bytearray()
+        for _ in range(128):
+            kind, arg0, arg1, body = receive(self.sock)
+            if kind == b"OKAY":
+                if arg1 != local or (remote is not None and remote != arg0):
+                    raise SdbError("Invalid SDB stream identifiers")
+                remote = arg0
+            elif kind == b"WRTE":
+                if remote is None or arg0 != remote or arg1 != local:
+                    raise SdbError("Unexpected SDB stream data")
+                if len(body) + len(output) > MAX_OUTPUT:
+                    raise SdbError("SDB response exceeded allowed size")
+                output.extend(body)
+                self.send(b"OKAY", local, remote)
+            elif kind == b"CLSE":
+                if arg1 != local or (remote is not None and arg0 != remote):
+                    raise SdbError("Invalid SDB stream close")
+                if remote is None:
+                    raise SdbError("Watch denied requested read-only shell")
+                self.send(b"CLSE", local, remote)
+                return output.decode("utf-8", "replace")
+            else:
+                raise SdbError("Unexpected SDB frame during read-only shell")
+        raise SdbError("SDB response exceeded frame limit")
+
+
+def private_watch_ip(raw):
+    try:
+        address = ipaddress.ip_address(raw)
+    except ValueError as exc:
+        raise SdbError("Use the watch's numeric Wi-Fi IP address, not a hostname") from exc
+    if not (address.is_private or address.is_link_local or address.is_loopback):
+        raise SdbError("Only local-network watch IP addresses are accepted")
+    return str(address)
+
+
+def collect(ip, key_path, timeout=8):
+    ip = private_watch_ip(ip)
+    observations, problems = {}, {}
+    for name in PROBES:
+        try:
+            with socket.create_connection((ip, PORT), timeout=timeout) as sock:
+                sock.settimeout(max(timeout, 25))
+                channel = Connection(sock, key_path)
+                channel.handshake()
+                value = channel.shell(name)
+            if (not value.strip() or any(
+                warning in value.lower() for warning in (
+                    "permission denied", "no such file", "not found", "access denied"
+                ))):
+                problems[name] = "Read-only property unavailable"
+            else:
+                observations[name] = value
+        except SdbError as exc:
+            if any(key in str(exc).lower() for key in (
+                "authorization", "authentication", "private key", "crypto", "rsa"
+            )):
+                raise
+            problems[name] = "Read-only property unavailable over SDB"
+        except (OSError, TimeoutError):
+            problems[name] = "Watch did not answer this SDB read"
+    return observations, problems
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--watch-ip", required=True,
+                        help="Exact watch address on your trusted Wi-Fi")
+    parser.add_argument("--report", type=Path,
+                        default=Path.home() / "watch3-r08-boot-redacted.json")
+    parser.add_argument("--key-path", type=Path,
+                        default=Path.home() / ".config/galaxy3/watch3-sdbkey")
+    args = parser.parse_args()
+    try:
+        values, errors = collect(args.watch_ip, args.key_path)
+        report = summarize(values, errors)
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps(report, indent=2) + "\n")
+    except (SdbError, ValueError, OSError) as exc:
+        print("FAIL[read-only-sdb]: " + str(exc), file=sys.stderr)
+        return 1
+    print("PASS: privacy-filtered Watch3 boot report saved locally.")
+    print("Report path:", args.report)
+    print("NO bootloader acceptance or stock recovery proven. NOT FLASHABLE.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -8,6 +8,51 @@ The historical reference [CI #40112813921](https://github.com/UglyGameFace/Galax
 found KEXEC disabled and historical initramfs root=/dev/ram0, but did not
 prove the installed R840X uses those settings.
 
+## Method 0: Android-only direct SDB without a computer (experimental)
+
+We now have a **pure-Python SDB protocol client** in
+[watch3_r08_android_sdb.py](../tools/watch3_r08_android_sdb.py).
+It uses a manually supplied private-network watch IP, Samsung SDB
+TCP port 26101, Samsung's 24-byte message framing, read-only shell
+services, and an optional locally generated RSA authentication key
+if the watch challenges the phone. Unlike running the official
+Samsung SDB binary, **the actual R840X connection has not been tested**
+and the watch might reject the client. All protocol tests use fake
+devices in GitHub Actions, not your watch.
+
+On an Android phone with Termux, on the same trusted Wi-Fi as the watch:
+
+1. On the watch, enable developer/debugging options and find its Wi-Fi IP.
+   Samsung's official procedure is linked at the end of this guide.
+2. In Termux, use the already installed Galaxy-3 checkout, or clone it:
+   `pkg install python git` and
+   `git clone https://github.com/UglyGameFace/Galaxy-3.git`.
+3. From the Galaxy-3 directory run, replacing the example IP with
+   the actual IP shown on **your watch**:
+
+   ```sh
+   cd ~/Galaxy-3
+   python tools/watch3_r08_android_sdb.py --watch-ip 192.168.1.40
+   ```
+
+4. If the watch asks for RSA approval, accept **only** if you initiated
+   this connection. If Termux reports a missing library, install the
+   local package with `pkg install python-cryptography` and run again.
+   The RSA private key stays in Termux's private app directory under
+   `~/.config/galaxy3/watch3-sdbkey`. **Never share or commit it.**
+5. When successful, inspect the local privacy-filtered file:
+   `~/watch3-r08-boot-redacted.json`. The script never saves raw SDB
+   shell output, serial numbers, IP addresses or unfiltered command lines.
+
+**The direct client is not an installation tool.** Its ONLY allowed
+remote commands are the seven specific read-only commands listed in
+Method A. It cannot write firmware, read hidden partitions, change
+permissions, restart the watch or authorize an AsteroidOS boot.
+
+If it cannot connect, don't try root/unlock/download-mode shortcuts.
+Report the brief sanitized failure message so the protocol mismatch
+can be fixed without putting the watch at risk.
+
 ## Method A: existing authorized SDB client
 
 Samsung documents **Smart Development Bridge (SDB)** over Wi-Fi, typically
