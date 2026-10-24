@@ -342,31 +342,12 @@ jobs:
           set -u
           bitbake -e "$TARGET" > "$GITHUB_WORKSPACE/stage-logs/postbuild.env"
           if [ "$TARGET" = asteroid-image ]; then
-            python3 - "$GITHUB_WORKSPACE/stage-logs/postbuild.env" "$GITHUB_WORKSPACE/stage-logs/image-paths.txt" <<'PY'
-          from pathlib import Path
-          import sys
-          variables = {}
-          for line in Path(sys.argv[1]).read_text().splitlines():
-              for key in ('MACHINE', 'DISTRO', 'IMAGE_ROOTFS', 'IMAGE_MANIFEST', 'DEPLOY_DIR_IMAGE'):
-                  if line.startswith(key + '='):
-                      raw = line.partition('=')[2]
-                      variables[key] = raw[1:-1] if raw.startswith('"') and raw.endswith('"') else raw
-          assert variables.get('MACHINE') == 'noblesse-r08'
-          assert variables.get('DISTRO') == 'asteroid'
-          rootfs = Path(variables['IMAGE_ROOTFS'])
-          manifest = Path(variables['IMAGE_MANIFEST'])
-          deploy = Path(variables['DEPLOY_DIR_IMAGE'])
-          print(f'Image rootfs: {rootfs} (directory={rootfs.is_dir()})')
-          print(f'Image manifest: {manifest} (file={manifest.is_file()})')
-          print(f'Image deploy directory: {deploy} (directory={deploy.is_dir()})')
-          assert rootfs.is_dir(), f'Actual extracted rootfs missing: {rootfs}'
-          assert manifest.is_file(), f'Actual installed-package manifest missing: {manifest}'
-          images = [p for p in deploy.glob('asteroid-image*.ext4') if p.is_file() and p.stat().st_size > 0]
-          assert images, 'No generated non-empty AsteroidOS ext4 image'
-          with Path(sys.argv[2]).open('w') as out:
-              out.write(str(rootfs) + '\n' + str(manifest) + '\n' + str(images[0].resolve()) + '\n')
-          print('PASS: actual R08 image rootfs, manifest and ext4 found')
-          PY
+            # The post-build BitBake environment expands a NEW DATETIME;
+            # IMAGE_MANIFEST points to a different timestamp than the built
+            # ext4. Resolve the deployed ext4 and its co-named manifest.
+            python3 "$GITHUB_WORKSPACE/tools/find_watch3_image_outputs.py" \
+              "$GITHUB_WORKSPACE/stage-logs/postbuild.env" \
+              "$GITHUB_WORKSPACE/stage-logs/image-paths.txt" "$GITHUB_ENV"
             mapfile -t paths < "$GITHUB_WORKSPACE/stage-logs/image-paths.txt"
             python3 "$GITHUB_WORKSPACE/tools/validate_watch3_graphics_rootfs.py" \
               "${paths[0]}" --installed-packages "${paths[1]}"
@@ -405,6 +386,18 @@ jobs:
             echo "PASS: validated $TARGET target package on the R08 machine"
           fi
           rm -f "$GITHUB_WORKSPACE/stage-logs/postbuild.env"
+
+      # Never lose a fully built image just because a subsequent validation
+      # check fails. Keep it explicitly UNVALIDATED and NOT FLASHABLE;
+      # this artifact is for offline debugging only.
+      - name: Preserve unvalidated OFF-DEVICE ext4 for diagnosis after validation failure
+        if: ${{ failure() && steps.qtbuild.outputs.finished == 'true' && env.TARGET == 'asteroid-image' && env.UNVALIDATED_IMAGE_PATH != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-UNVALIDATED-NOT-FLASHABLE-image-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: ${{ env.UNVALIDATED_IMAGE_PATH }}
 
       - name: Preserve validated OFF-DEVICE ext4 AsteroidOS output
         if: steps.qtbuild.outputs.finished == 'true' && env.TARGET == 'asteroid-image'
