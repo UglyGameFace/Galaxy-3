@@ -8,6 +8,49 @@ The historical reference [CI #40112813921](https://github.com/UglyGameFace/Galax
 found KEXEC disabled and historical initramfs root=/dev/ram0, but did not
 prove the installed R840X uses those settings.
 
+## Physical SM-R840X live boot report, collected October 24
+
+The owner successfully ran the Android/Termux **standard SDB shell** collector
+against the actual Tizen Watch3 and received its redacted JSON report.
+
+The report establishes:
+- **Live kernel 4.9.59**, matches the historical vendor reference version.
+- **Device-tree model NOBLESSE-LARGE-BT**, matches the R08 board description.
+- Live kernel root argument **/dev/ram0** and live DT root **/dev/ram0**.
+  This is an *initial kernel boot argument*, NOT proof that the watch's
+  persistent rootfs is stored on the small ram0 device.
+- **21 numbered eMMC partitions** mmcblk0p1..mmcblk0p21, plus boot
+  area, RPMB, zram, loop and device-mapper block device entries.
+  The 32 reported entries are **not 32 numbered eMMC partitions**.
+- `mmcblk0p20` and `dm-0` both reported **1,787,904 KiB**. This is a
+  potential dependency, but sizes alone **do not prove a mapping**.
+- The by-name device symlink locations were unavailable under the
+  unprivileged SDB shell. Never infer partition roles from numbering.
+
+**Next single narrowly focused task:** inspect Linux's exported live
+device-mapper dependency and a few partition-label/mount pseudo-files
+without touching raw storage. The new Android client flag
+`--storage-only` makes **five predefined** reads and saves a separate
+redacted JSON report. It does not broaden the existing boot collector.
+
+Once that change is merged:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_android_sdb.py --watch-ip 10.54.86.131 --storage-only
+cat ~/watch3-r08-storage-redacted.json
+```
+
+The address is only valid if **the watch still displays it**; turn off
+phone VPN while using your trusted hotspot. Do not upload raw device
+data, credentials or private sysfs outputs. If sysfs paths are
+unavailable, the report will say so rather than assume partition roles.
+
+**NOT proved by this report:** dm-0 backing, signed boot image acceptance,
+bootloader unlock, recovery partitions, downloadable matching Samsung
+stock rescue firmware, or safe flashing. The next proof gate remains
+bootloader and reliable stock-recovery compatibility with exact R840X.
+
 ## Actual Watch3 shell stream trace and protocol correction
 
 The October 24 physical Watch3 experiment reached:

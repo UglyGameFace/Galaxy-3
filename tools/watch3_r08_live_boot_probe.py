@@ -30,6 +30,16 @@ PROBES = {
     "block_links": "ls -l /dev/block/by-name",
     "disk_links": "ls -l /dev/disk/by-name",
 }
+# Optional next-phase storage topology observation after a successful live-boot
+# report. Exact fixed Linux pseudo-file operations ONLY. No block-device data
+# reads, dmsetup, root, mounting, repartitioning or bootloader access.
+STORAGE_PROBES = {
+    "mounts": "cat /proc/mounts",
+    "dm0_slaves": "ls /sys/block/dm-0/slaves",
+    "dm0_name": "cat /sys/block/dm-0/dm/name",
+    "p20_uevent": "cat /sys/class/block/mmcblk0p20/uevent",
+    "p21_uevent": "cat /sys/class/block/mmcblk0p21/uevent",
+}
 ESSENTIAL = ("cmdline", "version", "partitions")
 PUBLIC_FIELDS = ("root", "console", "init", "rootfstype", "rootflags")
 EXPECTED_MODEL = "NOBLESSE-LARGE-BT"

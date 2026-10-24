@@ -17,7 +17,12 @@ import socket
 import struct
 import sys
 
-from watch3_r08_live_boot_probe import PROBES, summarize
+from watch3_r08_live_boot_probe import PROBES, STORAGE_PROBES, summarize
+from watch3_r08_storage_mapping import summarize_storage
+
+# Explicit, fixed, read-only operations; extended storage set is ONLY used
+# when the user requests --storage-only. Normal boot collection stays unchanged.
+ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES}
 
 PORT = 26101
 VERSION = 0x00100000
@@ -161,7 +166,7 @@ class Connection:
         raise SdbError("Watch SDB handshake could not complete")
 
     def shell(self, operation, style="standard"):
-        if operation not in PROBES:
+        if operation not in ALLOWED_PROBES:
             raise SdbError("Operation not in the fixed read-only allowlist")
         if style not in {"standard", "tizen-command"}:
             raise SdbError("Unknown read-only SDB shell service style")
@@ -171,7 +176,7 @@ class Connection:
         destination = ("shell:" if style == "standard" else "shell:0 ")
         local = 2
         self.send(b"OPEN", local, 0,
-                  (destination + PROBES[operation]).encode() + b"\x00")
+                  (destination + ALLOWED_PROBES[operation]).encode() + b"\x00")
         remote = None
         output = bytearray()
         payload_frames = 0
@@ -352,10 +357,12 @@ def diagnose(ip, key_path, timeout=4, output=print):
         ) from None
 
 
-def collect(ip, key_path, timeout=8):
+def collect(ip, key_path, timeout=8, probes=PROBES):
     ip = private_watch_ip(ip)
     observations, problems = {}, {}
-    for name in PROBES:
+    if probes is not PROBES and probes is not STORAGE_PROBES:
+        raise SdbError("Only predefined boot or storage probe sets are allowed")
+    for name in probes:
         try:
             with socket.create_connection((ip, PORT), timeout=timeout) as sock:
                 sock.settimeout(max(timeout, 25))
@@ -399,11 +406,16 @@ def main():
                         help="Check hotspot port, SDB handshake and one "
                              "read-only version command; never collect raw "
                              "boot data or flash anything")
+    parser.add_argument("--storage-only", action="store_true",
+                        help="Read only fixed /proc/mounts and /sys eMMC "
+                             "device mapper dependencies; redacted report")
     parser.add_argument("--report", type=Path,
-                        default=Path.home() / "watch3-r08-boot-redacted.json")
+                        help="Optional local privacy-filtered JSON destination")
     parser.add_argument("--key-path", type=Path,
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     args = parser.parse_args()
+    if args.diagnose_only and args.storage_only:
+        parser.error("Choose --diagnose-only or --storage-only, not both")
     if args.diagnose_only:
         try:
             diagnose(args.watch_ip, args.key_path)
@@ -412,18 +424,29 @@ def main():
             return 1
         return 0
     try:
-        values, errors = collect(args.watch_ip, args.key_path)
-        report = summarize(values, errors)
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(json.dumps(report, indent=2) + "\n")
+        if args.storage_only:
+            values, errors = collect(args.watch_ip, args.key_path,
+                                     probes=STORAGE_PROBES)
+            report = summarize_storage(values, errors)
+            dest = args.report or (Path.home() /
+                                   "watch3-r08-storage-redacted.json")
+        else:
+            values, errors = collect(args.watch_ip, args.key_path)
+            report = summarize(values, errors)
+            dest = args.report or (Path.home() /
+                                   "watch3-r08-boot-redacted.json")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(report, indent=2) + "\n")
     except (SdbError, ValueError, OSError) as exc:
         print("FAIL[read-only-sdb]: " + str(exc), file=sys.stderr)
         print("DIAGNOSE: Run again with --diagnose-only to distinguish "
               "hotspot/TCP, SDB handshake and read-only shell problems.",
               file=sys.stderr)
         return 1
-    print("PASS: privacy-filtered Watch3 boot report saved locally.")
-    print("Report path:", args.report)
+    print("PASS: privacy-filtered Watch3 " +
+          ("storage" if args.storage_only else "boot") +
+          " report saved locally.")
+    print("Report path:", dest)
     print("NO bootloader acceptance or stock recovery proven. NOT FLASHABLE.")
     return 0
 
