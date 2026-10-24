@@ -8,6 +8,36 @@ The historical reference [CI #40112813921](https://github.com/UglyGameFace/Galax
 found KEXEC disabled and historical initramfs root=/dev/ram0, but did not
 prove the installed R840X uses those settings.
 
+## Samsung shell-close compatibility note
+
+An **actual R840X SDB handshake** succeeded from Android/Termux on
+2026-10-24, but the first attempted read of /proc/version failed with
+`Invalid SDB stream close`. This does **not** show that the watch kernel
+version was retrieved. A successful CNXN response proves only that Samsung
+SDB answered; the watch can still refuse an attempted shell service.
+
+The direct Python client now distinguishes a valid declined-open
+`CLSE(0, local_id)` from an unexpected stream-ID mismatch such as
+`CLSE(0, 0)`. In `--diagnose-only` mode it makes **one** alternate
+read-only request using the known Samsung Tizen command-dispatcher prefix
+(`shell:0 cat /proc/version`) after a close or unrecognized shell output.
+No arbitrary command, root access, firmware write, scan, install or reboot
+is permitted. The ordinary read-only boot collector likewise tries the
+same alternate representation only if its initial shell was closed.
+
+**Important:** That alternate request format has been observed in
+Samsung TV SDB tooling; the actual SM-R840X shell implementation has
+not been verified to accept it. A second refusal is a genuine diagnostic
+result, not reason to invent a bypass. Neither form's output is considered
+a valid boot observation unless the required data is returned. The tool
+exposes sanitized stream-ID metadata only, never kernel cmdline, device
+IDs, IP address or credentials.
+
+Protocol references:
+- https://github.com/RoboA-PLAYZ/blue-penny/blob/main/docs/tizen-sdb-protocol.md
+- https://github.com/sbose78/tizen-watch-internals
+- https://android.googlesource.com/platform/system/core/+/db511207ed3b2bb4fc422ef83868009b03692e61/adb/protocol.txt
+
 ## Phone hotspot setup and connection diagnosis
 
 **Samsung explicitly supports using a mobile hotspot** for Tizen Galaxy Watch
