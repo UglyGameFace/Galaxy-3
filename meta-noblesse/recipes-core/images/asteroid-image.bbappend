@@ -9,3 +9,8 @@
 # Keep the upstream '-i 4096' and only disable this one newer feature.
 # Do not affect other machines or non-ext4 images.
 EXTRA_IMAGECMD:ext4:append:noblesse-r08 = " -O ^orphan_file"
+
+# Optional Watch3 Edition face pack; does not override the stock face or
+# launcher. AsteroidOS Settings discovers these additional .qml files.
+# Never add this package for other watches or all architectures.
+IMAGE_INSTALL:append:noblesse-r08 = " watch3-faces"
