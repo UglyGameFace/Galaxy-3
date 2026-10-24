@@ -56,7 +56,7 @@ class StyleTests(unittest.TestCase):
                     self.assertNotIn(value, source)
                 self.assertEqual(source.count("{"), source.count("}"))
                 self.assertLess(len(source), 5000)
-                palette |= set(re.findall(r"#[0-9a-fA-F]{6}\\b", source))
+                palette |= set(re.findall(r"#[0-9a-fA-F]{6}", source))
         self.assertGreaterEqual(len(palette), 10)
 
 
