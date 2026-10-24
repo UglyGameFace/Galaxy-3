@@ -1,0 +1,47 @@
+name: Watch3 R08 live-boot evidence parser tests (NO DEVICE)
+
+# These are synthetic host tests only. NEVER open SDB connections in CI,
+# upload a real watch's raw /proc files, enumerate LAN devices or reboot.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/watch3_r08_live_boot_probe.py'
+      - 'tests/test_watch3_r08_live_boot_probe.py'
+      - '.github/workflows/watch3-r08-live-boot-probe-tests.yml'
+      - 'docs/watch3-r08-live-boot-evidence.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pure-python-readonly-fixtures:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify R08 live boot source boundaries and mock-only tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/watch3_r08_live_boot_probe.py
+          python3 -m unittest discover -s tests \
+            -p test_watch3_r08_live_boot_probe.py -v
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('tools/watch3_r08_live_boot_probe.py').read_text()
+          for expected in (
+              'cat /proc/cmdline', 'cat /proc/version',
+              'cat /proc/partitions', 'cat /proc/device-tree/model',
+              'cat /proc/device-tree/chosen/bootargs',
+              'ls -l /dev/block/by-name', 'ls -l /dev/disk/by-name',
+              '"flashing_authorized": False', '"bootloader_acceptance_proven": False'
+          ):
+              assert expected in source, expected
+          assert 'subprocess.run(' in source
+          assert 'shell=True' not in source
+          for forbidden in ('fastboot flash', 'sdb root on', 'netodin', 'heimdall flash'):
+              assert forbidden not in source.lower(), forbidden
+          print('PASS: synthetic-only CI; live SDB not contacted; no installer actions')
+          PY

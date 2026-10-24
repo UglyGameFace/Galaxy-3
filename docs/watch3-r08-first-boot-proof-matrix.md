@@ -81,6 +81,17 @@ read-only JSON report without recompiling or contacting the watch.
 the same initramfs boot assumptions. Never collect serial numbers or
 private identifiers in public GitHub logs.
 
+## Ready-to-use read-only runtime comparison
+
+The [R08 live Tizen boot evidence tool](watch3-r08-live-boot-evidence.md)
+can use an already authorized SDB client, or parse saved output entirely
+offline with Python on an Android phone. It reports actual kernel/root
+arguments, selected partition labels and direct differences from the
+pinned reference without exposing raw command lines or private identifiers.
+The new CI uses **synthetic samples only**, never contacts a device.
+A report is an observation, not evidence that the bootloader accepts a
+custom kernel or that stock firmware can be restored.
+
 ## Fastest evidence-first route to first boot
 
 **Gate A: stock baseline and observation, no writes.** Reuse the existing
