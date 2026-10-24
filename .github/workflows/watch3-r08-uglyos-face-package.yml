@@ -27,6 +27,12 @@ jobs:
     steps:
       - name: Checkout Galaxy-3
         uses: actions/checkout@v4
+      - name: Run fail-closed package validator fixtures before downloading sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/validate_uglyos_face_package.py
+          python3 -m unittest discover -s tests -p 'test_uglyos_face_package.py' -v
       - name: Check free runner capacity before fetching pinned sources
         shell: bash
         run: |
