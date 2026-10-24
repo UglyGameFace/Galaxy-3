@@ -194,6 +194,69 @@ def private_watch_ip(raw):
     return str(address)
 
 
+def diagnose(ip, key_path, timeout=4, output=print):
+    """Report the FIRST failing layer, not raw device output or identifiers.
+
+    TCP connect, SDB authentication and one allowlisted read of /proc/version
+    are separate steps. This method never changes the device.
+    """
+    ip = private_watch_ip(ip)
+    try:
+        with socket.create_connection((ip, PORT), timeout=timeout) as sock:
+            sock.settimeout(8)
+            output("PASS[tcp]: Watch debugging port 26101 is reachable.")
+            channel = Connection(sock, key_path)
+            try:
+                channel.handshake()
+            except (SdbError, OSError, TimeoutError) as exc:
+                if isinstance(exc, (OSError, TimeoutError)):
+                    raise SdbError(
+                        "FAIL[sdb]: TCP connected but watch did not complete "
+                        "SDB handshake. Check Tizen Debugging and authorization."
+                    ) from None
+                raise SdbError(
+                    "FAIL[sdb]: TCP connected, SDB protocol/authentication "
+                    "failed: " + str(exc)
+                ) from None
+            output("PASS[sdb]: Watch accepted experimental SDB handshake.")
+            try:
+                result = channel.shell("version")
+            except (SdbError, OSError, TimeoutError) as exc:
+                if isinstance(exc, (OSError, TimeoutError)):
+                    raise SdbError(
+                        "FAIL[shell]: SDB connected but read-only shell "
+                        "did not respond."
+                    ) from None
+                raise SdbError(
+                    "FAIL[shell]: SDB connected but read-only shell failed: "
+                    + str(exc)
+                ) from None
+            if "Linux version " not in result:
+                raise SdbError(
+                    "FAIL[shell]: SDB responded but did not provide a "
+                    "recognizable /proc/version. No raw output displayed."
+                )
+            output("PASS[shell]: Read-only watch kernel version is accessible.")
+            output("NEXT: Run without --diagnose-only to collect redacted boot facts.")
+    except ConnectionRefusedError:
+        raise SdbError(
+            "FAIL[tcp-refused]: Device refused TCP port 26101. On Tizen "
+            "Watch3 enable Settings > About watch > Debugging, set Wi-Fi "
+            "Always on, and normally restart the watch."
+        ) from None
+    except (TimeoutError, socket.timeout):
+        raise SdbError(
+            "FAIL[tcp-timeout]: No reply on TCP port 26101. Confirm the "
+            "watch's currently displayed hotspot IP, debugging and Wi-Fi "
+            "connection. Your phone's hotspot may isolate clients."
+        ) from None
+    except OSError:
+        raise SdbError(
+            "FAIL[tcp-network]: Watch SDB port could not be reached on "
+            "the current network. Check the watch's IP, hotspot and Wi-Fi."
+        ) from None
+
+
 def collect(ip, key_path, timeout=8):
     ip = private_watch_ip(ip)
     observations, problems = {}, {}
@@ -226,11 +289,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--watch-ip", required=True,
                         help="Exact watch address on your trusted Wi-Fi")
+    parser.add_argument("--diagnose-only", action="store_true",
+                        help="Check hotspot port, SDB handshake and one "
+                             "read-only version command; never collect raw "
+                             "boot data or flash anything")
     parser.add_argument("--report", type=Path,
                         default=Path.home() / "watch3-r08-boot-redacted.json")
     parser.add_argument("--key-path", type=Path,
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     args = parser.parse_args()
+    if args.diagnose_only:
+        try:
+            diagnose(args.watch_ip, args.key_path)
+        except (SdbError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
     try:
         values, errors = collect(args.watch_ip, args.key_path)
         report = summarize(values, errors)
@@ -238,6 +312,9 @@ def main():
         args.report.write_text(json.dumps(report, indent=2) + "\n")
     except (SdbError, ValueError, OSError) as exc:
         print("FAIL[read-only-sdb]: " + str(exc), file=sys.stderr)
+        print("DIAGNOSE: Run again with --diagnose-only to distinguish "
+              "hotspot/TCP, SDB handshake and read-only shell problems.",
+              file=sys.stderr)
         return 1
     print("PASS: privacy-filtered Watch3 boot report saved locally.")
     print("Report path:", args.report)
