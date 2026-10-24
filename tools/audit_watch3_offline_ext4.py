@@ -113,7 +113,9 @@ def audit(image_dir: Path, stage_dir: Path) -> dict:
             f"Read-only e2fsck returned {fsck.returncode}: "
             f"{(fsck.stdout + fsck.stderr)[-1600:]}")
     header = run_tool("dumpe2fs", "-h", str(image), timeout=90)
-    if header.returncode or "Filesystem magic number:  0xEF53" not in header.stdout:
+    if header.returncode or not re.search(
+            r"^Filesystem magic number:\s+0xEF53\s*$",
+            header.stdout, re.MULTILINE):
         raise ValueError(f"Invalid ext4 superblock header: {header.stderr[-500:]}")
     fields = {}
     for line in header.stdout.splitlines():
@@ -125,6 +127,12 @@ def audit(image_dir: Path, stage_dir: Path) -> dict:
                 fields[name.strip()] = value.strip()
     if "extent" not in fields.get("Filesystem features", "").split():
         raise ValueError("Ext4 expected extent feature is absent")
+    feature_names = set(fields.get("Filesystem features", "").split())
+    # orphan_file was added upstream in Linux 5.15. The Watch3 R08
+    # reference kernel is 4.9.59. This is a compatibility concern even if
+    # ext4 metadata is structurally healthy and e2fsck 1.47+ accepts it.
+    # Do not modify an existing successful image to "fix" the feature.
+    legacy_kernel_feature_risk = "orphan_file" in feature_names
 
     with tempfile.TemporaryDirectory(prefix="watch3-offline-audit-") as temporary:
         root = Path(temporary)
@@ -152,6 +160,14 @@ def audit(image_dir: Path, stage_dir: Path) -> dict:
         "verified_sha256": actual,
         "filesystem": fields,
         "read_only_e2fsck": "clean (return code 0)",
+        "ext4_orphan_file_present": legacy_kernel_feature_risk,
+        "legacy_watch3_kernel_4_9_compatibility_risk": legacy_kernel_feature_risk,
+        "kernel_feature_risk_action": (
+            "Stop: require a separate legacy-compatible image build and "
+            "read-only kernel/filesystem evidence before any device action"
+            if legacy_kernel_feature_risk else
+            "No orphan_file flag found; further hardware and kernel checks still required"
+        ),
         "deployed_arm64_launcher": "ELF64 little-endian AArch64 header verified",
         "deployed_compositor_config": list(NEEDED_CONFIG),
         "deployed_launcher_service": "environment reference verified",
@@ -182,6 +198,9 @@ def main() -> int:
     print(json.dumps(result, indent=2))
     print("PASS: ext4 SHA256, superblock, filesystem consistency and extracted "
           "ARM64 launcher/config checked WITHOUT modifying the image.")
+    if result["legacy_watch3_kernel_4_9_compatibility_risk"]:
+        print("BLOCKER: ext4 orphan_file flag is newer than pinned Watch3 "
+              "Linux 4.9.59 reference kernel; no hardware installation.")
     print("NOT TESTED: physical watch boot, secure boot, display, input, audio or "
           "stock firmware recovery. NOT FLASHABLE.")
     return 0
