@@ -1,14 +1,18 @@
 # Galaxy Watch3 / AsteroidOS R08 port research
 
-## Watch3 Edition: customizing AsteroidOS without replacing it
+## UgLy|OS: our enhanced AsteroidOS edition
 
-We are **extending** the existing AsteroidOS build, not inventing a new OS
+**UgLy|OS** is the displayed name of our enhanced AsteroidOS edition. We are
+**extending** the existing AsteroidOS build, not inventing a new OS
 or discarding upstream packages. The first optional enhancements are three
 new round-watch faces (Orbit, Focus, Signal) packaged only for `noblesse-r08`.
 Upstream launcher defaults remain unchanged, and the current Settings
 watchface selector discovers the files from its existing watchfaces folder.
+The optional Orbit face displays the exact **UgLy|OS** name; the shell-safe
+internal identifier is `uglyos`, used in `/usr/share/uglyos/edition.json`.
+The OS foundation remains **AsteroidOS**, with its licenses and attribution.
 
-See the [Watch3 Edition enhancement roadmap](docs/watch3-asteroid-enhancements-roadmap.md)
+See the [UgLy|OS enhancement roadmap](docs/watch3-asteroid-enhancements-roadmap.md)
 for the complete UI, phone integration, fitness, app, privacy, updates, and
 hardware feasibility plan. The source pack is **not yet image-built, rendered
 or hardware-tested**. Installation is still blocked on bootloader acceptance
