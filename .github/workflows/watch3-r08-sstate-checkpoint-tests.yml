@@ -9,6 +9,8 @@ on:
       - '.github/workflows/watch3-r08-sstate-checkpoint-tests.yml'
       - 'tools/watch3_yocto_sstate_checkpoint.py'
       - 'tests/test_watch3_yocto_sstate_checkpoint.py'
+      - 'tools/find_watch3_image_outputs.py'
+      - 'tests/test_watch3_image_outputs.py'
   pull_request:
     branches: [main]
     paths:
@@ -16,6 +18,8 @@ on:
       - '.github/workflows/watch3-r08-qt-staged-runtime.yml'
       - 'tools/watch3_yocto_sstate_checkpoint.py'
       - 'tests/test_watch3_yocto_sstate_checkpoint.py'
+      - 'tools/find_watch3_image_outputs.py'
+      - 'tests/test_watch3_image_outputs.py'
   workflow_dispatch:
 
 permissions:
@@ -33,6 +37,8 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tools/watch3_yocto_sstate_checkpoint.py
           python3 -m unittest discover -s tests -p test_watch3_yocto_sstate_checkpoint.py -v
+          python3 -m py_compile tools/find_watch3_image_outputs.py
+          python3 -m unittest discover -s tests -p test_watch3_image_outputs.py -v
       - name: Create an isolated mock Yocto signature archive and checkpoint
         shell: bash
         run: |
