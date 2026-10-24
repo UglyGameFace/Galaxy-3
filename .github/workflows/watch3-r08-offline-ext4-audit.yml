@@ -16,7 +16,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: watch3-r08-offline-audit-\${{ github.ref }}
+  group: watch3-r08-offline-audit-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -50,7 +50,7 @@ jobs:
           name: galaxy3-r08-OFFLINE-NOT-FLASHABLE-image-40095182440
           run-id: 40095182440
           repository: UglyGameFace/Galaxy-3
-          github-token: \${{ github.token }}
+          github-token: ${{ github.token }}
           path: retrieved/image
 
       - name: Retrieve matching original build SHA256 and package manifest
@@ -59,7 +59,7 @@ jobs:
           name: galaxy3-r08-build-stage-40095182440
           run-id: 40095182440
           repository: UglyGameFace/Galaxy-3
-          github-token: \${{ github.token }}
+          github-token: ${{ github.token }}
           path: retrieved/stage
 
       - name: Inspect ext4 in place without mounting or altering it
@@ -83,7 +83,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: galaxy3-r08-readonly-ext4-audit-\${{ github.run_id }}
+          name: galaxy3-r08-readonly-ext4-audit-${{ github.run_id }}
           retention-days: 30
           if-no-files-found: warn
           path: audit-results/watch3-r08-offline-ext4-audit.json
