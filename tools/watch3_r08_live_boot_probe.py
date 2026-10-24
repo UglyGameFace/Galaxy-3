@@ -40,6 +40,19 @@ STORAGE_PROBES = {
     "p20_uevent": "cat /sys/class/block/mmcblk0p20/uevent",
     "p21_uevent": "cat /sys/class/block/mmcblk0p21/uevent",
 }
+# Explicit, finite opt-in partition-name inventory. Kernel sysfs metadata
+# only; NEVER read /dev/mmcblk*, use dmsetup, remount, or infer flash safety.
+# The keys and commands are generated from the hard-coded 1..21 partitions
+# confirmed by the physical R840X /proc/partitions report.
+PARTITION_PROBES = {
+    "mountinfo": "cat /proc/self/mountinfo",
+    "dm0_dev": "cat /sys/class/block/dm-0/dev",
+    **{
+        f"p{number}_uevent":
+            f"cat /sys/class/block/mmcblk0p{number}/uevent"
+        for number in range(1, 22)
+    },
+}
 ESSENTIAL = ("cmdline", "version", "partitions")
 PUBLIC_FIELDS = ("root", "console", "init", "rootfstype", "rootflags")
 EXPECTED_MODEL = "NOBLESSE-LARGE-BT"
