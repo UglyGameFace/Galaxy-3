@@ -132,8 +132,81 @@ class AndroidSdbTests(unittest.TestCase):
             + frame(b"CLSE", 42, 0))
         conn = Connection(sock, Path("/unused"))
         conn.handshake()
-        with self.assertRaisesRegex(ShellCloseError, "unexpected stream IDs"):
+        with self.assertRaisesRegex(ShellCloseError, "wrong local stream"):
             conn.shell("version")
+
+    def test_real_watch3_okay_then_zero_sender_close_has_no_boot_data(self):
+        # The physical Watch3 R840X trace observed in Termux was:
+        # OKAY(9,2) followed by CLSE(0,2), without a WRTE payload.
+        socket_mock = FakeSocket(
+            frame(b"CNXN", VERSION, 256 * 1024, b"device::\x00")
+            + frame(b"OKAY", 9, 2)
+            + frame(b"CLSE", 0, 2))
+        connection = Connection(socket_mock, Path("/unused"))
+        connection.handshake()
+        with self.assertRaisesRegex(
+            ShellCloseError, r"CLSE\(0,2\) without any WRTE"
+        ):
+            connection.shell("version")
+        sent = decode_all(bytes(socket_mock.sent))
+        self.assertEqual([p[0] for p in sent], [b"CNXN", b"OPEN"])
+
+    def test_legacy_zero_sender_close_can_finish_real_received_data(self):
+        socket_mock = FakeSocket(
+            frame(b"CNXN", VERSION, 256 * 1024, b"device::\x00")
+            + frame(b"OKAY", 9, 2)
+            + frame(b"WRTE", 9, 2, b"Linux version 4.9.59 PRIVATE\n")
+            + frame(b"CLSE", 0, 2))
+        connection = Connection(socket_mock, Path("/unused"))
+        connection.handshake()
+        self.assertIn("Linux version 4.9.59", connection.shell("version"))
+        sent = decode_all(bytes(socket_mock.sent))
+        self.assertEqual([p[0] for p in sent],
+                         [b"CNXN", b"OPEN", b"OKAY"])
+
+    def test_waiting_shell_reports_phase_and_data_count_without_leaks(self):
+        class HangingSocket(FakeSocket):
+            def recv(self, n):
+                if not self.incoming:
+                    raise socket.timeout("watch private IP and credentials")
+                return super().recv(n)
+        socket_mock = HangingSocket(
+            frame(b"CNXN", VERSION, 256 * 1024, b"device::\x00")
+            + frame(b"OKAY", 9, 2))
+        connection = Connection(socket_mock, Path("/unused"))
+        connection.handshake()
+        with self.assertRaisesRegex(
+            ShellCloseError, "after OKAY remote_id=9; WRTE frames=0, bytes=0"
+        ) as error:
+            connection.shell("version", style="tizen-command")
+        self.assertNotIn("watch private IP", str(error.exception))
+
+    def test_both_actual_watch_shell_failures_have_distinct_phases(self):
+        class HangingSocket(FakeSocket):
+            def recv(self, n):
+                if not self.incoming:
+                    raise socket.timeout
+                return super().recv(n)
+        connections = [
+            FakeSocket(
+                frame(b"CNXN", VERSION, 256 * 1024, b"device::\x00")
+                + frame(b"OKAY", 9, 2)
+                + frame(b"CLSE", 0, 2)),
+            HangingSocket(
+                frame(b"CNXN", VERSION, 256 * 1024, b"device::\x00")
+                + frame(b"OKAY", 11, 2))
+        ]
+        messages = []
+        with patch("watch3_r08_android_sdb.socket.create_connection",
+                   side_effect=connections):
+            with self.assertRaisesRegex(SdbError,
+                                        "Both allowed read-only SDB shell forms failed") as result:
+                diagnose("10.54.86.131", Path("/unused"), output=messages.append)
+        msg = str(result.exception)
+        self.assertIn("CLSE(0,2) without any WRTE", msg)
+        self.assertIn("after OKAY remote_id=11; WRTE frames=0, bytes=0", msg)
+        self.assertNotIn("10.54.86.131", msg)
+        self.assertNotIn("PRIVATE", "\n".join(messages))
 
     def test_diagnose_recovers_using_tizen_dispatcher_only_after_close(self):
         first = FakeSocket(
