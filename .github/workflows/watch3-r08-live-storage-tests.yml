@@ -1,0 +1,34 @@
+name: Watch3 R08 read-only storage mapping fixtures (NO DEVICE)
+
+# Completely simulated watch. No physical watch, SDB network request,
+# bootloader change, raw block read, flashing or OS compilation.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/watch3_r08_storage_mapping.py'
+      - 'tools/watch3_r08_android_sdb.py'
+      - 'tools/watch3_r08_live_boot_probe.py'
+      - 'tests/test_watch3_r08_storage_mapping.py'
+      - '.github/workflows/watch3-r08-live-storage-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-storage-probe-tests:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce read-only storage probe and private report fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            tools/watch3_r08_android_sdb.py \
+            tools/watch3_r08_live_boot_probe.py \
+            tools/watch3_r08_storage_mapping.py
+          python3 -m unittest discover -s tests \
+            -p 'test_watch3_r08_storage_mapping.py' -v
