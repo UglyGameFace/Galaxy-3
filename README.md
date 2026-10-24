@@ -13,6 +13,13 @@ newer ext4 **orphan_file** feature, which raises a compatibility concern with th
 reference Linux **4.9.59** Watch3 kernel. Details and next safe steps are in
 [the offline image audit and recovery gates](docs/watch3-r08-offline-image-audit.md).
 
+**First-boot research is now the sole active hardware milestone.** The
+[model-specific proof matrix](docs/watch3-r08-first-boot-proof-matrix.md)
+compares Tizen SDB, wireless download, Ragnarök and internal service routes,
+clearly separating proven operations from unverified R840X capabilities.
+No firmware writes are permitted without exact stock recovery and proven
+custom boot-chain acceptance.
+
 **Status: image compilation and offline integrity successful; kernel filesystem
 compatibility, bootloader, physical display/touch/audio, stock backup and recovery
 remain unverified. No flashing is authorized.**
