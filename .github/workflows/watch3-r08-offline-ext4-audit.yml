@@ -1,0 +1,89 @@
+name: Watch3 R08 read-only audit of completed AsteroidOS ext4
+
+# Audit the existing validated image from run 40095182440.
+# No BitBake, new image compilation, flashing, mounting or watch access.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-offline-ext4-audit.yml'
+      - 'tools/audit_watch3_offline_ext4.py'
+      - 'tests/test_watch3_offline_ext4_audit.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: watch3-r08-offline-audit-\${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit-completed-image:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout offline audit and unchanged Watch3 validators
+        uses: actions/checkout@v4
+
+      - name: Install e2fsprogs for read-only ext4 inspection only
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends e2fsprogs
+          command -v debugfs
+          command -v e2fsck
+          command -v dumpe2fs
+
+      - name: Validate audit helper with fixture tests before fetching build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/audit_watch3_offline_ext4.py
+          python3 -m unittest discover -s tests -p test_watch3_offline_ext4_audit.py -v
+
+      - name: Retrieve the already-built exact Watch3 offline ext4
+        uses: actions/download-artifact@v4
+        with:
+          name: galaxy3-r08-OFFLINE-NOT-FLASHABLE-image-40095182440
+          run-id: 40095182440
+          repository: UglyGameFace/Galaxy-3
+          github-token: \${{ github.token }}
+          path: retrieved/image
+
+      - name: Retrieve matching original build SHA256 and package manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: galaxy3-r08-build-stage-40095182440
+          run-id: 40095182440
+          repository: UglyGameFace/Galaxy-3
+          github-token: \${{ github.token }}
+          path: retrieved/stage
+
+      - name: Inspect ext4 in place without mounting or altering it
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/audit_watch3_offline_ext4.py \
+            --image-dir retrieved/image \
+            --stage-dir retrieved/stage \
+            --report audit-results/watch3-r08-offline-ext4-audit.json
+          {
+            echo '## Galaxy Watch3 R08: existing ext4 audited OFF-DEVICE'
+            echo '- Original build: [#40095182440](https://github.com/UglyGameFace/Galaxy-3/actions/runs/40095182440)'
+            echo '- Matched original SHA256 and package manifest'
+            echo '- Inspected ext4 header and read-only filesystem consistency'
+            echo '- Extracted and checked ARM64 launcher, service and compositor config'
+            echo '- **NOT BOOT-TESTED. NOT FLASHABLE.**'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep only small read-only audit report, never re-upload firmware
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-readonly-ext4-audit-\${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: audit-results/watch3-r08-offline-ext4-audit.json
