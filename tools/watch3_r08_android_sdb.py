@@ -174,8 +174,19 @@ class Connection:
                   (destination + PROBES[operation]).encode() + b"\x00")
         remote = None
         output = bytearray()
+        payload_frames = 0
         for _ in range(128):
-            kind, arg0, arg1, body = receive(self.sock)
+            try:
+                kind, arg0, arg1, body = receive(self.sock)
+            except (OSError, TimeoutError) as exc:
+                # Show protocol phase, not raw output, network identifiers or
+                # authorization material. A refused shell is not a kernel read.
+                phase = ("before OKAY" if remote is None
+                         else f"after OKAY remote_id={remote}")
+                raise ShellCloseError(
+                    "SDB shell timed out " + phase +
+                    f"; WRTE frames={payload_frames}, bytes={len(output)}"
+                ) from None
             if kind == b"OKAY":
                 if arg1 != local or (remote is not None and remote != arg0):
                     raise SdbError("Invalid SDB stream identifiers")
@@ -188,6 +199,7 @@ class Connection:
                 if len(body) + len(output) > MAX_OUTPUT:
                     raise SdbError("SDB response exceeded allowed size")
                 output.extend(body)
+                payload_frames += 1
                 self.send(b"OKAY", local, remote)
             elif kind == b"CLSE":
                 # A valid refused OPEN has sender_id=0, receiver_id=local;
@@ -201,13 +213,34 @@ class Connection:
                         "SDB closed read-only shell before opening it "
                         f"(CLSE sender_id={arg0}, receiver_id={arg1}, "
                         f"expected_receiver_id={local})")
-                if arg1 != local or arg0 != remote:
+                if arg1 != local:
                     raise ShellCloseError(
-                        "SDB closed an established shell with unexpected stream "
-                        f"IDs (CLSE sender_id={arg0}, receiver_id={arg1}, "
-                        f"expected_sender_id={remote}, "
+                        "SDB closed an established shell for the wrong local "
+                        f"stream (CLSE sender_id={arg0}, receiver_id={arg1}, "
                         f"expected_receiver_id={local})")
+                if arg0 == 0:
+                    # Some *older* ADB-family daemons use CLSE(0, local)
+                    # even AFTER acknowledging OPEN, although modern ADB
+                    # documentation reserves zero for failed OPEN. Real
+                    # Watch3 screenshot shows OKAY(9,2), then CLSE(0,2).
+                    # No payload: NOT success. Actual WRTE: may finish.
+                    if not output:
+                        raise ShellCloseError(
+                            "SDB acknowledged shell then closed it with "
+                            f"CLSE(0,{local}) without any WRTE data "
+                            "(legacy zero-sender close or service refusal)")
+                    return output.decode("utf-8", "replace")
+                if arg0 != remote:
+                    raise ShellCloseError(
+                        "SDB closed an established shell with unexpected "
+                        f"sender_id={arg0}, expected_sender_id={remote}, "
+                        f"receiver_id={arg1}")
+                # Existing Samsung SDB behavior echoes a normal nonzero close.
                 self.send(b"CLSE", local, remote)
+                if not output:
+                    raise ShellCloseError(
+                        "SDB acknowledged shell but closed without WRTE data "
+                        f"(remote_id={remote})")
                 return output.decode("utf-8", "replace")
             else:
                 raise SdbError("Unexpected SDB frame during read-only shell")
