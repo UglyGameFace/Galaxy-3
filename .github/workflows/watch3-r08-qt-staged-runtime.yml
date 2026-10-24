@@ -75,7 +75,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            git python3 python3-packaging python3-setuptools gawk diffstat chrpath
+            git python3 python3-packaging python3-setuptools gawk diffstat chrpath e2fsprogs
       - name: Fetch the upstream AsteroidOS metadata layers
         shell: bash
         run: |
@@ -220,9 +220,11 @@ jobs:
           bitbake -e "$TARGET" > "$GITHUB_WORKSPACE/stage-logs/target.env"
           python3 - "$GITHUB_WORKSPACE/stage-logs/target.env" "$TARGET" <<'PY'
           from pathlib import Path
+          import re
           import sys
+          environment = Path(sys.argv[1]).read_text()
           values = {}
-          for line in Path(sys.argv[1]).read_text().splitlines():
+          for line in environment.splitlines():
               for name in ('PN', 'MACHINE', 'DISTRO', 'PV', 'IMAGE_FSTYPES', 'RM_WORK_EXCLUDE'):
                   if line.startswith(name + '='):
                       raw = line.partition('=')[2]
@@ -237,6 +239,13 @@ jobs:
               assert 'asteroid-image' in values.get('RM_WORK_EXCLUDE', '').split(), (
                   'Image rootfs/manifest will be deleted by rm_work; '
                   'add asteroid-image to RM_WORK_EXCLUDE before building')
+              # Verify the EFFECTIVE dynamic task, not only a conf file.
+              # Pinned OE-Core populates it under its temporary ext4 override.
+              task = re.search(r'(?ms)^do_image_ext4\s*\(\)\s*\{(.*?)^\}', environment)
+              assert task and '-O ^orphan_file' in task.group(1), (
+                  'R08 do_image_ext4 is not disabling orphan_file; '
+                  'abort before costly ARM64 compilation')
+              print('PASS: actual R08 do_image_ext4 disables orphan_file')
           print(f'PASS: pinned R08 {target} recipe (offline only)')
           PY
           rm -f "$GITHUB_WORKSPACE/stage-logs/target.env"
@@ -351,6 +360,10 @@ jobs:
             mapfile -t paths < "$GITHUB_WORKSPACE/stage-logs/image-paths.txt"
             python3 "$GITHUB_WORKSPACE/tools/validate_watch3_graphics_rootfs.py" \
               "${paths[0]}" --installed-packages "${paths[1]}"
+            # Independent old-e2fsprogs compatibility gate: no mount, writes,
+            # or bootability claims, executed BEFORE naming output validated.
+            python3 "$GITHUB_WORKSPACE/tools/validate_watch3_legacy_ext4.py" \
+              "${paths[2]}" --report "$GITHUB_WORKSPACE/stage-logs/legacy-ext4.json"
             sha256sum "${paths[2]}" > "$GITHUB_WORKSPACE/stage-logs/asteroid-image.sha256"
             echo "VALIDATED_IMAGE_PATH=${paths[2]}" >> "$GITHUB_ENV"
             cp "${paths[1]}" "$GITHUB_WORKSPACE/stage-logs/installed-packages.manifest"
@@ -420,6 +433,7 @@ jobs:
             stage-logs/image-paths.txt
             stage-logs/asteroid-image.sha256
             stage-logs/installed-packages.manifest
+            stage-logs/legacy-ext4.json
             stage-logs/arm64/
 
       # A timed-out package is not a successful build. Keep this AFTER the
