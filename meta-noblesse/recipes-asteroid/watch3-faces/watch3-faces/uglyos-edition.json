@@ -1,0 +1,10 @@
+{
+  "display_name": "UgLy|OS",
+  "slug": "uglyos",
+  "edition": "Galaxy Watch3 R08",
+  "base_system": "AsteroidOS",
+  "upstream_credit": "AsteroidOS open-source project",
+  "version": "0.1.0-dev",
+  "boot_status": "not-boot-tested",
+  "install_status": "not-flashable"
+}
