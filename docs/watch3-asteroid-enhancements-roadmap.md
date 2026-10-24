@@ -1,9 +1,12 @@
-# Watch3 Edition: Enhanced AsteroidOS, not a replacement OS
+# UgLy|OS: Enhanced AsteroidOS, not a replacement OS
 
 **2026-10-24 · Owner direction:** preserve the real AsteroidOS/OpenEmbedded
 foundation, keep the working experimental `noblesse-r08` integration, and
-develop an optional, highly customizable Watch3 Edition on top. This is
-NOT a request to rename the OS and claim it has booted.
+develop our own highly customizable **UgLy|OS** edition on top.
+**UgLy|OS** is the exact user-facing name (including `|`); `uglyos` is the
+safe machine identifier for paths, packages, services and automation.
+The edition is **based on AsteroidOS**, with upstream licenses, credits and
+update boundaries retained. This naming does NOT mean it has booted.
 
 **Current physical status:** a validated *offline* ARM64 AsteroidOS ext4
 exists; Android-to-Watch3 Tizen SDB can read runtime evidence. The 4.9.59
@@ -87,10 +90,11 @@ the needed chips and kernel drivers are verified. Remote AI/voice features
 can use the Android phone rather than pretend cloud inference is free on a
 small 2020-era watch.
 
-## First delivered software slice: optional watchface assets
+## First software slice: optional UgLy|OS watchface assets
 
 Under `meta-noblesse/recipes-asteroid/watch3-faces`:
-- `900-watch3-orbit.qml` uses an OLED-friendly dark green accent;
+- `900-watch3-orbit.qml` uses an OLED-friendly dark green accent and
+  displays **UgLy|OS** as its nameplate;
 - `901-watch3-focus.qml` uses a calm monochrome presentation;
 - `902-watch3-signal.qml` uses high-contrast amber sport styling.
 
@@ -99,7 +103,9 @@ All bind to **real** `wallClock.time`, 12/24h `use12H.value`,
 existing `burnInProtectionManager`. No GPU shader masks, heavy animations,
 network access or fabricated health information.
 
-The R08-only `watch3-faces_1.0.bb` packages these files without patching
+The R08-only `watch3-faces_1.0.bb` packages these files and installs
+`/usr/share/uglyos/edition.json` containing the exact display name, safe
+identifier, base OS credit and experimental/non-flashable status, without patching
 the actual launcher and the image recipe appends `watch3-faces` only for
 `noblesse-r08`. Existing watchface selection and originals remain intact.
 
