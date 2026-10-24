@@ -1,0 +1,54 @@
+name: Watch3 R08 legacy ext4 compatibility checks
+
+# Fast host-only format and workflow contract tests. No BitBake compile,
+# no watch access, no flashing, no untrusted firmware writes.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-legacy-ext4-check.yml'
+      - '.github/workflows/watch3-r08-qt-staged-runtime.yml'
+      - 'meta-noblesse/recipes-core/images/asteroid-image.bbappend'
+      - 'tools/validate_watch3_legacy_ext4.py'
+      - 'tests/test_watch3_legacy_ext4.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  legacy-ext4-fixture:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate e2fsprogs and reproducible fixture tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          e2fsck -V
+          command -v mkfs.ext4
+          command -v dumpe2fs
+          python3 -m py_compile tools/validate_watch3_legacy_ext4.py
+          python3 -m unittest discover -s tests -p test_watch3_legacy_ext4.py -v
+
+      - name: Ensure real R08 image workflow retains safety and full validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path('.github/workflows/watch3-r08-qt-staged-runtime.yml').read_text()
+          recipe = Path('meta-noblesse/recipes-core/images/asteroid-image.bbappend').read_text()
+          assert 'EXTRA_IMAGECMD:ext4:append:noblesse-r08 = " -O ^orphan_file"' in recipe
+          assert "actual R08 do_image_ext4 disables orphan_file" in src
+          assert 'validate_watch3_legacy_ext4.py' in src
+          assert "validate_watch3_graphics_rootfs.py" in src
+          assert "find_watch3_image_outputs.py" in src
+          assert "RM_WORK_EXCLUDE" in src
+          assert "legacy-ext4.json" in src
+          assert "OFFLINE-NOT-FLASHABLE" in src
+          assert "bitbake asteroid-image" in src
+          print("PASS: R08 legacy ext4 metadata and original image-validation gates retained")
+          PY
