@@ -1,5 +1,23 @@
 # Galaxy Watch3 / AsteroidOS R08 port research
 
+## Current milestone: real image built, verified off-device, not flash-ready
+
+On **October 24, 2026**, [full AsteroidOS ARM64 image build #40095182440](https://github.com/UglyGameFace/Galaxy-3/actions/runs/40095182440)
+passed all 8,040 BitBake tasks and the rootfs/Qt/ARM64 validation gates.
+A real ext4 was uploaded as an explicitly **OFFLINE-NOT-FLASHABLE** artifact.
+Download and preserve that original image before its scheduled expiry on **October 31, 2026**.
+
+A separate, read-only artifact audit independently checked the original checksum,
+ext4 filesystem consistency and embedded ARM64 launcher. It also detected the
+newer ext4 **orphan_file** feature, which raises a compatibility concern with the
+reference Linux **4.9.59** Watch3 kernel. Details and next safe steps are in
+[the offline image audit and recovery gates](docs/watch3-r08-offline-image-audit.md).
+
+**Status: image compilation and offline integrity successful; kernel filesystem
+compatibility, bootloader, physical display/touch/audio, stock backup and recovery
+remain unverified. No flashing is authorized.**
+
+
 **Device:** Samsung Galaxy Watch3 SM-R840X, NOBLESSE-LARGE-BT (Exynos 9110, revision R08)
 **Installed firmware:** R840XXXU1AUA2; Tizen 5.5; running kernel Linux 4.9.59.
 
