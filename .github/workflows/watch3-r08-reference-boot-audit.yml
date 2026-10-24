@@ -1,0 +1,82 @@
+name: Watch3 R08 pinned boot reference audit (NO DEVICE ACCESS)
+
+# Fetch only five fixed public reference source files and audit boot facts.
+# No compilation, watch reboot, network probing, PIT, flash or recovery calls.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-reference-boot-audit.yml'
+      - 'tools/audit_watch3_reference_boot.py'
+      - 'tests/test_watch3_reference_boot_audit.py'
+      - 'docs/watch3-r08-first-boot-proof-matrix.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-reference:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout audit code only
+        uses: actions/checkout@v4
+
+      - name: Fast offline fixture tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/audit_watch3_reference_boot.py
+          python3 -m unittest discover -s tests -p test_watch3_reference_boot_audit.py -v
+
+      - name: Fetch the exact pinned five R08 vendor reference files
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit=ec258e12887d37362b59e3291c1d3e5363c24bff
+          base="https://raw.githubusercontent.com/UsrBinLuna/kernel_samsung_galileo/$commit/arch/arm64"
+          mkdir -p reference
+          curl -fLSs --retry 3 --max-time 90 "$base/configs/tizen_noblesse_defconfig" \
+            -o reference/base.config
+          curl -fLSs --retry 3 --max-time 90 "$base/configs/tizen_noblesse_large_defconfig" \
+            -o reference/large.config
+          curl -fLSs --retry 3 --max-time 90 "$base/configs/tizen_noblesse_brcm_defconfig" \
+            -o reference/brcm.config
+          curl -fLSs --retry 3 --max-time 90 \
+            "$base/boot/dts/exynos/exynos9110-tizen_noblesse_large_bt-r08.dts" \
+            -o reference/board.dts
+          curl -fLSs --retry 3 --max-time 90 \
+            "$base/boot/dts/exynos/exynos9110-tizen_noblesse_large_bt-r08.dtsi" \
+            -o reference/board.dtsi
+          wc -c reference/*
+          # Reference source only, not the current stock firmware or an
+          # extracted device partition. The commit is explicit and fixed.
+
+      - name: Audit historical R08 boot/rootfs contract without a device
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/audit_watch3_reference_boot.py \
+            --base reference/base.config \
+            --large reference/large.config \
+            --brcm reference/brcm.config \
+            --dts reference/board.dts \
+            --dtsi reference/board.dtsi \
+            --output audit-results/r08-historical-boot-reference.json
+          {
+            echo '## R08 pinned reference audit'
+            echo '- R08 model, Exynos ID and initramfs root arguments checked'
+            echo '- CONFIG_KEXEC disabled in the historical reference and its fragments'
+            echo '- The true deployed bootargs/partition map/signature policy **remain unknown**'
+            echo '- **NO DEVICE BOOT PROVEN; NO FLASHING AUTHORIZED**'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload tiny reference report only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-historical-boot-reference-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: audit-results/r08-historical-boot-reference.json
