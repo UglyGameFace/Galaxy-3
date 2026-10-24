@@ -31,6 +31,14 @@ class SdbError(ValueError):
     pass
 
 
+class ShellCloseError(SdbError):
+    """The watch closed a requested shell stream, possibly before acceptance.
+
+    This is different from failure of the authenticated TCP/SDB transport.
+    The frame's local/remote stream IDs, not watch identifiers, are logged.
+    """
+
+
 def frame(kind: bytes, arg0=0, arg1=0, body=b""):
     if kind not in KNOWN or len(body) > MAX_PAYLOAD:
         raise SdbError("Invalid SDB frame command or payload size")
@@ -152,11 +160,18 @@ class Connection:
                 raise SdbError("Watch authorization failed; approve prompt on watch")
         raise SdbError("Watch SDB handshake could not complete")
 
-    def shell(self, operation):
+    def shell(self, operation, style="standard"):
         if operation not in PROBES:
             raise SdbError("Operation not in the fixed read-only allowlist")
+        if style not in {"standard", "tizen-command"}:
+            raise SdbError("Unknown read-only SDB shell service style")
+        # Classic watch SDB uses "shell:cat ..."; Samsung's Tizen service
+        # dispatcher on some models uses "shell:0 cat ..." instead.
+        # Both variants only contain our literal read-only allowlist.
+        destination = ("shell:" if style == "standard" else "shell:0 ")
         local = 2
-        self.send(b"OPEN", local, 0, ("shell:" + PROBES[operation]).encode() + b"\x00")
+        self.send(b"OPEN", local, 0,
+                  (destination + PROBES[operation]).encode() + b"\x00")
         remote = None
         output = bytearray()
         for _ in range(128):
@@ -164,6 +179,8 @@ class Connection:
             if kind == b"OKAY":
                 if arg1 != local or (remote is not None and remote != arg0):
                     raise SdbError("Invalid SDB stream identifiers")
+                if arg0 == 0:
+                    raise SdbError("Device acknowledged shell with zero stream ID")
                 remote = arg0
             elif kind == b"WRTE":
                 if remote is None or arg0 != remote or arg1 != local:
@@ -173,10 +190,23 @@ class Connection:
                 output.extend(body)
                 self.send(b"OKAY", local, remote)
             elif kind == b"CLSE":
-                if arg1 != local or (remote is not None and arg0 != remote):
-                    raise SdbError("Invalid SDB stream close")
+                # A valid refused OPEN has sender_id=0, receiver_id=local;
+                # it must NEVER be treated as successful empty output.
+                # Record only stream IDs, not frame content or secrets.
                 if remote is None:
-                    raise SdbError("Watch denied requested read-only shell")
+                    if arg0 == 0 and arg1 == local:
+                        raise ShellCloseError(
+                            "Read-only shell OPEN refused by SDB (CLSE 0/local)")
+                    raise ShellCloseError(
+                        "SDB closed read-only shell before opening it "
+                        f"(CLSE sender_id={arg0}, receiver_id={arg1}, "
+                        f"expected_receiver_id={local})")
+                if arg1 != local or arg0 != remote:
+                    raise ShellCloseError(
+                        "SDB closed an established shell with unexpected stream "
+                        f"IDs (CLSE sender_id={arg0}, receiver_id={arg1}, "
+                        f"expected_sender_id={remote}, "
+                        f"expected_receiver_id={local})")
                 self.send(b"CLSE", local, remote)
                 return output.decode("utf-8", "replace")
             else:
@@ -221,6 +251,37 @@ def diagnose(ip, key_path, timeout=4, output=print):
             output("PASS[sdb]: Watch accepted experimental SDB handshake.")
             try:
                 result = channel.shell("version")
+                style = "standard"
+                if "Linux version " not in result:
+                    raise ShellCloseError(
+                        "Standard SDB shell response was not a kernel version")
+            except ShellCloseError as first:
+                output("NOTE[shell]: Standard read-only shell was closed or "
+                       "returned no valid kernel version; checking documented "
+                       "Tizen command-prefixed format.")
+                try:
+                    # Independent connection, not an unverified reuse of a
+                    # closed SDB stream. Never send arbitrary commands.
+                    with socket.create_connection((ip, PORT),
+                                                  timeout=timeout) as second:
+                        second.settimeout(8)
+                        other = Connection(second, key_path)
+                        other.handshake()
+                        result = other.shell("version", style="tizen-command")
+                    style = "tizen-command"
+                except (SdbError, OSError, TimeoutError) as second_error:
+                    # All messages describe protocol state, not raw output.
+                    if isinstance(second_error, ShellCloseError):
+                        reason = str(second_error)
+                    elif isinstance(second_error, SdbError):
+                        reason = str(second_error)
+                    else:
+                        reason = "second read-only shell did not respond"
+                    raise SdbError(
+                        "FAIL[shell]: Both allowed read-only SDB shell forms "
+                        "failed. Standard: " + str(first) + "; Tizen command: "
+                        + reason
+                    ) from None
             except (SdbError, OSError, TimeoutError) as exc:
                 if isinstance(exc, (OSError, TimeoutError)):
                     raise SdbError(
@@ -236,7 +297,8 @@ def diagnose(ip, key_path, timeout=4, output=print):
                     "FAIL[shell]: SDB responded but did not provide a "
                     "recognizable /proc/version. No raw output displayed."
                 )
-            output("PASS[shell]: Read-only watch kernel version is accessible.")
+            output("PASS[shell]: Read-only watch kernel version is accessible "
+                   f"(format={style}).")
             output("NEXT: Run without --diagnose-only to collect redacted boot facts.")
     except ConnectionRefusedError:
         raise SdbError(
@@ -266,7 +328,18 @@ def collect(ip, key_path, timeout=8):
                 sock.settimeout(max(timeout, 25))
                 channel = Connection(sock, key_path)
                 channel.handshake()
-                value = channel.shell(name)
+                try:
+                    value = channel.shell(name)
+                except ShellCloseError:
+                    # A Tizen command-dispatcher variant is observed on some
+                    # Samsung devices. Only try the SAME fixed read-only
+                    # operation, in a fresh authorized connection.
+                    with socket.create_connection((ip, PORT),
+                                                  timeout=timeout) as second:
+                        second.settimeout(max(timeout, 25))
+                        alt = Connection(second, key_path)
+                        alt.handshake()
+                        value = alt.shell(name, style="tizen-command")
             if (not value.strip() or any(
                 warning in value.lower() for warning in (
                     "permission denied", "no such file", "not found", "access denied"
