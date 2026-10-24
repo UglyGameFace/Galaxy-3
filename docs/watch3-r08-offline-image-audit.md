@@ -64,6 +64,25 @@ possible. Inspect the resulting filesystem with a modern checker **and**
 test older kernel/e2fsprogs compatibility off-device. Preserve the original
 passing artifact unchanged for provenance and comparison.
 
+## R08 legacy-ext4 candidate (proposed, not yet built)
+
+A separate R08-only AsteroidOS image recipe append now requests
+`EXTRA_IMAGECMD:ext4:append:noblesse-r08 = " -O ^orphan_file"`.
+The pinned Yocto image_types class uses the ext4 override when constructing
+`do_image_ext4`; the manual staged workflow refuses to start expensive
+compilation unless the generated image task actually includes that flag.
+
+After the regular rootfs/graphics checks, a new read-only gate checks
+the resulting ext4's feature list and requires `e2fsck -f -n` to succeed
+using Ubuntu 22.04's older e2fsprogs. The original October 24 image is
+unchanged, with its original SHA-256 and off-device audit preserved.
+
+**Do not mark the legacy candidate validated until a new complete
+`asteroid-image` run passes both validators.** Even a passing image is not
+boot- or recovery-tested and must not be flashed. The new run should restore
+the existing Yocto sstate checkpoint and rebuild affected image tasks rather
+than intentionally recompiling the entire OS.
+
 ## Other hardware gates still completely open
 
 - Prove signing, boot-chain and bootloader behavior for **SM-R840X R08**,
