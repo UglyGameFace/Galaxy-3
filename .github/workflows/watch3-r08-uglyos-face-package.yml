@@ -147,6 +147,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Fresh runner steps share the checkout, not pre-created output dirs.
+          # Create before any shell redirection or tee: otherwise BitBake is
+          # skipped by bash with 'No such file or directory'.
+          mkdir -p "$GITHUB_WORKSPACE/uglyos-logs"
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
@@ -159,6 +163,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Fresh runner steps share the checkout, not pre-created output dirs.
+          # Create before any shell redirection or tee: otherwise BitBake is
+          # skipped by bash with 'No such file or directory'.
+          mkdir -p "$GITHUB_WORKSPACE/uglyos-logs"
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
@@ -168,6 +176,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Fresh runner steps share the checkout, not pre-created output dirs.
+          # Create before any shell redirection or tee: otherwise BitBake is
+          # skipped by bash with 'No such file or directory'.
+          mkdir -p "$GITHUB_WORKSPACE/uglyos-logs"
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
