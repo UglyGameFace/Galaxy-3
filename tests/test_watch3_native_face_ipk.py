@@ -118,6 +118,29 @@ class NativeIpkTests(unittest.TestCase):
         with self.assertRaisesRegex(PackageError, "runtime dependency"):
             verify_native_ipk(self.info, self.source, self.file)
 
+    def test_rejects_extra_runtime_dependency_even_with_launcher(self):
+        self.write_ipk(control={"Package": "watch3-faces", "Version": "1.0-r0",
+                                "Architecture": "noblesse_r08",
+                                "Depends": "asteroid-launcher, bogus"})
+        with self.assertRaisesRegex(PackageError, "exactly asteroid-launcher"):
+            verify_native_ipk(self.info, self.source, self.file)
+
+    def test_data_only_override_has_fail_closed_runtime_and_graph_checks(self):
+        root = Path(__file__).resolve().parents[1]
+        recipe = (root / "meta-noblesse/recipes-asteroid/watch3-faces/"
+                  "watch3-faces_1.0.bb").read_text()
+        self.assertTrue(any(line.startswith("RDEPENDS:") and
+                            "asteroid-launcher" in line
+                            for line in recipe.splitlines()))
+        self.assertIn('d.setVarFlag("do_package_write_ipk", "rdeptask", "")', recipe)
+        self.assertIn('if deps != ["asteroid-launcher"]:', recipe)
+        workflow = (root / ".github/workflows/watch3-r08-native-face-ipk.yml").read_text()
+        self.assertIn("bitbake -g -c package_write_ipk watch3-faces", workflow)
+        self.assertIn("bitbake -c package_write_ipk watch3-faces", workflow)
+        self.assertIn('validate_watch3_native_face_ipk.py"', workflow)
+        self.assertIn("assert len(tasks) <= 800", workflow)
+        self.assertNotIn("bitbake -b ", workflow)
+
     def test_rejects_unexpected_archive_payload(self):
         payload = dict(self.payload)
         payload["etc/unsafe"] = b"extra"

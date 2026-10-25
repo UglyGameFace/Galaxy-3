@@ -214,15 +214,19 @@ class UgLyOSPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(PackageError, "Unexpected package-split assets"):
             inspect_package(self.info, self.source)
 
-    def test_bounded_native_package_split_does_not_fake_ipk(self):
+    def test_native_ipk_requires_bounded_graph_and_real_package_split(self):
         workflow = (Path(__file__).resolve().parents[1] /
                     ".github/workflows/watch3-r08-native-face-ipk.yml").read_text()
-        self.assertIn("bitbake -g -c package watch3-faces", workflow)
-        self.assertIn("bitbake -c package watch3-faces", workflow)
+        # Preserve the verified 522-task staging path within real IPK build.
+        self.assertIn("bitbake -g -c package_write_ipk watch3-faces", workflow)
+        self.assertIn("bitbake -c package_write_ipk watch3-faces", workflow)
         self.assertIn('validate_uglyos_face_package.py" packaged', workflow)
+        self.assertIn('validate_watch3_native_face_ipk.py"', workflow)
         self.assertIn("01-native-ipk-task-depends.dot", workflow)
-        self.assertNotIn("bitbake -c package_write_ipk watch3-faces 2>&1", workflow)
-        self.assertIn("NOT TESTED: native package_write_ipk", workflow)
+        self.assertIn("assert len(tasks) <= 800", workflow)
+        self.assertIn("asteroid-launcher.do_packagedata", workflow)
+        self.assertIn("NOT TESTED: opkg installation", workflow)
+        self.assertNotIn("bitbake -b ", workflow)
 
     def test_unknown_or_root_paths_rejected(self):
         with self.assertRaisesRegex(PackageError, "Unsafe package path"):
