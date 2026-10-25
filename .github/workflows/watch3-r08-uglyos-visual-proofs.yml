@@ -51,22 +51,22 @@ jobs:
           set -euo pipefail
           python3 tools/render_uglyos_faces.py --output uglyos-qt-previews |
             tee uglyos-host-render.log
-          test "$(find uglyos-qt-previews -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 15
+          test "$(find uglyos-qt-previews -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 30
           test -s uglyos-qt-previews/render-report.json
           python3 - <<'PY'
           import json
           from pathlib import Path
           report = json.loads(Path('uglyos-qt-previews/render-report.json').read_text())
-          assert len(report['images']) == 15
+          assert len(report['images']) == 30
           assert len({x['file'].split('--')[0] for x in report['images']}) == 3
           assert all(x['highlight_samples'] >= 40 for x in report['images'])
-          print("PASS: 15 nonblank previews from real QML sources; mock signals disclosed")
+          print("PASS: 30 nonblank previews including five selectable palettes per face")
           PY
           {
             echo '## UgLy|OS host Qt software-rendering proof'
-            echo '- Three unchanged R08 QML sources rendered, 15 round-screen previews'
-            echo '- Active 12h/24h, ambient, nightstand and 240px layout gates'
-            echo '- Fake Nemo.Mce battery and clock inputs; no device connection'
+            echo '- Three real R08 QML sources rendered, 30 round-screen previews'
+            echo '- Active 12h/24h, ambient, nightstand, 240px and 5 custom palette gates'
+            echo '- Mock Nemo.Mce battery, Nemo.Configuration accent and clock inputs; no device connection'
             echo '- NOT TESTED: target Qt 6.11, framebuffer, AOD, boot, install or recovery'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload OFFDEVICE-MOCK-SIGNALS visual evidence

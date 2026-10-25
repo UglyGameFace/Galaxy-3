@@ -2,11 +2,27 @@
 // Galaxy Watch3 AsteroidOS enhancements: Focus. Minimal monochrome face.
 import QtQuick
 import Nemo.Mce
+import Nemo.Configuration
 
 Item {
     id: face
     anchors.fill: parent
     readonly property real diameter: Math.min(width, height)
+    // Shared optional appearance preference; original/unknown retains legacy colors.
+    readonly property string accentChoice: ["emerald", "ice", "violet", "ember", "rose"].indexOf(uglyOsAccent.value) >= 0
+                                            ? uglyOsAccent.value : "original"
+    readonly property bool themed: accentChoice !== "original"
+    readonly property color accent: accentChoice === "emerald" ? "#44E8A3"
+                                  : accentChoice === "ice" ? "#80D9FF"
+                                  : accentChoice === "violet" ? "#BE9BFF"
+                                  : accentChoice === "ember" ? "#FFBE72"
+                                  : accentChoice === "rose" ? "#FF95C8"
+                                  : "#DDDDDD"
+    ConfigurationValue {
+        id: uglyOsAccent
+        key: "/desktop/uglyos/appearance/accent"
+        defaultValue: "original"
+    }
     readonly property string currentTime: wallClock.time.toLocaleString(
         Qt.locale(), use12H.value ? "h:mm AP" : "HH:mm")
     readonly property bool dimmed: displayAmbient || nightstand
@@ -41,13 +57,13 @@ Item {
             width: safe.width * 0.64
             height: Math.max(1, safe.height * 0.006)
             y: safe.height * 0.65
-            color: face.dimmed ? "#424242" : "#686868"
+            color: face.dimmed ? "#424242" : (face.themed ? face.accent : "#686868")
         }
         Text {
             y: safe.height * 0.72
             anchors.horizontalCenter: parent.horizontalCenter
             text: wallClock.time.toLocaleString(Qt.locale(), "d MMM yyyy")
-            color: face.dimmed ? "#828282" : "#DDDDDD"
+            color: face.dimmed ? "#828282" : face.accent
             font.pixelSize: safe.height * 0.075
             renderType: Text.NativeRendering
         }
@@ -56,7 +72,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             visible: !face.dimmed
             text: battery.percent + "%"
-            color: "#999999"
+            color: face.themed ? face.accent : "#999999"
             font.pixelSize: safe.height * 0.065
             renderType: Text.NativeRendering
         }

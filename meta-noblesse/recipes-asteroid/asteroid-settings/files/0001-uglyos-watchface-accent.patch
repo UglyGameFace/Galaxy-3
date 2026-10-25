@@ -1,0 +1,72 @@
+From: UgLy|OS R08 project
+Subject: [PATCH] Add optional R08 accent cycling to pinned AsteroidOS watchface settings
+
+---
+--- a/src/qml/WatchfacePage.qml
++++ b/src/qml/WatchfacePage.qml
+@@ -24,12 +24,17 @@
+ import Nemo.Configuration
+ 
+ Item {
++    id: watchfacePage
+     property int depth
+     property var pop
+     property alias displayAmbient: compositor.displayAmbient
+     property string assetPath: "file:///usr/share/asteroid-launcher/"
+     property alias watchface: watchfaceSource.value
+ 
++    readonly property var accentIds: ["original", "emerald", "ice", "violet", "ember", "rose"]
++    readonly property var accentNames: [qsTr("Original"), qsTr("Emerald"), qsTr("Ice"),
++                                        qsTr("Violet"), qsTr("Ember"), qsTr("Rose")]
++
+     ConfigurationValue {
+         id: watchfaceSource
+         key: "/desktop/asteroid/watchface"
+@@ -48,12 +53,46 @@
+         defaultValue: false
+     }
+ 
++    ConfigurationValue {
++        id: uglyOsAccent
++        key: "/desktop/uglyos/appearance/accent"
++        defaultValue: "original"
++    }
++
+     QtObject {
+         id: compositor
+         property bool displayAmbient: false
+     }
+ 
++    // Preserve the stock face grid and selector/configuration key.
++    // The R08-only palette row uses the existing OptionCycler control.
+     WatchfaceSelector {
+-        anchors.fill: parent
++        anchors.top: parent.top
++        anchors.left: parent.left
++        anchors.right: parent.right
++        anchors.bottom: accentRow.top
+     }
++    Item {
++        id: accentRow
++        anchors.left: parent.left
++        anchors.right: parent.right
++        anchors.bottom: parent.bottom
++        anchors.bottomMargin: Dims.h(5)
++        height: Dims.h(23)
++
++        OptionCycler {
++            anchors.centerIn: parent
++            width: parent.width * 0.82
++            height: parent.height
++            text: qsTr("UgLy|OS accent")
++            valueArray: watchfacePage.accentNames
++            currentValue: watchfacePage.accentNames[
++                Math.max(0, watchfacePage.accentIds.indexOf(uglyOsAccent.value))]
++            onValueChanged: (selected) => {
++                const index = watchfacePage.accentNames.indexOf(selected)
++                if (index >= 0 && uglyOsAccent.value !== watchfacePage.accentIds[index])
++                    uglyOsAccent.value = watchfacePage.accentIds[index]
++            }
++        }
++    }
+ }
