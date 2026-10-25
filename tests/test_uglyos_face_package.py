@@ -174,6 +174,41 @@ class UgLyOSPackageTests(unittest.TestCase):
             "RDEPENDS:watch3-faces": "asteroid-launcher"
         })
 
+    def test_bitbake_env_reader_accepts_actual_exported_datadir(self):
+        # Run #40151216277: the real package-env.tmp has this
+        # form. The previous reader dropped datadir, then do_install
+        # validation falsely raised "Unsafe datadir".
+        file = self.root / "exported.env"
+        file.write_text(
+            '# $datadir [2 operations]\\n'
+            '#     "${prefix}/share"\\n'
+            'export datadir="/usr/share"\\n'
+            'export prefix="/usr"\\n'
+            f'D="{self.installed_root}"\\n'
+            'PN="watch3-faces"\\n'
+        )
+        parsed = variables(file)
+        self.assertEqual(parsed["datadir"], "/usr/share")
+        self.assertEqual(parsed["D"], str(self.installed_root))
+        inspect_installed(parsed, self.source)
+
+    def test_bitbake_env_reader_ignores_commented_export_history(self):
+        file = self.root / "commented-export.env"
+        file.write_text(
+            '# export datadir="/usr/../etc"\\n'
+            'export datadir="/usr/share"\\n'
+        )
+        self.assertEqual(variables(file), {"datadir": "/usr/share"})
+
+    def test_bitbake_env_reader_does_not_allow_unsafe_exported_paths(self):
+        file = self.root / "bad-export.env"
+        file.write_text(
+            'export datadir="/usr/../etc"\\n'
+            f'D="{self.installed_root}"\\n'
+        )
+        with self.assertRaisesRegex(PackageError, "Unsafe datadir"):
+            inspect_installed(variables(file), self.source)
+
     def test_unknown_or_root_paths_rejected(self):
         with self.assertRaisesRegex(PackageError, "Unsafe package path"):
             inspect_package({"D": "/", "PKGDEST": "/", "datadir": "/usr/share"},
