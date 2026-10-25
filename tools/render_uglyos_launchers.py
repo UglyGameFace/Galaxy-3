@@ -199,8 +199,22 @@ def render(app: QGuiApplication, qml: Path, size: int, palette: str, effects: st
             if hasattr(item, "childItems"):
                 stack.extend(item.childItems())
         if first is None:
+            apps = view.rootObject().findChild(QObject, "uglyos-apps-view")
+            if apps is None:
+                apps = next((v for v in view.rootObject().childItems()
+                             if v.objectName() == "uglyos-apps-view"), None)
+            attrs = ("contentY", "originY", "contentHeight", "currentIndex",
+                     "count", "atYBeginning", "atYEnd")
+            state = {name: apps.property(name) for name in attrs} if apps else {}
+            if apps:
+                state.update(width=apps.width(), height=apps.height(), y=apps.y())
+            coords = {}
+            for item in (apps.childItems() if apps else []):
+                if item.objectName().startswith("uglyos-app-item-"):
+                    coords[item.objectName()] = (item.x(), item.y(), item.height())
             raise RuntimeError(f"First app delegate not in visible Qt Quick tree for {qml.name}; "
-                               f"named items={visible[:35]}, model count={model.rowCount()}")
+                               f"named items={visible[:35]}, model count={model.rowCount()}, "
+                               f"view={state}, delegate_coordinates={coords}")
     local = QPointF(first.width() * 0.5, first.height() * 0.5)
     scene = first.mapToScene(local)
     point = QPoint(round(scene.x()), round(scene.y()))
