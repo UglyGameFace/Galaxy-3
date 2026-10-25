@@ -159,6 +159,29 @@ jobs:
           python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_face_package.py" metadata \
             "$GITHUB_WORKSPACE/uglyos-logs/face-env.tmp" "$GITHUB_WORKSPACE/uglyos-logs/image-env.tmp"
           rm -f "$GITHUB_WORKSPACE/uglyos-logs/"*.env.tmp
+      - name: Prepare Yocto pseudo-native fakeroot for isolated packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/uglyos-logs"
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          # Run #40148392465 proved -b correctly isolates the 10 recipe
+          # tasks, but do_install still requires the actual Pseudo executable
+          # from virtual/fakeroot-native:do_populate_sysroot. -b deliberately
+          # skips cross-recipe deps, so prepare this one prerequisite first.
+          # Build the native fakeroot sysroot, NOT the target toolchain, Qt,
+          # or the firmware image. Pipefail preserves BitBake's exit status.
+          timeout --signal=TERM --kill-after=5s 900s \
+            bitbake -c populate_sysroot pseudo-native 2>&1 |
+            tee "$GITHUB_WORKSPACE/uglyos-logs/pseudo-native-sysroot.log"
+          pseudo_bin="$BUILDDIR/tmp/sysroots-components/$(uname -m)/pseudo-native/usr/bin/pseudo"
+          if [[ ! -x "$pseudo_bin" ]]; then
+            echo "::error title=Missing Yocto fakeroot::pseudo-native did not populate $pseudo_bin"
+            exit 1
+          fi
+          echo "PASS: BitBake's required pseudo-native fakeroot is available"
       - name: Package only UgLyOS QML assets using isolated BitBake recipe
         shell: bash
         run: |
