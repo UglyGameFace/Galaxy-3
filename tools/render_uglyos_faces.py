@@ -33,6 +33,11 @@ CASES = (
     ("ambient", 360, False, True, False),
     ("nightstand", 360, False, False, True),
     ("compact-240", 240, False, False, False),
+    ("palette-emerald", 360, False, False, False),
+    ("palette-ice", 360, False, False, False),
+    ("palette-violet", 360, False, False, False),
+    ("palette-ember", 360, False, False, False),
+    ("palette-rose", 360, False, False, False),
 )
 
 
@@ -110,7 +115,7 @@ def _measure(raw: QImage) -> dict[str, int]:
 
 
 def _render_one(app: QGuiApplication, source: Path, size: int,
-                use12: bool, ambient: bool, nightstand: bool) -> tuple[QImage, dict]:
+                use12: bool, ambient: bool, nightstand: bool, preset: str) -> tuple[QImage, dict]:
     clock = Clock()
     preference = FormatPreference(use12)
     burnin = BurnInMock()
@@ -124,12 +129,17 @@ def _render_one(app: QGuiApplication, source: Path, size: int,
     context.setContextProperty("burnInProtectionManager", burnin)
     context.setContextProperty("displayAmbient", ambient)
     context.setContextProperty("nightstand", nightstand)
+    context.setContextProperty("mockAccentPreset", preset)
     view.setResizeMode(QQuickView.SizeRootObjectToView)
     view.resize(size, size)
     view.setSource(QUrl.fromLocalFile(str(source.resolve())))
     if view.status() != QQuickView.Ready or view.rootObject() is None:
         errors.extend(str(e.toString()) for e in view.errors())
         raise RuntimeError(f"QML rejected {source.name}: {'; '.join(errors)}")
+    # The host mock supplies the palette through the exact real ConfigurationValue key.
+    choice = str(view.rootObject().property("accentChoice"))
+    if choice != preset:
+        raise RuntimeError(f"Accent preset mismatch in {source.name}: {choice!r} != {preset!r}")
     # Assert the semantic clock text, not just that font sizes changed.
     clock_text = str(view.rootObject().property("currentTime"))
     expected_time = "3:42 PM" if use12 else "15:42"
@@ -167,10 +177,12 @@ def main() -> int:
         raise RuntimeError(f"Only the three known R08 watch faces may be rendered: {faces}")
     if not (STUBS / "Nemo/Mce/qmldir").is_file():
         raise RuntimeError("Mock Nemo.Mce module missing")
+    if not (STUBS / "Nemo/Configuration/qmldir").is_file():
+        raise RuntimeError("Mock Nemo.Configuration module missing")
     QLocale.setDefault(QLocale(QLocale.English, QLocale.UnitedStates))
     app = QGuiApplication.instance() or QGuiApplication(["uglyos-host-renderer"])
     report = {"renderer": "PySide6 host Qt Quick software, off-device",
-              "runtime_data": "MOCK clock, battery, 12h preference, ambient, burn-in offsets",
+              "runtime_data": "MOCK clock, battery, accent config, 12h preference, ambient, burn-in offsets",
               "fixed_time": "2026-10-25T15:42:00",
               "not_verified": ["AsteroidOS Qt 6.11 target imports", "Watch3 framebuffer",
                                "hardware AOD", "watch boot", "flashing"],
@@ -178,7 +190,8 @@ def main() -> int:
     image_bytes: dict[tuple[str, str], bytes] = {}
     for name in EXPECTED:
         for mode, size, use12, ambient, nightstand in CASES:
-            preview, measure = _render_one(app, FACES / name, size, use12, ambient, nightstand)
+            preset = mode.removeprefix("palette-") if mode.startswith("palette-") else "original"
+            preview, measure = _render_one(app, FACES / name, size, use12, ambient, nightstand, preset)
             target = args.output / (name.removesuffix(".qml") + "--" + mode + ".png")
             if not preview.save(str(target), "PNG"):
                 raise RuntimeError(f"Cannot save PNG preview: {target}")
@@ -187,7 +200,8 @@ def main() -> int:
                 raise RuntimeError(f"Suspiciously small PNG: {target.name}")
             image_bytes[(name, mode)] = data
             report["images"].append({"file": target.name, "size": size,
-                                     "mode": mode, "sha256": hashlib.sha256(data).hexdigest(),
+                                     "mode": mode, "palette": preset,
+                                     "sha256": hashlib.sha256(data).hexdigest(),
                                      **measure})
             print(f"PASS[host-qt]: {target.name} ({measure['highlight_samples']} highlight samples)")
     for name in EXPECTED:
@@ -195,8 +209,12 @@ def main() -> int:
             raise RuntimeError(f"Ambient does not change rendering: {name}")
         if image_bytes[(name, "active-24h")] == image_bytes[(name, "active-12h")]:
             raise RuntimeError(f"12/24h setting does not change rendering: {name}")
+        palette_modes = ["active-24h", "palette-emerald", "palette-ice",
+                         "palette-violet", "palette-ember", "palette-rose"]
+        if len({image_bytes[(name, mode)] for mode in palette_modes}) != len(palette_modes):
+            raise RuntimeError(f"Accent palettes do not produce distinct renders: {name}")
     (args.output / "render-report.json").write_text(json.dumps(report, indent=2) + "\n")
-    print("PASS[host-qt]: 15 real QML previews, active/ambient + 12h/24h variants checked")
+    print("PASS[host-qt]: 30 real QML previews: 5 modes and 5 distinct accent palettes per face")
     print("NOT TESTED: Watch3 firmware, target QML modules, physical screen, AOD or boot")
     return 0
 

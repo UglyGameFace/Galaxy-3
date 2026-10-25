@@ -33,6 +33,16 @@ class HostRenderContracts(unittest.TestCase):
         self.assertIn('image_bytes[(name, "active-24h")] == image_bytes[(name, "ambient")]', src)
         self.assertIn('image_bytes[(name, "active-24h")] == image_bytes[(name, "active-12h")]', src)
 
+    def test_palette_choices_have_full_host_render_coverage(self):
+        src = SCRIPT.read_text()
+        for name in ("emerald", "ice", "violet", "ember", "rose"):
+            self.assertIn('"palette-' + name + '"', src)
+        self.assertIn("mockAccentPreset", src)
+        self.assertIn("Accent preset mismatch", src)
+        self.assertIn("Accent palettes do not produce distinct renders", src)
+        self.assertIn('30 real QML previews', src)
+        self.assertTrue((ROOT / "tools/uglyos-render-fixtures/Nemo/Configuration/qmldir").is_file())
+
     def test_mock_is_explicit_and_watch_writes_are_absent(self):
         src = SCRIPT.read_text()
         self.assertIn("MOCK clock, battery", src)

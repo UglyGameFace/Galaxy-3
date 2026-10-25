@@ -3,12 +3,27 @@
 // Existing watchface Settings discovers .qml files automatically.
 import QtQuick
 import Nemo.Mce
+import Nemo.Configuration
 
 Item {
     id: face
     anchors.fill: parent
     readonly property real diameter: Math.min(width, height)
-    readonly property color accent: "#6EED9A"
+    // Shared optional appearance preference; original/unknown retains legacy colors.
+    readonly property string accentChoice: ["emerald", "ice", "violet", "ember", "rose"].indexOf(uglyOsAccent.value) >= 0
+                                            ? uglyOsAccent.value : "original"
+    readonly property bool themed: accentChoice !== "original"
+    readonly property color accent: accentChoice === "emerald" ? "#44E8A3"
+                                  : accentChoice === "ice" ? "#80D9FF"
+                                  : accentChoice === "violet" ? "#BE9BFF"
+                                  : accentChoice === "ember" ? "#FFBE72"
+                                  : accentChoice === "rose" ? "#FF95C8"
+                                  : "#6EED9A"
+    ConfigurationValue {
+        id: uglyOsAccent
+        key: "/desktop/uglyos/appearance/accent"
+        defaultValue: "original"
+    }
     readonly property bool ambient: displayAmbient
     readonly property bool dimmed: ambient || nightstand
     readonly property string currentTime: wallClock.time.toLocaleString(
