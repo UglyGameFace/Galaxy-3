@@ -26,9 +26,12 @@ ROOT = Path(__file__).resolve().parents[1]
 FACES_FIXTURES = ROOT / "tools/uglyos-render-fixtures"
 FIXTURES = ROOT / "tools/uglyos-launcher-fixtures"
 LAYOUTS = ROOT / "meta-noblesse/recipes-asteroid/uglyos-launchers/uglyos-launchers"
-EXPECTED = ("900-uglyos-fast-list.qml", "901-uglyos-compact-grid.qml")
-CASES = (("original-360", 360, "original"), ("rose-360", 360, "rose"),
-         ("compact-240", 240, "original"))
+EXPECTED = ("900-uglyos-fast-list.qml", "901-uglyos-compact-grid.qml",
+            "902-uglyos-stoner-lounge.qml", "903-uglyos-gamer-arcade.qml")
+CASES = (("original-360", 360, "original", "subtle"),
+         ("rose-360", 360, "rose", "subtle"),
+         ("compact-240", 240, "original", "subtle"),
+         ("effects-off-360", 360, "original", "off"))
 
 
 class AppItem(QObject):
@@ -129,7 +132,7 @@ def verify_pixels(image: QImage) -> int:
     return lit
 
 
-def render(app: QGuiApplication, qml: Path, size: int, palette: str):
+def render(app: QGuiApplication, qml: Path, size: int, palette: str, effects: str):
     model = AppModel()
     grid = FakeGrid()
     locale = FakeLocale()
@@ -144,6 +147,7 @@ def render(app: QGuiApplication, qml: Path, size: int, palette: str):
     context.setContextProperty("grid", grid)
     context.setContextProperty("localeManager", locale)
     context.setContextProperty("mockAccentPreset", palette)
+    context.setContextProperty("mockEffectsPreset", effects)
     # Runtime integration uses these existing ancestor properties in MainScreen.qml.
     for name in ("forbidTop", "forbidBottom", "forbidLeft", "forbidRight",
                  "toTopAllowed", "toBottomAllowed", "toLeftAllowed",
@@ -154,6 +158,10 @@ def render(app: QGuiApplication, qml: Path, size: int, palette: str):
     view.setSource(QUrl.fromLocalFile(str(qml.resolve())))
     if view.status() != QQuickView.Ready:
         raise RuntimeError(f"Cannot load {qml.name}: {view.errors()}")
+    if qml.name.startswith(("902", "903")):
+        effective = bool(view.rootObject().property("effectsEnabled"))
+        if effective != (effects == "subtle"):
+            raise RuntimeError(f"Touch motion setting ignored in {qml.name}: {effective}")
     view.show()
     QTest.qWait(400)
     app.processEvents()
@@ -168,7 +176,8 @@ def render(app: QGuiApplication, qml: Path, size: int, palette: str):
     lit = verify_pixels(img)
     # Confirm this layout is actually actionable: first app dispatches through
     # the unmodified launcherModel object's launchApplication method.
-    point = QPoint(size // 2 if qml.name.startswith("900") else size // 4, int(size * 0.24))
+    point = QPoint(size // 2 if qml.name.startswith(("900", "902")) else size // 4,
+                   int(size * 0.24))
     QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier, point)
     app.processEvents()
     if model.items[0].activations != 1:
@@ -191,8 +200,8 @@ def main():
     previews = []
     by_name = {}
     for qml in EXPECTED:
-        for case, size, palette in CASES:
-            rendered, lit = render(qt, LAYOUTS / qml, size, palette)
+        for case, size, palette, effects in CASES:
+            rendered, lit = render(qt, LAYOUTS / qml, size, palette, effects)
             name = f"{qml.removesuffix('.qml')}--{case}.png"
             dest = args.output / name
             if not rendered.save(str(dest), "PNG"):
@@ -201,18 +210,20 @@ def main():
             if len(data) < 1500:
                 raise RuntimeError(f"Suspiciously tiny visual evidence: {name}")
             by_name[(qml, case)] = data
-            previews.append({"file": name, "size": size, "palette": palette,
+            previews.append({"file": name, "size": size, "palette": palette, "effects": effects,
                              "lit_samples": lit,
                              "sha256": hashlib.sha256(data).hexdigest()})
             print(f"PASS[launcher-qt]: {name}: {lit} lit samples; click dispatched")
     for qml in EXPECTED:
-        if by_name[(qml, "original-360")] == by_name[(qml, "rose-360")]:
-            raise RuntimeError(f"Palette ignored by QML: {qml}")
+        if qml.startswith(("900", "901")) and by_name[(qml, "original-360")] == by_name[(qml, "rose-360")]:
+            raise RuntimeError(f"Accent setting ignored by QML: {qml}")
+        if qml.startswith(("902", "903")) and by_name[(qml, "original-360")] != by_name[(qml, "effects-off-360")]:
+            raise RuntimeError(f"Idle appearance should be identical with touch effects off: {qml}")
     report = {"source": "REAL QML plus MOCK app model and icon module",
               "safety": "OFF-DEVICE ONLY: no real launcher backend, watch boot or install",
               "previews": previews}
     (args.output / "proof.json").write_text(json.dumps(report, indent=2) + "\n")
-    print("PASS[launcher-qt]: 6 previews, two lightweight app launchers and click dispatch")
+    print("PASS[launcher-qt]: 16 previews, four lightweight app launchers and click dispatch")
     return 0
 
 

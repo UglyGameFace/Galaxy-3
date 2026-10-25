@@ -7,11 +7,12 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "meta-noblesse/recipes-asteroid/uglyos-launchers/uglyos-launchers"
 RECIPE = ROOT / "meta-noblesse/recipes-asteroid/uglyos-launchers/uglyos-launchers_1.0.bb"
 IMAGE = ROOT / "meta-noblesse/recipes-core/images/asteroid-image.bbappend"
-LAYOUTS = ("900-uglyos-fast-list.qml", "901-uglyos-compact-grid.qml")
+LAYOUTS = ("900-uglyos-fast-list.qml", "901-uglyos-compact-grid.qml",
+           "902-uglyos-stoner-lounge.qml", "903-uglyos-gamer-arcade.qml")
 
 
 class LauncherContracts(unittest.TestCase):
-    def test_two_selectable_additive_layouts(self):
+    def test_four_selectable_additive_layouts(self):
         self.assertEqual(tuple(sorted(p.name for p in ASSETS.glob("*.qml"))), LAYOUTS)
         recipe = RECIPE.read_text()
         for name in LAYOUTS:
@@ -35,11 +36,20 @@ class LauncherContracts(unittest.TestCase):
                 self.assertLess(len(source), 6000)
                 self.assertIn("model: launcherModel", source)
                 self.assertIn("model.object.launchApplication()", source)
-                self.assertIn("cacheBuffer: height * 0.55", source)
+                self.assertTrue("cacheBuffer: height * 0.55" in source or
+                                "cacheBuffer: height * 0.5" in source)
                 self.assertIn("enabled: !appsView.dragging", source)
                 self.assertIn("Text.ElideRight", source)
-                self.assertIn('key: "/desktop/uglyos/appearance/accent"', source)
-                self.assertIn('defaultValue: "original"', source)
+                if name.startswith(("900", "901")):
+                    self.assertIn('key: "/desktop/uglyos/appearance/accent"', source)
+                    self.assertIn('defaultValue: "original"', source)
+                else:
+                    self.assertIn('key: "/desktop/uglyos/appearance/effects"', source)
+                    self.assertIn('defaultValue: "subtle"', source)
+                    self.assertIn("Behavior on color", source)
+                    self.assertIn("ColorAnimation { duration:", source)
+                    self.assertNotIn("running: true", source)
+                    self.assertNotIn("loops:", source)
                 self.assertIn("grid.changeAllowedDirections()", source)
                 for forbidden in ("ShaderEffect", "DropShadow", "FastBlur", "Canvas {",
                                   "WebView", "Timer {", "NumberAnimation", "RotationAnimation",
@@ -56,6 +66,11 @@ class LauncherContracts(unittest.TestCase):
         self.assertIn("OFF-DEVICE ONLY", program)
         self.assertNotIn("sdb shell", program)
         self.assertNotIn("fastboot flash", program)
+        settings = (ROOT / "meta-noblesse/recipes-asteroid/asteroid-settings/files/0002-uglyos-launcher-effects.patch").read_text()
+        self.assertIn('key: "/desktop/uglyos/appearance/effects"', settings)
+        self.assertIn("OptionCycler {", settings)
+        self.assertIn("Off", settings)
+        self.assertIn("Subtle", settings)
 
 
 if __name__ == "__main__":

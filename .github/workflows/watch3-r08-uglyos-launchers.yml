@@ -31,6 +31,24 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tools/render_uglyos_launchers.py
           python3 -m unittest discover -s tests -p test_uglyos_launchers.py -v
+      - name: Verify effects selector patch on exact pinned AsteroidOS Settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          checkout="$RUNNER_TEMP/uglyos-settings-pinned"
+          git init -q "$checkout"
+          git -C "$checkout" remote add origin https://github.com/AsteroidOS/asteroid-settings.git
+          git -C "$checkout" fetch --depth=1 origin 60340bd1c27a7b9e4884bd61c0563d091bc8b240
+          git -C "$checkout" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$checkout" rev-parse HEAD)" = 60340bd1c27a7b9e4884bd61c0563d091bc8b240
+          patch="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-settings/files/0002-uglyos-launcher-effects.patch"
+          git -C "$checkout" apply --check "$patch"
+          git -C "$checkout" apply "$patch"
+          git -C "$checkout" diff --check
+          grep -q '/desktop/uglyos/appearance/effects' "$checkout/src/qml/LauncherPage.qml"
+          grep -q 'UgLy|OS effects' "$checkout/src/qml/LauncherPage.qml"
+          grep -q '/desktop/asteroid/applauncher' "$checkout/src/qml/LauncherPage.qml"
+          echo 'PASS: real pinned Settings launcher selector keeps stock and adds Off/Subtle effect choice'
       - name: Install host Qt software rendering prerequisites
         run: |
           set -euo pipefail
