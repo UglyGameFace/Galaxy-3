@@ -114,6 +114,12 @@ def inspect_package(info: dict[str, str], source: Path) -> None:
     if not edition.is_file() or edition.read_bytes() != (source / "uglyos-edition.json").read_bytes():
         raise PackageError("Brand metadata differs from source")
     verify_identity(edition)
+    actual = {p.relative_to(package).as_posix() for p in package.rglob("*")
+              if p.is_file() or p.is_symlink()}
+    expected = {f"asteroid-launcher/watchfaces/{name}" for name in FACES}
+    expected.add("uglyos/edition.json")
+    if actual != expected:
+        raise PackageError(f"Unexpected package-split assets: {sorted(actual ^ expected)}")
     print("PASS[package]: all four sources match the real package split")
 
 
