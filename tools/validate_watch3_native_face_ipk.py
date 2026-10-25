@@ -104,8 +104,8 @@ def verify_native_ipk(info: dict[str, str], source: Path, package: Path) -> str:
         if fields.get(key) != expected:
             raise PackageError(f"Native IPK {key} does not match BitBake metadata")
     dependencies = fields.get("Depends", "")
-    if "asteroid-launcher" not in re.split(r"[,\s]+", dependencies):
-        raise PackageError("Native IPK missing asteroid-launcher runtime dependency")
+    if dependencies.strip() != "asteroid-launcher":
+        raise PackageError("Native IPK must have exactly asteroid-launcher as its runtime dependency")
     if set(payload) != set(PAYLOAD):
         raise PackageError(f"Native IPK payload paths differ: {sorted(set(payload) ^ set(PAYLOAD))}")
     for name, original in PAYLOAD.items():

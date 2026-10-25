@@ -30,3 +30,17 @@ do_install() {
 
 FILES:${PN} = "${datadir}/asteroid-launcher/watchfaces/*.qml ${datadir}/uglyos/edition.json"
 RDEPENDS:${PN} = "asteroid-launcher"
+
+# The R08-only edition contains only QML/JSON data; its sole runtime
+# dependency is an unversioned asteroid-launcher package. The pinned IPK
+# class's rdeptask ordinarily builds *all* launcher/Qt package metadata.
+# For THIS recipe only, skip that build-order edge. Do NOT remove the
+# install-time RDEPENDS. The real package's Depends control is verified
+# independently before this change is accepted.
+python __anonymous () {
+    if d.getVar("MACHINE") == "noblesse-r08":
+        deps = (d.getVar("RDEPENDS:" + d.getVar("PN")) or "").split()
+        if deps != ["asteroid-launcher"]:
+            bb.fatal("R08 native-IPK exception requires exactly asteroid-launcher RDEPENDS")
+        d.setVarFlag("do_package_write_ipk", "rdeptask", "")
+}

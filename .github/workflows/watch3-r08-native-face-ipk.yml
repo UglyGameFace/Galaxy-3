@@ -1,7 +1,8 @@
-name: UgLy|OS R08 real Yocto watchface package split
+name: UgLy|OS R08 genuine bounded native Yocto watchface IPK
 
-# Native dependency-aware package_write_ipk with a strict task-graph budget.
-# OFF-DEVICE ONLY. A genuine IPK does not prove bootability or flashing safety.
+# Dependency-aware native package_write_ipk, no -b. Fail closed on Qt graph.
+# R08 data-only rdeptask exception is accepted ONLY if real IPK Depends is intact.
+# OFF-DEVICE ONLY: no boot, recovery or flashing validation.
 on:
   pull_request:
     branches: [main]
@@ -143,7 +144,7 @@ jobs:
               assert st.f_favail >= 500_000, 'Free inodes too low for this build'
           print('PASS: BitBake inode guard is realistic and filesystem has headroom')
           PY
-      - name: Record true native IPK dependency blocker then budget genuine do_package
+      - name: Check actual R08 runtime dependency and budget genuine IPK graph
         shell: bash
         run: |
           set -euo pipefail
@@ -151,65 +152,52 @@ jobs:
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
-          bitbake -e watch3-faces > "$GITHUB_WORKSPACE/native-face-logs/face-env.tmp"
-          bitbake -e asteroid-image > "$GITHUB_WORKSPACE/native-face-logs/image-env.tmp"
+          bitbake -e watch3-faces > "$GITHUB_WORKSPACE/native-face-logs/face.env.tmp"
+          bitbake -e asteroid-image > "$GITHUB_WORKSPACE/native-face-logs/image.env.tmp"
           python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_face_package.py" metadata \
-            "$GITHUB_WORKSPACE/native-face-logs/face-env.tmp" \
-            "$GITHUB_WORKSPACE/native-face-logs/image-env.tmp"
+            "$GITHUB_WORKSPACE/native-face-logs/face.env.tmp" \
+            "$GITHUB_WORKSPACE/native-face-logs/image.env.tmp"
+          python3 - "$GITHUB_WORKSPACE/native-face-logs/face.env.tmp" <<'PY'
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, 'tools')
+          from validate_uglyos_face_package import variables
+          info = variables(Path(sys.argv[1]))
+          assert info.get("RDEPENDS:watch3-faces") == "asteroid-launcher"
+          assert info.get("PACKAGE_ARCH") == "noblesse_r08"
+          print("PASS: real watch3-faces runtime dependency is preserved")
+          PY
           rm -f "$GITHUB_WORKSPACE/native-face-logs/"*.env.tmp
-          # PR #23 run 40173248170 proved full package_write_ipk recursively
-          # pulls QtBase, QtDeclarative, QtWayland and Qt native tools. Keep the
-          # runtime launcher dependency unchanged. Graph both tasks to show the
-          # difference, never disable the guard or quietly rewrite RDEPENDS.
           timeout --signal=TERM --kill-after=5s 900s \
             bitbake -g -c package_write_ipk watch3-faces 2>&1 |
             tee "$GITHUB_WORKSPACE/native-face-logs/01-native-ipk-graph.log"
           cp pn-buildlist "$GITHUB_WORKSPACE/native-face-logs/01-native-ipk-pn-buildlist.txt"
           cp task-depends.dot "$GITHUB_WORKSPACE/native-face-logs/01-native-ipk-task-depends.dot"
-          timeout --signal=TERM --kill-after=5s 900s \
-            bitbake -g -c package watch3-faces 2>&1 |
-            tee "$GITHUB_WORKSPACE/native-face-logs/02-package-split-graph.log"
-          cp pn-buildlist "$GITHUB_WORKSPACE/native-face-logs/02-package-split-pn-buildlist.txt"
-          cp task-depends.dot "$GITHUB_WORKSPACE/native-face-logs/02-package-split-task-depends.dot"
           python3 - "$GITHUB_WORKSPACE/native-face-logs" "$GITHUB_STEP_SUMMARY" <<'PY'
           from pathlib import Path
           import re
           import sys
           folder, summary = map(Path, sys.argv[1:])
-          forbidden = {"qtbase", "qtbase-native", "qtdeclarative",
-                       "qtdeclarative-native", "qttools-native", "qtwayland",
-                       "asteroid-image", "virtual/kernel"}
-          def graph(prefix):
-              recipes = set((folder / (prefix + "-pn-buildlist.txt")).read_text().splitlines())
-              text = (folder / (prefix + "-task-depends.dot")).read_text()
-              tasks = set(re.findall(r'"([^"]+\.do_[^"]+)"', text))
-              assert recipes and tasks and "watch3-faces" in recipes, "Empty/wrong task graph"
-              return recipes, tasks
-          native, native_tasks = graph("01-native-ipk")
-          split, split_tasks = graph("02-package-split")
-          blocked = sorted(native & forbidden)
-          if not blocked:
-              raise ValueError("Native IPK graph no longer has expected blockers; revise explicit staging strategy")
-          blocked_in_split = sorted(split & forbidden)
-          if blocked_in_split:
-              raise ValueError(f"Even do_package needs expensive Qt/firmware dependencies: {blocked_in_split}")
-          if len(split_tasks) > 800:
-              raise ValueError(f"do_package graph exceeds 800-task budget: {len(split_tasks)}")
-          report = (
-              f"Native package_write_ipk: {len(native)} recipes / {len(native_tasks)} tasks; "
-              f"unacceptable dependencies: {blocked}\n"
-              f"Genuine do_package split: {len(split)} recipes / {len(split_tasks)} tasks; "
-              f"no forbidden Qt/firmware dependencies\n"
-          )
-          (folder / "03-graph-comparison.txt").write_text(report)
-          print(report)
-          with summary.open("a") as f:
-              f.write("## UgLy|OS R08 task-graph findings\n")
-              f.write(f"- Full native IPK writer: **blocked** by {', '.join(blocked)}; not executed\n")
-              f.write(f"- Real do_package: {len(split_tasks)} tasks (cap 800), no forbidden Qt/firmware dependencies\n")
+          recipes = set((folder / "01-native-ipk-pn-buildlist.txt").read_text().splitlines())
+          graph = (folder / "01-native-ipk-task-depends.dot").read_text()
+          tasks = set(re.findall(r'"([^"]+\.do_[^"]+)"', graph))
+          assert "watch3-faces" in recipes and tasks, "Empty or wrong task graph"
+          assert '"watch3-faces.do_package_write_ipk" -> "asteroid-launcher.do_packagedata"' not in graph, (
+              "Runtime packagedata edge still expands the launcher build")
+          forbidden = {"qtbase", "qtbase-native", "qtdeclarative", "qtdeclarative-native",
+                       "qttools-native", "qtwayland", "asteroid-launcher", "asteroid-image"}
+          blocked = sorted(recipes & forbidden)
+          assert not blocked, f"Native IPK graph has forbidden expensive recipes: {blocked}"
+          assert len(tasks) <= 800, f"Native IPK task count over safety cap: {len(tasks)}"
+          message = f"PASS: native IPK graph has {len(recipes)} recipes / {len(tasks)} tasks"
+          print(message)
+          (folder / "02-task-budget.txt").write_text(message + "\n")
+          with summary.open("a") as out:
+              out.write("## Bounded native package_write_ipk graph\n")
+              out.write(f"- {len(recipes)} recipes, {len(tasks)} tasks (cap 800)\n")
           PY
 
-      - name: Run genuine dependency-aware Yocto do_package only
+      - name: Build real dependency-aware Yocto IPK without -b
         shell: bash
         run: |
           set -euo pipefail
@@ -218,14 +206,14 @@ jobs:
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
           timeout --signal=TERM --kill-after=5s 2700s \
-            bitbake -c package watch3-faces 2>&1 |
-            tee "$GITHUB_WORKSPACE/native-face-logs/04-real-do-package.log"
+            bitbake -c package_write_ipk watch3-faces 2>&1 |
+            tee "$GITHUB_WORKSPACE/native-face-logs/03-native-ipk-build.log"
 
-      - name: Verify actual Yocto package split, identity, paths and source bytes
+      - name: Verify real Yocto IPK, control dependency and package split
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/native-face-logs"
+          mkdir -p "$GITHUB_WORKSPACE/native-face-logs/native-ipk"
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
@@ -233,20 +221,44 @@ jobs:
           python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_face_package.py" packaged \
             "$GITHUB_WORKSPACE/native-face-logs/package.env.tmp" \
             "$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/watch3-faces/watch3-faces" |
-            tee "$GITHUB_WORKSPACE/native-face-logs/05-actual-package-split-proof.log"
+            tee "$GITHUB_WORKSPACE/native-face-logs/04-real-package-split.txt"
+          pkgdir="$GITHUB_WORKSPACE/build/tmp/deploy/ipk"
+          test -d "$pkgdir"
+          count="$(find "$pkgdir" -type f -name 'watch3-faces_*.ipk' | wc -l)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error title=Missing native Yocto IPK::Expected one IPK, found $count"
+            exit 1
+          fi
+          archive="$(find "$pkgdir" -type f -name 'watch3-faces_*.ipk' -print -quit)"
+          python3 "$GITHUB_WORKSPACE/tools/validate_watch3_native_face_ipk.py" \
+            "$GITHUB_WORKSPACE/native-face-logs/package.env.tmp" \
+            "$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/watch3-faces/watch3-faces" \
+            "$archive" |
+            tee "$GITHUB_WORKSPACE/native-face-logs/05-verified-native-ipk.txt"
+          cp "$archive" "$GITHUB_WORKSPACE/native-face-logs/native-ipk/"
+          sha256sum "$GITHUB_WORKSPACE"/native-face-logs/native-ipk/*.ipk |
+            tee "$GITHUB_WORKSPACE/native-face-logs/06-native-ipk.sha256"
           rm -f "$GITHUB_WORKSPACE/native-face-logs/package.env.tmp"
           {
-            echo '## Verified real Yocto do_package split, NOT an IPK'
-            echo '- Actual BitBake D and packages-split match four source assets byte-for-byte'
-            echo '- Preserved RDEPENDS:watch3-faces = asteroid-launcher'
-            echo '- NOT TESTED: native package_write_ipk, rootfs, opkg install, watch boot or flashing'
+            echo '## Real Yocto IPK verified (off-device)'
+            echo '- Four source assets match actual native IPK payload and package split'
+            echo '- Native control must contain Depends: asteroid-launcher'
+            echo '- NOT TESTED: opkg installation, firmware rootfs, boot, stock recovery, flashing'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload bounded task-graph and package-split diagnostics
+      - name: Upload genuine Yocto IPK marked OFFLINE-NOT-FLASHABLE
+        uses: actions/upload-artifact@v4
+        with:
+          name: REAL-YOCTO-OFFLINE-NOT-FLASHABLE-watch3-faces
+          retention-days: 7
+          if-no-files-found: error
+          path: native-face-logs/native-ipk/*.ipk
+
+      - name: Upload bounded native IPK diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: galaxy3-r08-real-package-split-diagnostics
+          name: galaxy3-r08-native-ipk-build-diagnostics
           retention-days: 7
           if-no-files-found: warn
           path: native-face-logs/
