@@ -61,6 +61,24 @@ class UgLyOSPackageTests(unittest.TestCase):
                                 section.index('source src/oe-core/oe-init-build-env'))
                 self.assertIn('"$GITHUB_WORKSPACE/uglyos-logs/', section)
 
+    def test_native_fakeroot_is_prepared_before_isolated_package(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/watch3-r08-uglyos-face-package.yml").read_text()
+        prep_head = "      - name: Prepare Yocto pseudo-native fakeroot for isolated packaging"
+        package_head = "      - name: Package only UgLyOS QML assets using isolated BitBake recipe"
+        self.assertEqual(workflow.count(prep_head), 1)
+        self.assertLess(workflow.index(prep_head), workflow.index(package_head))
+        prep = workflow.split(prep_head, 1)[1].split("      - name:", 1)[0]
+        self.assertIn("bitbake -c populate_sysroot pseudo-native", prep)
+        self.assertIn("timeout --signal=TERM --kill-after=5s 900s", prep)
+        self.assertIn('mkdir -p "$GITHUB_WORKSPACE/uglyos-logs"', prep)
+        self.assertLess(prep.index('mkdir -p "$GITHUB_WORKSPACE/uglyos-logs"'),
+                        prep.index('tee "$GITHUB_WORKSPACE/uglyos-logs/'))
+        self.assertIn('pseudo_bin="$BUILDDIR/tmp/sysroots-components/', prep)
+        self.assertIn('if [[ ! -x "$pseudo_bin" ]]', prep)
+        self.assertNotIn("bitbake watch3-faces", prep)
+        self.assertNotIn("-c package pseudo-native", prep)
+
     def test_real_packaging_bypasses_cold_cross_recipe_task_graph(self):
         workflow = (Path(__file__).resolve().parents[1] /
                     ".github/workflows/watch3-r08-uglyos-face-package.yml").read_text()
