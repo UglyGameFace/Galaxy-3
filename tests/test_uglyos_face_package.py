@@ -48,7 +48,7 @@ class UgLyOSPackageTests(unittest.TestCase):
                     ".github/workflows/watch3-r08-uglyos-face-package.yml").read_text()
         steps = [
             "Confirm real BitBake recipe and image dependency metadata",
-            "Build only UgLyOS watchface asset IPK (no Qt or full system)",
+            "Package only UgLyOS QML assets using isolated BitBake recipe",
             "Verify actual installed files and package staging against source",
         ]
         for name in steps:
@@ -60,6 +60,32 @@ class UgLyOSPackageTests(unittest.TestCase):
                 self.assertLess(section.index(create),
                                 section.index('source src/oe-core/oe-init-build-env'))
                 self.assertIn('"$GITHUB_WORKSPACE/uglyos-logs/', section)
+
+    def test_real_packaging_bypasses_cold_cross_recipe_task_graph(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/watch3-r08-uglyos-face-package.yml").read_text()
+        step = workflow.split(
+            "      - name: Package only UgLyOS QML assets using isolated BitBake recipe",
+            1)[1].split("      - name:", 1)[0]
+        self.assertIn('bitbake -b "$recipe" -c package', step)
+        self.assertIn('watch3-faces_1.0.bb', step)
+        self.assertIn('600s', step)
+        self.assertNotIn('bitbake watch3-faces 2>&1', step)
+        self.assertIn("INHIBIT_DEFAULT_DEPS=1", step)
+        self.assertIn('timeout --signal=TERM --kill-after=5s', step)
+        # The original full dependency build timed out on task 655/3359.
+        # Do not "fix" the cost of unnecessary compilation by increasing time.
+        self.assertNotIn('1200s', step)
+
+    def test_small_data_recipe_has_no_compile_or_codegen(self):
+        recipe = (Path(__file__).resolve().parents[1] /
+                  "meta-noblesse/recipes-asteroid/watch3-faces/"
+                  "watch3-faces_1.0.bb").read_text()
+        self.assertIn('INHIBIT_DEFAULT_DEPS = "1"', recipe)
+        self.assertIn('do_compile[noexec] = "1"', recipe)
+        self.assertIn('do_configure[noexec] = "1"', recipe)
+        self.assertIn('install -m 0644', recipe)
+        self.assertNotIn('DEPENDS +=', recipe)
 
     def test_unchanged_payload_is_verified(self):
         inspect_package(self.info, self.source)
