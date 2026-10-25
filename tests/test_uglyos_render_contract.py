@@ -20,6 +20,8 @@ class HostRenderContracts(unittest.TestCase):
         self.assertIn("view.engine().warnings.connect", src)
         self.assertIn("QQuickView.Ready", src)
         self.assertIn("Burn-in offset invalid", src)
+        self.assertIn('expected_time = "3:42 PM" if use12 else "15:42"', src)
+        self.assertIn('property("currentTime")', src)
 
     def test_coverage_and_automated_pixel_guards(self):
         src = SCRIPT.read_text()

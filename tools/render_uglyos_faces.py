@@ -130,6 +130,12 @@ def _render_one(app: QGuiApplication, source: Path, size: int,
     if view.status() != QQuickView.Ready or view.rootObject() is None:
         errors.extend(str(e.toString()) for e in view.errors())
         raise RuntimeError(f"QML rejected {source.name}: {'; '.join(errors)}")
+    # Assert the semantic clock text, not just that font sizes changed.
+    clock_text = str(view.rootObject().property("currentTime"))
+    expected_time = "3:42 PM" if use12 else "15:42"
+    if clock_text != expected_time:
+        raise RuntimeError(f"Wrong {('12h' if use12 else '24h')} clock text in {source.name}: "
+                           f"{clock_text!r} != {expected_time!r}")
     view.show()
     QTest.qWait(450)
     app.processEvents()

@@ -12,7 +12,7 @@ Item {
     readonly property bool ambient: displayAmbient
     readonly property bool dimmed: ambient || nightstand
     readonly property string currentTime: wallClock.time.toLocaleString(
-        Qt.locale(), use12H.value ? "h:mm" : "HH:mm")
+        Qt.locale(), use12H.value ? "h:mm AP" : "HH:mm")
     readonly property string currentDate: wallClock.time.toLocaleString(
         Qt.locale(), "ddd, d MMM")
 

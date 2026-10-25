@@ -7,6 +7,8 @@ Item {
     id: face
     anchors.fill: parent
     readonly property real diameter: Math.min(width, height)
+    readonly property string currentTime: wallClock.time.toLocaleString(
+        Qt.locale(), use12H.value ? "h:mm AP" : "HH:mm")
     readonly property bool dimmed: displayAmbient || nightstand
     MceBatteryLevel { id: battery }
 
@@ -27,8 +29,7 @@ Item {
         }
         Text {
             anchors.centerIn: parent
-            text: wallClock.time.toLocaleString(
-                Qt.locale(), use12H.value ? "h:mm" : "HH:mm")
+            text: face.currentTime
             color: face.dimmed ? "#B5B5B5" : "#FFFFFF"
             font.family: "Noto Sans"
             font.weight: Font.Light
