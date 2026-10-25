@@ -7,7 +7,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from validate_uglyos_face_package import (PackageError, FACES, metadata,
-                                          inspect_package, variables)
+                                          inspect_installed, inspect_package, variables)
 
 
 class UgLyOSPackageTests(unittest.TestCase):
@@ -48,8 +48,8 @@ class UgLyOSPackageTests(unittest.TestCase):
                     ".github/workflows/watch3-r08-uglyos-face-package.yml").read_text()
         steps = [
             "Confirm real BitBake recipe and image dependency metadata",
-            "Build only UgLyOS watchface asset IPK (no Qt or full system)",
-            "Verify actual installed files and package staging against source",
+            "Install only UgLyOS QML assets using isolated BitBake recipe",
+            "Verify actual BitBake installed files against source",
         ]
         for name in steps:
             with self.subTest(step=name):
@@ -61,8 +61,71 @@ class UgLyOSPackageTests(unittest.TestCase):
                                 section.index('source src/oe-core/oe-init-build-env'))
                 self.assertIn('"$GITHUB_WORKSPACE/uglyos-logs/', section)
 
+    def test_native_fakeroot_is_prepared_before_isolated_package(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/watch3-r08-uglyos-face-package.yml").read_text()
+        prep_head = "      - name: Prepare Yocto pseudo-native fakeroot for isolated packaging"
+        package_head = "      - name: Install only UgLyOS QML assets using isolated BitBake recipe"
+        self.assertEqual(workflow.count(prep_head), 1)
+        self.assertLess(workflow.index(prep_head), workflow.index(package_head))
+        prep = workflow.split(prep_head, 1)[1].split("      - name:", 1)[0]
+        self.assertIn("bitbake -c populate_sysroot pseudo-native", prep)
+        self.assertIn("timeout --signal=TERM --kill-after=5s 900s", prep)
+        self.assertIn('mkdir -p "$GITHUB_WORKSPACE/uglyos-logs"', prep)
+        self.assertLess(prep.index('mkdir -p "$GITHUB_WORKSPACE/uglyos-logs"'),
+                        prep.index('tee "$GITHUB_WORKSPACE/uglyos-logs/'))
+        self.assertIn('pseudo_bin="$BUILDDIR/tmp/sysroots-components/', prep)
+        self.assertIn('if [[ ! -x "$pseudo_bin" ]]', prep)
+        self.assertNotIn("bitbake watch3-faces", prep)
+        self.assertNotIn("-c package pseudo-native", prep)
+
+    def test_real_install_bypasses_cold_cross_recipe_task_graph(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/watch3-r08-uglyos-face-package.yml").read_text()
+        step = workflow.split(
+            "      - name: Install only UgLyOS QML assets using isolated BitBake recipe",
+            1)[1].split("      - name:", 1)[0]
+        self.assertIn('bitbake -b "$recipe" -c install', step)
+        self.assertNotIn('bitbake -b "$recipe" -c package', step)
+        self.assertIn('watch3-faces_1.0.bb', step)
+        self.assertIn('600s', step)
+        self.assertNotIn('bitbake watch3-faces 2>&1', step)
+        self.assertIn("INHIBIT_DEFAULT_DEPS=1", step)
+        self.assertIn('timeout --signal=TERM --kill-after=5s', step)
+        # The original full dependency build timed out on task 655/3359.
+        # Do not "fix" the cost of unnecessary compilation by increasing time.
+        self.assertNotIn('1200s', step)
+
+    def test_small_data_recipe_has_no_compile_or_codegen(self):
+        recipe = (Path(__file__).resolve().parents[1] /
+                  "meta-noblesse/recipes-asteroid/watch3-faces/"
+                  "watch3-faces_1.0.bb").read_text()
+        self.assertIn('INHIBIT_DEFAULT_DEPS = "1"', recipe)
+        self.assertIn('do_compile[noexec] = "1"', recipe)
+        self.assertIn('do_configure[noexec] = "1"', recipe)
+        self.assertIn('install -m 0644', recipe)
+        self.assertNotIn('DEPENDS +=', recipe)
+
     def test_unchanged_payload_is_verified(self):
+        inspect_installed(self.info, self.source)
         inspect_package(self.info, self.source)
+
+    def test_staged_extra_file_is_rejected(self):
+        self.write(self.installed_root / "usr/share/uglyos/unknown.txt", "extra")
+        with self.assertRaisesRegex(PackageError, "Unexpected installed assets"):
+            inspect_installed(self.info, self.source)
+
+    def test_modified_installed_face_is_rejected(self):
+        self.write(self.installed_root / "usr/share/asteroid-launcher/watchfaces" / FACES[0], "wrong")
+        with self.assertRaisesRegex(PackageError, "Source/install mismatch"):
+            inspect_installed(self.info, self.source)
+
+    def test_lightweight_ci_does_not_claim_finished_package(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/watch3-r08-uglyos-face-package.yml").read_text()
+        self.assertIn('validate_uglyos_face_package.py" installed', workflow)
+        self.assertIn("NOT TESTED: do_package, package split, IPK creation", workflow)
+        self.assertNotIn('validate_uglyos_face_package.py" packaged', workflow)
 
     def test_modified_packaged_face_is_rejected(self):
         p = self.package_root / "watch3-faces/usr/share/asteroid-launcher/watchfaces" / FACES[0]
@@ -110,6 +173,41 @@ class UgLyOSPackageTests(unittest.TestCase):
             "MACHINE": "noblesse-r08", "PN": "watch3-faces",
             "RDEPENDS:watch3-faces": "asteroid-launcher"
         })
+
+    def test_bitbake_env_reader_accepts_actual_exported_datadir(self):
+        # Run #40151216277: the real package-env.tmp has this
+        # form. The previous reader dropped datadir, then do_install
+        # validation falsely raised "Unsafe datadir".
+        file = self.root / "exported.env"
+        file.write_text(
+            '# $datadir [2 operations]\n'
+            '#     "${prefix}/share"\n'
+            'export datadir="/usr/share"\n'
+            'export prefix="/usr"\n'
+            f'D="{self.installed_root}"\n'
+            'PN="watch3-faces"\n'
+        )
+        parsed = variables(file)
+        self.assertEqual(parsed["datadir"], "/usr/share")
+        self.assertEqual(parsed["D"], str(self.installed_root))
+        inspect_installed(parsed, self.source)
+
+    def test_bitbake_env_reader_ignores_commented_export_history(self):
+        file = self.root / "commented-export.env"
+        file.write_text(
+            '# export datadir="/usr/../etc"\n'
+            'export datadir="/usr/share"\n'
+        )
+        self.assertEqual(variables(file), {"datadir": "/usr/share"})
+
+    def test_bitbake_env_reader_does_not_allow_unsafe_exported_paths(self):
+        file = self.root / "bad-export.env"
+        file.write_text(
+            'export datadir="/usr/../etc"\n'
+            f'D="{self.installed_root}"\n'
+        )
+        with self.assertRaisesRegex(PackageError, "Unsafe datadir"):
+            inspect_installed(variables(file), self.source)
 
     def test_unknown_or_root_paths_rejected(self):
         with self.assertRaisesRegex(PackageError, "Unsafe package path"):

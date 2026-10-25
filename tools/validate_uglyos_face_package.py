@@ -27,6 +27,10 @@ def variables(file: Path) -> dict[str, str]:
               "PACKAGES", "FILES:watch3-faces", "PKGDEST", "D", "datadir")
     collected: dict[str, str] = {}
     for line in file.read_text().splitlines():
+        # Real "bitbake -e" exports datadir (and other shell variables).
+        # Normalize only the exact export prefix, not commented history.
+        if line.startswith("export "):
+            line = line[len("export "):]
         for name in wanted:
             if line.startswith(name + '="') and line.endswith('"'):
                 collected[name] = line[len(name) + 2:-1]
@@ -68,46 +72,62 @@ def verify_identity(file: Path) -> None:
         raise PackageError("Branding, upstream credit, or flash-status mismatch")
 
 
+def inspect_installed(info: dict[str, str], source: Path) -> None:
+    """Validate the actual BitBake do_install tree without claiming an IPK."""
+    root = info.get("D", "")
+    datadir = info.get("datadir", "")
+    if not root.startswith("/") or root == "/":
+        raise PackageError("Unsafe BitBake installation root")
+    if not datadir.startswith("/") or ".." in Path(datadir).parts:
+        raise PackageError("Unsafe datadir from BitBake metadata")
+    stage = Path(root) / datadir.lstrip("/")
+    expected = {f"asteroid-launcher/watchfaces/{name}": source / name
+                for name in FACES}
+    expected["uglyos/edition.json"] = source / "uglyos-edition.json"
+    for relative, original in expected.items():
+        installed = stage / relative
+        if not original.is_file() or not installed.is_file():
+            raise PackageError(f"Missing staged/source asset {relative}")
+        if not original.read_bytes() or installed.read_bytes() != original.read_bytes():
+            raise PackageError(f"Source/install mismatch for {relative}")
+    found = {p.relative_to(stage).as_posix() for p in stage.rglob("*")
+             if p.is_file() or p.is_symlink()}
+    if found != set(expected):
+        raise PackageError(f"Unexpected installed assets: {sorted(found ^ set(expected))}")
+    verify_identity(stage / "uglyos/edition.json")
+    print("PASS[installed]: 3 QML faces + identity match actual BitBake D")
+    print("NOT TESTED: do_package, package split, IPK, image, Qt or watch boot")
+
+
 def inspect_package(info: dict[str, str], source: Path) -> None:
-    stage_value = info.get("D", "")
-    package_value = info.get("PKGDEST", "")
-    if not stage_value.startswith("/") or not package_value.startswith("/"):
-        raise PackageError("Missing absolute BitBake installation and package roots")
-    if stage_value == "/" or package_value == "/":
+    """Optional full split check, only valid after a genuine do_package."""
+    pkgdest = info.get("PKGDEST", "")
+    if not pkgdest.startswith("/") or pkgdest == "/":
         raise PackageError("Unsafe package path root")
-    stage = Path(stage_value) / info.get("datadir", "/usr/share").lstrip("/")
-    packaged = Path(package_value) / PACKAGE / info.get("datadir", "/usr/share").lstrip("/")
+    inspect_installed(info, source)
+    package = Path(pkgdest) / PACKAGE / info.get("datadir", "/usr/share").lstrip("/")
     for name in FACES:
-        source_file = source / name
-        installed_file = stage / "asteroid-launcher/watchfaces" / name
-        packaged_file = packaged / "asteroid-launcher/watchfaces" / name
-        if not all(p.is_file() for p in (source_file, installed_file, packaged_file)):
-            raise PackageError(f"Missing staged/packaged QML {name}")
-        expected = source_file.read_bytes()
-        if not expected or any(p.read_bytes() != expected
-                               for p in (installed_file, packaged_file)):
+        target = package / "asteroid-launcher/watchfaces" / name
+        if not target.is_file() or target.read_bytes() != (source / name).read_bytes():
             raise PackageError(f"Source/package mismatch for QML {name}")
-    identity = source / "uglyos-edition.json"
-    installed = stage / "uglyos/edition.json"
-    final = packaged / "uglyos/edition.json"
-    if not all(p.is_file() for p in (identity, installed, final)):
-        raise PackageError("UgLy|OS edition identity not packaged")
-    if not (identity.read_bytes() == installed.read_bytes() == final.read_bytes()):
+    edition = package / "uglyos/edition.json"
+    if not edition.is_file() or edition.read_bytes() != (source / "uglyos-edition.json").read_bytes():
         raise PackageError("Brand metadata differs from source")
-    verify_identity(final)
-    print("PASS[package]: 3 real QML faces + identity staged and packaged byte-for-byte")
-    print("NOT TESTED: actual Qt rendering, full filesystem, Watch3 boot or flashing")
+    verify_identity(edition)
+    print("PASS[package]: all four sources match the real package split")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("metadata", "packaged"))
+    parser.add_argument("mode", choices=("metadata", "installed", "packaged"))
     parser.add_argument("environment", type=Path)
     parser.add_argument("other", type=Path)
     args = parser.parse_args()
     try:
         if args.mode == "metadata":
             metadata(variables(args.environment), variables(args.other))
+        elif args.mode == "installed":
+            inspect_installed(variables(args.environment), args.other)
         else:
             inspect_package(variables(args.environment), args.other)
     except (PackageError, OSError, ValueError) as error:
