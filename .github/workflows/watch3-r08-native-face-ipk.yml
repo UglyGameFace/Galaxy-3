@@ -160,7 +160,8 @@ jobs:
           python3 - "$GITHUB_WORKSPACE/native-face-logs/face.env.tmp" <<'PY'
           from pathlib import Path
           import sys
-          sys.path.insert(0, 'tools')
+          import os
+          sys.path.insert(0, str(Path(os.environ['GITHUB_WORKSPACE']) / 'tools'))
           from validate_uglyos_face_package import variables
           info = variables(Path(sys.argv[1]))
           assert info.get("RDEPENDS:watch3-faces") == "asteroid-launcher"
