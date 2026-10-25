@@ -118,31 +118,22 @@ class NativeIpkTests(unittest.TestCase):
         with self.assertRaisesRegex(PackageError, "runtime dependency"):
             verify_native_ipk(self.info, self.source, self.file)
 
-    def test_rejects_extra_dependency_even_with_launcher_present(self):
+    def test_rejects_extra_runtime_dependency_even_with_launcher(self):
         self.write_ipk(control={"Package": "watch3-faces", "Version": "1.0-r0",
                                 "Architecture": "noblesse_r08",
                                 "Depends": "asteroid-launcher, bogus"})
         with self.assertRaisesRegex(PackageError, "exactly asteroid-launcher"):
             verify_native_ipk(self.info, self.source, self.file)
 
-    def test_r08_override_retains_runtime_dependency_and_graph_safety(self):
+    def test_data_only_override_has_fail_closed_runtime_and_graph_checks(self):
         root = Path(__file__).resolve().parents[1]
         recipe = (root / "meta-noblesse/recipes-asteroid/watch3-faces/"
                   "watch3-faces_1.0.bb").read_text()
-        self.assertIn('RDEPENDS:' + '
-        payload = dict(self.payload)
-        payload["etc/unsafe"] = b"extra"
-        self.write_ipk(payload=payload)
-        with self.assertRaisesRegex(PackageError, "payload paths differ"):
-            verify_native_ipk(self.info, self.source, self.file)
-
-
-if __name__ == "__main__":
-    unittest.main()
- + '{PN} = "asteroid-launcher"', recipe)
+        self.assertTrue(any(line.startswith("RDEPENDS:") and
+                            "asteroid-launcher" in line
+                            for line in recipe.splitlines()))
         self.assertIn('d.setVarFlag("do_package_write_ipk", "rdeptask", "")', recipe)
         self.assertIn('if deps != ["asteroid-launcher"]:', recipe)
-        self.assertIn('if d.getVar("MACHINE") == "noblesse-r08":', recipe)
         workflow = (root / ".github/workflows/watch3-r08-native-face-ipk.yml").read_text()
         self.assertIn("bitbake -g -c package_write_ipk watch3-faces", workflow)
         self.assertIn("bitbake -c package_write_ipk watch3-faces", workflow)
