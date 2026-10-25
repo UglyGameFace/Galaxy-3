@@ -24,7 +24,7 @@ class PackageError(ValueError):
 def variables(file: Path) -> dict[str, str]:
     wanted = ("PN", "MACHINE", "DISTRO", "INHIBIT_DEFAULT_DEPS",
               "BASEDEPENDS", "DEPENDS", "IMAGE_INSTALL", "RDEPENDS:watch3-faces",
-              "PACKAGES", "FILES:watch3-faces", "PKGDEST", "D", "datadir")
+              "PACKAGES", "FILES:watch3-faces", "PKGDEST", "D", "datadir", "PV", "PR", "PACKAGE_ARCH")
     collected: dict[str, str] = {}
     for line in file.read_text().splitlines():
         # Real "bitbake -e" exports datadir (and other shell variables).

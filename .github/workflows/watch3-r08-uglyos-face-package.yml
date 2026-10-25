@@ -13,6 +13,8 @@ on:
       - 'meta-noblesse/recipes-core/images/asteroid-image.bbappend'
       - 'tools/validate_uglyos_face_package.py'
       - 'tests/test_uglyos_face_package.py'
+      - 'tools/build_uglyos_face_ipk.py'
+      - 'tests/test_uglyos_face_ipk.py'
   workflow_dispatch:
 
 permissions:
@@ -33,8 +35,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile tools/validate_uglyos_face_package.py
+          python3 -m py_compile tools/validate_uglyos_face_package.py tools/build_uglyos_face_ipk.py
           python3 -m unittest discover -s tests -p 'test_uglyos_face_package.py' -v
+          python3 -m unittest discover -s tests -p 'test_uglyos_face_ipk.py' -v
       - name: Check free runner capacity before fetching pinned sources
         shell: bash
         run: |
@@ -232,6 +235,37 @@ jobs:
             echo '- Actual BitBake metadata selects the package in R08 asteroid-image'
             echo '- NOT TESTED: do_package, package split, IPK creation, full rootfs, Qt rendering, watch boot or flashing'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Build and verify OFFLINE IPK format (not a Yocto package task)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/uglyos-logs" "$GITHUB_WORKSPACE/uglyos-offline-ipk"
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          # CI-only archive made from actual BitBake D. NOT do_package or an
+          # installable firmware build; never flash this artifact.
+          bitbake -e watch3-faces > "$GITHUB_WORKSPACE/uglyos-logs/ipk-env.tmp"
+          python3 "$GITHUB_WORKSPACE/tools/build_uglyos_face_ipk.py" \
+            "$GITHUB_WORKSPACE/uglyos-logs/ipk-env.tmp" \
+            "$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/watch3-faces/watch3-faces" \
+            "$GITHUB_WORKSPACE/uglyos-offline-ipk" |
+            tee "$GITHUB_WORKSPACE/uglyos-logs/offline-ipk-proof.log"
+          rm -f "$GITHUB_WORKSPACE/uglyos-logs/ipk-env.tmp"
+          archive="$GITHUB_WORKSPACE/uglyos-offline-ipk/watch3-faces_1.0-r0_noblesse_r08.ipk"
+          test -f "$archive"
+          ar t "$archive"
+          echo '## OFFLINE UgLy|OS IPK-format archive verified' >> "$GITHUB_STEP_SUMMARY"
+          echo '- From real BitBake D; ar format, control, payload and checksums verified' >> "$GITHUB_STEP_SUMMARY"
+          echo '- NOT TESTED: Yocto package split/write, opkg install, firmware boot or flashing' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload OFFLINE-NOT-FLASHABLE proof archive
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFLINE-NOT-FLASHABLE-uglyos-r08-watchfaces
+          retention-days: 7
+          if-no-files-found: error
+          path: uglyos-offline-ipk/*.ipk
       - name: Upload only bounded packaging logs
         if: always()
         uses: actions/upload-artifact@v4
