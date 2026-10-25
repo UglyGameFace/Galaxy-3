@@ -1,0 +1,81 @@
+name: UgLy|OS R08 host Qt visual proofs (NO DEVICE)
+
+# Render real three watch-face QML files using host Qt Quick software.
+# Clock/battery/AOD are MOCKS. Not proof of target Qt, hardware or boot.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-uglyos-visual-proofs.yml'
+      - 'tools/render_uglyos_faces.py'
+      - 'tools/uglyos-render-fixtures/**'
+      - 'tests/test_uglyos_render_contract.py'
+      - 'meta-noblesse/recipes-asteroid/watch3-faces/watch3-faces/*.qml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: galaxy3-r08-host-visual
+  cancel-in-progress: true
+
+jobs:
+  render-real-qml-offdevice:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+      QT_QUICK_BACKEND: software
+      QT_OPENGL: software
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare host Qt software renderer and fonts
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            fonts-noto-core libegl1 libopengl0 libxcb-cursor0
+          python3 -m pip install --disable-pip-version-check --no-cache-dir \
+            "PySide6==6.8.3"
+      - name: Enforce off-device renderer safety contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/render_uglyos_faces.py
+          python3 -m unittest discover -s tests -p test_uglyos_render_contract.py -v
+      - name: Render all three actual QML faces in five display modes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/render_uglyos_faces.py --output uglyos-qt-previews |
+            tee uglyos-host-render.log
+          test "$(find uglyos-qt-previews -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 15
+          test -s uglyos-qt-previews/render-report.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('uglyos-qt-previews/render-report.json').read_text())
+          assert len(report['images']) == 15
+          assert len({x['file'].split('--')[0] for x in report['images']}) == 3
+          assert all(x['highlight_samples'] >= 40 for x in report['images'])
+          print("PASS: 15 nonblank previews from real QML sources; mock signals disclosed")
+          PY
+          {
+            echo '## UgLy|OS host Qt software-rendering proof'
+            echo '- Three unchanged R08 QML sources rendered, 15 round-screen previews'
+            echo '- Active 12h/24h, ambient, nightstand and 240px layout gates'
+            echo '- Fake Nemo.Mce battery and clock inputs; no device connection'
+            echo '- NOT TESTED: target Qt 6.11, framebuffer, AOD, boot, install or recovery'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload OFFDEVICE-MOCK-SIGNALS visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFDEVICE-MOCK-SIGNALS-uglyos-qt-watchface-previews
+          path: |
+            uglyos-qt-previews/
+            uglyos-host-render.log
+          retention-days: 14
+          if-no-files-found: warn

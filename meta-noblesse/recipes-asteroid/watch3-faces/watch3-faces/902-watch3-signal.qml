@@ -7,6 +7,8 @@ Item {
     id: face
     anchors.fill: parent
     readonly property real diameter: Math.min(width, height)
+    readonly property string currentTime: wallClock.time.toLocaleString(
+        Qt.locale(), use12H.value ? "h:mm AP" : "HH:mm")
     readonly property bool dimmed: displayAmbient || nightstand
     readonly property color accent: "#FFC36B"
     MceBatteryLevel { id: battery }
@@ -37,8 +39,7 @@ Item {
             id: time
             anchors.horizontalCenter: parent.horizontalCenter
             y: safe.height * 0.32
-            text: wallClock.time.toLocaleString(
-                Qt.locale(), use12H.value ? "h:mm" : "HH:mm")
+            text: face.currentTime
             color: face.dimmed ? "#C2AA87" : "#FFF0D9"
             font.family: "Noto Sans"
             font.weight: Font.Bold
