@@ -27,6 +27,10 @@ def variables(file: Path) -> dict[str, str]:
               "PACKAGES", "FILES:watch3-faces", "PKGDEST", "D", "datadir")
     collected: dict[str, str] = {}
     for line in file.read_text().splitlines():
+        # Real "bitbake -e" exports datadir (and other shell variables).
+        # Normalize only the exact export prefix, not commented history.
+        if line.startswith("export "):
+            line = line[len("export "):]
         for name in wanted:
             if line.startswith(name + '="') and line.endswith('"'):
                 collected[name] = line[len(name) + 2:-1]
