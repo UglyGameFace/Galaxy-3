@@ -209,6 +209,21 @@ class UgLyOSPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(PackageError, "Unsafe datadir"):
             inspect_installed(variables(file), self.source)
 
+    def test_unexpected_packaged_file_is_rejected(self):
+        self.write(self.package_root / "watch3-faces/usr/share/uglyos/extra.txt", "surprise")
+        with self.assertRaisesRegex(PackageError, "Unexpected package-split assets"):
+            inspect_package(self.info, self.source)
+
+    def test_bounded_native_package_split_does_not_fake_ipk(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/watch3-r08-native-face-ipk.yml").read_text()
+        self.assertIn("bitbake -g -c package watch3-faces", workflow)
+        self.assertIn("bitbake -c package watch3-faces", workflow)
+        self.assertIn('validate_uglyos_face_package.py" packaged', workflow)
+        self.assertIn("01-native-ipk-task-depends.dot", workflow)
+        self.assertNotIn("bitbake -c package_write_ipk watch3-faces 2>&1", workflow)
+        self.assertIn("NOT TESTED: native package_write_ipk", workflow)
+
     def test_unknown_or_root_paths_rejected(self):
         with self.assertRaisesRegex(PackageError, "Unsafe package path"):
             inspect_package({"D": "/", "PKGDEST": "/", "datadir": "/usr/share"},

@@ -1,0 +1,252 @@
+name: UgLy|OS R08 real Yocto watchface package split
+
+# Native dependency-aware package_write_ipk with a strict task-graph budget.
+# OFF-DEVICE ONLY. A genuine IPK does not prove bootability or flashing safety.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-native-face-ipk.yml'
+      - 'tools/validate_watch3_native_face_ipk.py'
+      - 'tests/test_watch3_native_face_ipk.py'
+      - 'meta-noblesse/recipes-asteroid/watch3-faces/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: galaxy3-r08-native-face-ipk
+  cancel-in-progress: false
+
+jobs:
+  asteroid-metadata:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    steps:
+      - name: Checkout Galaxy-3
+        uses: actions/checkout@v4
+      - name: Check free runner capacity before fetching pinned sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h "$GITHUB_WORKSPACE"
+          free -h
+          disk_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+          mem_kib="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+          if (( disk_kib < 30 * 1024 * 1024 || mem_kib < 4 * 1024 * 1024 )); then
+            echo "::error title=Runner capacity below package gate::Need >=30 GiB free disk and >=4 GiB RAM for small metadata package task. No build started."
+            exit 1
+          fi
+          echo 'PASS: available free runner supports bounded machine configuration package stage'
+      - name: Install metadata parsing prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git python3 python3-packaging python3-setuptools gawk diffstat chrpath zstd binutils
+      - name: Validate native IPK archive reader before upstream downloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/validate_watch3_native_face_ipk.py
+          python3 -m unittest discover -s tests -p 'test_watch3_native_face_ipk.py' -v
+          python3 -m unittest discover -s tests -p 'test_uglyos_face_package.py' -v
+      - name: Fetch the upstream AsteroidOS metadata layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src preflight-logs
+          get_layer() {
+            local dest="$1" url="$2" branch="$3"
+            git clone --depth=1 --single-branch --branch "$branch" "$url" "src/$dest"
+            printf '%s %s %s\n' "$dest" "$branch" "$(git -C "src/$dest" rev-parse HEAD)" | tee -a preflight-logs/upstream-commits.txt
+          }
+          get_layer oe-core https://github.com/openembedded/openembedded-core.git whinlatter
+          get_layer oe-core/bitbake https://github.com/openembedded/bitbake.git 2.16
+          # Reuse the same known-good core revisions as the successful R08 Linux rootfs.
+          git -C src/oe-core fetch --depth=1 origin 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core checkout --detach 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core/bitbake fetch --depth=1 origin 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          git -C src/oe-core/bitbake checkout --detach 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          get_layer meta-openembedded https://github.com/openembedded/meta-openembedded.git whinlatter
+          get_layer meta-qt6 https://code.qt.io/yocto/meta-qt6.git 6.11
+          get_layer meta-smartphone https://github.com/shr-distribution/meta-smartphone.git whinlatter
+          get_layer meta-clang https://github.com/kraj/meta-clang.git whinlatter
+          get_layer meta-asteroid https://github.com/AsteroidOS/meta-asteroid.git master
+          get_layer meta-asteroid-community https://github.com/AsteroidOS/meta-asteroid-community.git master
+          get_layer meta-virtualization https://git.yoctoproject.org/meta-virtualization whinlatter
+          git -C src/meta-openembedded checkout --detach f52f32952cb9717949f8bc3d3ccf6c4c5a59521f
+          git -C src/meta-qt6 checkout --detach ec98b3ab1c8deeab9412ef6cbfd55729dc567b01
+          git -C src/meta-smartphone checkout --detach 0ef4e8979fbf3403ff8aef977874496dc312d913
+          git -C src/meta-clang checkout --detach cf20f8bd1366d41094c945597b95dd746e87b871
+          # master can advance after the shallow clone; explicitly fetch our tested commit.
+          git -C src/meta-asteroid fetch --depth=1 origin 1af66a6188f7909303cfcec779c8475be1bc4679
+          git -C src/meta-asteroid checkout --detach 1af66a6188f7909303cfcec779c8475be1bc4679
+          git -C src/meta-asteroid-community checkout --detach f911d8900b2da887d1486416a8c16b8f8f15dd35
+          git -C src/meta-virtualization checkout --detach 8f03a0cc8950ef5d5e4f11d9ae494946d1991e45
+          { echo 'PINNED CORE:'; git -C src/oe-core rev-parse HEAD; git -C src/oe-core/bitbake rev-parse HEAD; } | tee -a preflight-logs/upstream-commits.txt
+          echo 'AsteroidOS source layers downloaded; no kernel or operating system built.'
+      - name: Configure actual AsteroidOS distro with R08 machine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/conf preflight-logs
+          cat > build/conf/bblayers.conf <<'EOF'
+          BBPATH = "${TOPDIR}"
+          BBLAYERS = " \
+            ${TOPDIR}/../src/oe-core/meta \
+            ${TOPDIR}/../src/meta-qt6 \
+            ${TOPDIR}/../src/meta-asteroid \
+            ${TOPDIR}/../src/meta-asteroid-community \
+            ${TOPDIR}/../src/meta-openembedded/meta-oe \
+            ${TOPDIR}/../src/meta-openembedded/meta-multimedia \
+            ${TOPDIR}/../src/meta-openembedded/meta-gnome \
+            ${TOPDIR}/../src/meta-openembedded/meta-networking \
+            ${TOPDIR}/../src/meta-smartphone/meta-android \
+            ${TOPDIR}/../src/meta-openembedded/meta-python \
+            ${TOPDIR}/../src/meta-openembedded/meta-filesystems \
+            ${TOPDIR}/../src/meta-clang \
+            ${TOPDIR}/../src/meta-virtualization \
+            ${TOPDIR}/../meta-noblesse \
+          "
+          EOF
+          cat > build/conf/local.conf <<'EOF'
+          MACHINE = "noblesse-r08"
+          DISTRO = "asteroid"
+          PACKAGE_CLASSES = "package_ipk"
+          BB_NUMBER_THREADS = "3"
+          PARALLEL_MAKE = "-j3"
+          EOF
+          echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},8G,100K"' >> build/conf/local.conf
+      - name: Check that inode safety limit fits this free runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The previous 200M free-inode threshold meant 209,715,200
+          # inodes and stopped the build with ~18 million actually free.
+          df -h "$GITHUB_WORKSPACE"
+          df -i "$GITHUB_WORKSPACE"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          config = Path('build/conf/local.conf').read_text()
+          limits = [line for line in config.splitlines() if line.startswith('BB_DISKMON_DIRS = ')]
+          assert len(limits) == 1 and limits[0].endswith(',8G,100K"'), 'Unsafe BitBake disk/inode limit'
+          st = os.statvfs('build')
+          disk_gib = st.f_bavail * st.f_frsize / 1024**3
+          print(f'Free disk: {disk_gib:.1f} GiB; stop limit: 8 GiB')
+          assert disk_gib >= 20, 'Free disk too low for this build'
+          if st.f_files > 0 and st.f_favail >= 0:
+              print(f'Free inodes: {st.f_favail:,}; stop limit: 102,400')
+              assert st.f_favail >= 500_000, 'Free inodes too low for this build'
+          print('PASS: BitBake inode guard is realistic and filesystem has headroom')
+          PY
+      - name: Record true native IPK dependency blocker then budget genuine do_package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/native-face-logs"
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e watch3-faces > "$GITHUB_WORKSPACE/native-face-logs/face-env.tmp"
+          bitbake -e asteroid-image > "$GITHUB_WORKSPACE/native-face-logs/image-env.tmp"
+          python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_face_package.py" metadata \
+            "$GITHUB_WORKSPACE/native-face-logs/face-env.tmp" \
+            "$GITHUB_WORKSPACE/native-face-logs/image-env.tmp"
+          rm -f "$GITHUB_WORKSPACE/native-face-logs/"*.env.tmp
+          # PR #23 run 40173248170 proved full package_write_ipk recursively
+          # pulls QtBase, QtDeclarative, QtWayland and Qt native tools. Keep the
+          # runtime launcher dependency unchanged. Graph both tasks to show the
+          # difference, never disable the guard or quietly rewrite RDEPENDS.
+          timeout --signal=TERM --kill-after=5s 900s \
+            bitbake -g -c package_write_ipk watch3-faces 2>&1 |
+            tee "$GITHUB_WORKSPACE/native-face-logs/01-native-ipk-graph.log"
+          cp pn-buildlist "$GITHUB_WORKSPACE/native-face-logs/01-native-ipk-pn-buildlist.txt"
+          cp task-depends.dot "$GITHUB_WORKSPACE/native-face-logs/01-native-ipk-task-depends.dot"
+          timeout --signal=TERM --kill-after=5s 900s \
+            bitbake -g -c package watch3-faces 2>&1 |
+            tee "$GITHUB_WORKSPACE/native-face-logs/02-package-split-graph.log"
+          cp pn-buildlist "$GITHUB_WORKSPACE/native-face-logs/02-package-split-pn-buildlist.txt"
+          cp task-depends.dot "$GITHUB_WORKSPACE/native-face-logs/02-package-split-task-depends.dot"
+          python3 - "$GITHUB_WORKSPACE/native-face-logs" "$GITHUB_STEP_SUMMARY" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+          folder, summary = map(Path, sys.argv[1:])
+          forbidden = {"qtbase", "qtbase-native", "qtdeclarative",
+                       "qtdeclarative-native", "qttools-native", "qtwayland",
+                       "asteroid-image", "virtual/kernel"}
+          def graph(prefix):
+              recipes = set((folder / (prefix + "-pn-buildlist.txt")).read_text().splitlines())
+              text = (folder / (prefix + "-task-depends.dot")).read_text()
+              tasks = set(re.findall(r'"([^"]+\.do_[^"]+)"', text))
+              assert recipes and tasks and "watch3-faces" in recipes, "Empty/wrong task graph"
+              return recipes, tasks
+          native, native_tasks = graph("01-native-ipk")
+          split, split_tasks = graph("02-package-split")
+          blocked = sorted(native & forbidden)
+          if not blocked:
+              raise ValueError("Native IPK graph no longer has expected blockers; revise explicit staging strategy")
+          blocked_in_split = sorted(split & forbidden)
+          if blocked_in_split:
+              raise ValueError(f"Even do_package needs expensive Qt/firmware dependencies: {blocked_in_split}")
+          if len(split_tasks) > 800:
+              raise ValueError(f"do_package graph exceeds 800-task budget: {len(split_tasks)}")
+          report = (
+              f"Native package_write_ipk: {len(native)} recipes / {len(native_tasks)} tasks; "
+              f"unacceptable dependencies: {blocked}\n"
+              f"Genuine do_package split: {len(split)} recipes / {len(split_tasks)} tasks; "
+              f"no forbidden Qt/firmware dependencies\n"
+          )
+          (folder / "03-graph-comparison.txt").write_text(report)
+          print(report)
+          with summary.open("a") as f:
+              f.write("## UgLy|OS R08 task-graph findings\n")
+              f.write(f"- Full native IPK writer: **blocked** by {', '.join(blocked)}; not executed\n")
+              f.write(f"- Real do_package: {len(split_tasks)} tasks (cap 800), no forbidden Qt/firmware dependencies\n")
+          PY
+
+      - name: Run genuine dependency-aware Yocto do_package only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/native-face-logs"
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          timeout --signal=TERM --kill-after=5s 2700s \
+            bitbake -c package watch3-faces 2>&1 |
+            tee "$GITHUB_WORKSPACE/native-face-logs/04-real-do-package.log"
+
+      - name: Verify actual Yocto package split, identity, paths and source bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/native-face-logs"
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e watch3-faces > "$GITHUB_WORKSPACE/native-face-logs/package.env.tmp"
+          python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_face_package.py" packaged \
+            "$GITHUB_WORKSPACE/native-face-logs/package.env.tmp" \
+            "$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/watch3-faces/watch3-faces" |
+            tee "$GITHUB_WORKSPACE/native-face-logs/05-actual-package-split-proof.log"
+          rm -f "$GITHUB_WORKSPACE/native-face-logs/package.env.tmp"
+          {
+            echo '## Verified real Yocto do_package split, NOT an IPK'
+            echo '- Actual BitBake D and packages-split match four source assets byte-for-byte'
+            echo '- Preserved RDEPENDS:watch3-faces = asteroid-launcher'
+            echo '- NOT TESTED: native package_write_ipk, rootfs, opkg install, watch boot or flashing'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload bounded task-graph and package-split diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-real-package-split-diagnostics
+          retention-days: 7
+          if-no-files-found: warn
+          path: native-face-logs/
