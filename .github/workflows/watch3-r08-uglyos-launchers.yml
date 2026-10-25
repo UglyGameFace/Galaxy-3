@@ -61,21 +61,21 @@ jobs:
           set -euo pipefail
           python3 tools/render_uglyos_launchers.py --output uglyos-launcher-host-previews \
             | tee uglyos-launcher-qt.log
-          test "$(find uglyos-launcher-host-previews -maxdepth 1 -name '*.png' | wc -l)" -eq 6
+          test "$(find uglyos-launcher-host-previews -maxdepth 1 -name '*.png' | wc -l)" -eq 16
           python3 - <<'PY'
           import json
           from pathlib import Path
           report = json.loads(Path("uglyos-launcher-host-previews/proof.json").read_text())
-          assert len(report["previews"]) == 6
+          assert len(report["previews"]) == 16
           assert all(r["lit_samples"] >= 45 for r in report["previews"])
-          print("PASS: six nonblank real-QML layouts with mock app activation")
+          print("PASS: 16 nonblank real-QML previews with mock app activation")
           PY
           {
             echo '## UgLy|OS R08 Fast Launcher host-Qt proof'
-            echo '- Fast List and Compact Grid rendered with 10 fake installed apps'
-            echo '- 360px and 240px round screens, Original and Rose accent'
+            echo '- Fast List, Compact Grid, Stoner Lounge and Gamer Arcade rendered with mock apps'
+            echo '- 360px and 240px round screens, Rose accent and touch effects On/Off'
             echo '- Fake application click dispatch verified'
-            echo '- No shader masks, effects, timers, network polling or image textures'
+            echo '- No shaders, looping effects, timers, background network polling or images'
             echo '- NOT TESTED: target launcher, real apps, measured battery life or Watch3 boot'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload offline mock-data visual evidence
