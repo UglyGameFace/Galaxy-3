@@ -17,7 +17,7 @@ os.environ.setdefault("QT_QUICK_BACKEND", "software")
 os.environ.setdefault("QT_OPENGL", "software")
 
 from PySide6.QtCore import (QAbstractListModel, QModelIndex, QObject, Property,
-                             QPoint, Qt, Slot, QUrl)
+                             QPoint, Qt, Slot, Signal, QUrl)
 from PySide6.QtGui import QGuiApplication, QImage, QPainter, QPainterPath
 from PySide6.QtQuick import QQuickView
 from PySide6.QtTest import QTest
@@ -84,7 +84,9 @@ class AppModel(QAbstractListModel):
 
 
 class FakeGrid(QObject):
-    @Property(int, constant=True)
+    currentVerticalPosChanged = Signal()
+
+    @Property(int, notify=currentVerticalPosChanged)
     def currentVerticalPos(self) -> int:
         return 0
 

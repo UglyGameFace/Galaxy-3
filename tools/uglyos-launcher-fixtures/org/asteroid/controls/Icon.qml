@@ -1,6 +1,7 @@
 // HOST ONLY: simulated icon for visual tests, not a device icon resource.
 import QtQuick
 Item {
+    id: iconRoot
     property string name: ""
     property color color: "#BFE9D0"
     Rectangle {
@@ -13,11 +14,11 @@ Item {
     Text {
         anchors.centerIn: parent
         color: parent.color
-        text: parent.parent.name.indexOf("calendar") >= 0 ? "D" :
-              parent.parent.name.indexOf("settings") >= 0 ? "S" :
-              parent.parent.name.indexOf("music") >= 0 ? "M" :
-              parent.parent.name.indexOf("timer") >= 0 ? "T" :
-              parent.parent.name.indexOf("alarm") >= 0 ? "A" : "+"
+        text: iconRoot.name.indexOf("calendar") >= 0 ? "D" :
+              iconRoot.name.indexOf("settings") >= 0 ? "S" :
+              iconRoot.name.indexOf("music") >= 0 ? "M" :
+              iconRoot.name.indexOf("timer") >= 0 ? "T" :
+              iconRoot.name.indexOf("alarm") >= 0 ? "A" : "+"
         font.pixelSize: Math.max(10, parent.width * 0.44)
     }
 }
