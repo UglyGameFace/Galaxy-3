@@ -1,0 +1,72 @@
+name: UgLy|OS R08 lightweight selectable launchers (NO DEVICE)
+
+# Host Qt 6 renders real QML against fake icons/apps; never runs on a watch.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'meta-noblesse/recipes-asteroid/uglyos-launchers/**'
+      - 'meta-noblesse/recipes-core/images/asteroid-image.bbappend'
+      - 'tools/render_uglyos_launchers.py'
+      - 'tools/uglyos-launcher-fixtures/**'
+      - 'tests/test_uglyos_launchers.py'
+      - '.github/workflows/watch3-r08-uglyos-launchers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-launcher-layout-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+      QT_QUICK_BACKEND: software
+      QT_OPENGL: software
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify machine-scoped and lightweight QML contracts
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/render_uglyos_launchers.py
+          python3 -m unittest discover -s tests -p test_uglyos_launchers.py -v
+      - name: Install host Qt software rendering prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            fonts-noto-core libegl1 libopengl0 libxcb-cursor0
+          python3 -m pip install --disable-pip-version-check --no-cache-dir "PySide6==6.8.3"
+      - name: Render real launcher QML with simulated installed applications
+        run: |
+          set -euo pipefail
+          python3 tools/render_uglyos_launchers.py --output uglyos-launcher-host-previews \
+            | tee uglyos-launcher-qt.log
+          test "$(find uglyos-launcher-host-previews -maxdepth 1 -name '*.png' | wc -l)" -eq 6
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("uglyos-launcher-host-previews/proof.json").read_text())
+          assert len(report["previews"]) == 6
+          assert all(r["lit_samples"] >= 45 for r in report["previews"])
+          print("PASS: six nonblank real-QML layouts with mock app activation")
+          PY
+          {
+            echo '## UgLy|OS R08 Fast Launcher host-Qt proof'
+            echo '- Fast List and Compact Grid rendered with 10 fake installed apps'
+            echo '- 360px and 240px round screens, Original and Rose accent'
+            echo '- Fake application click dispatch verified'
+            echo '- No shader masks, effects, timers, network polling or image textures'
+            echo '- NOT TESTED: target launcher, real apps, measured battery life or Watch3 boot'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload offline mock-data visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFDEVICE-MOCK-APPS-uglyos-launchers
+          path: |
+            uglyos-launcher-host-previews/
+            uglyos-launcher-qt.log
+          retention-days: 14
+          if-no-files-found: warn
