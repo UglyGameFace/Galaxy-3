@@ -180,12 +180,12 @@ class UgLyOSPackageTests(unittest.TestCase):
         # validation falsely raised "Unsafe datadir".
         file = self.root / "exported.env"
         file.write_text(
-            '# $datadir [2 operations]\\n'
-            '#     "${prefix}/share"\\n'
-            'export datadir="/usr/share"\\n'
-            'export prefix="/usr"\\n'
-            f'D="{self.installed_root}"\\n'
-            'PN="watch3-faces"\\n'
+            '# $datadir [2 operations]\n'
+            '#     "${prefix}/share"\n'
+            'export datadir="/usr/share"\n'
+            'export prefix="/usr"\n'
+            f'D="{self.installed_root}"\n'
+            'PN="watch3-faces"\n'
         )
         parsed = variables(file)
         self.assertEqual(parsed["datadir"], "/usr/share")
@@ -195,16 +195,16 @@ class UgLyOSPackageTests(unittest.TestCase):
     def test_bitbake_env_reader_ignores_commented_export_history(self):
         file = self.root / "commented-export.env"
         file.write_text(
-            '# export datadir="/usr/../etc"\\n'
-            'export datadir="/usr/share"\\n'
+            '# export datadir="/usr/../etc"\n'
+            'export datadir="/usr/share"\n'
         )
         self.assertEqual(variables(file), {"datadir": "/usr/share"})
 
     def test_bitbake_env_reader_does_not_allow_unsafe_exported_paths(self):
         file = self.root / "bad-export.env"
         file.write_text(
-            'export datadir="/usr/../etc"\\n'
-            f'D="{self.installed_root}"\\n'
+            'export datadir="/usr/../etc"\n'
+            f'D="{self.installed_root}"\n'
         )
         with self.assertRaisesRegex(PackageError, "Unsafe datadir"):
             inspect_installed(variables(file), self.source)
