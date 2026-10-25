@@ -159,19 +159,30 @@ jobs:
           python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_face_package.py" metadata \
             "$GITHUB_WORKSPACE/uglyos-logs/face-env.tmp" "$GITHUB_WORKSPACE/uglyos-logs/image-env.tmp"
           rm -f "$GITHUB_WORKSPACE/uglyos-logs/"*.env.tmp
-      - name: Build only UgLyOS watchface asset IPK (no Qt or full system)
+      - name: Package only UgLyOS QML assets using isolated BitBake recipe
         shell: bash
         run: |
           set -euo pipefail
-          # Fresh runner steps share the checkout, not pre-created output dirs.
-          # Create before any shell redirection or tee: otherwise BitBake is
-          # skipped by bash with 'No such file or directory'.
           mkdir -p "$GITHUB_WORKSPACE/uglyos-logs"
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
-          timeout --signal=TERM --kill-after=5s 1200s \
-            bitbake watch3-faces 2>&1 | tee "$GITHUB_WORKSPACE/uglyos-logs/watch3-faces-bitbake.log"
+          # Run #40134919700 hit its 20-minute timeout on task 655/3359:
+          # bitbake watch3-faces recursively constructed the entire cold
+          # target/native dependency closure, although this recipe installs
+          # only four text files and has INHIBIT_DEFAULT_DEPS=1.
+          #
+          # Pinned BitBake 2.16 -b executes ONE named .bb and its own task
+          # chain without rebuilding dependencies from other recipes. It is
+          # only appropriate here because the do_install task is a simple
+          # source-to-data-dir copy with no compilers or native generator.
+          # We still assert the actual machine/distro IMAGE_INSTALL metadata
+          # in the prior independent step, and verify all files after package.
+          recipe="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/watch3-faces/watch3-faces_1.0.bb"
+          test -f "$recipe"
+          timeout --signal=TERM --kill-after=5s 600s \
+            bitbake -b "$recipe" -c package 2>&1 |
+            tee "$GITHUB_WORKSPACE/uglyos-logs/watch3-faces-isolated-package.log"
       - name: Verify actual installed files and package staging against source
         shell: bash
         run: |
