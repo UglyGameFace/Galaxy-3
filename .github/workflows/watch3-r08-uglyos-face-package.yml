@@ -1,6 +1,8 @@
 name: UgLyOS R08 actual watchface package verification
 
-# Small, real BitBake package verification for UgLy|OS R08 using pinned upstream.
+# Bounded real BitBake do_install verification for UgLy|OS R08 using pinned upstream.
+# IMPORTANT: full do_package is not tested in limited-dependency (-b) mode:
+# pinned OpenEmbedded package_pkgdata.bbclass references an undefined function.
 # NEVER compiles Qt, full AsteroidOS image, boots or flashes a watch.
 on:
   pull_request:
@@ -182,7 +184,7 @@ jobs:
             exit 1
           fi
           echo "PASS: BitBake's required pseudo-native fakeroot is available"
-      - name: Package only UgLyOS QML assets using isolated BitBake recipe
+      - name: Install only UgLyOS QML assets using isolated BitBake recipe
         shell: bash
         run: |
           set -euo pipefail
@@ -199,14 +201,16 @@ jobs:
           # chain without rebuilding dependencies from other recipes. It is
           # only appropriate here because the do_install task is a simple
           # source-to-data-dir copy with no compilers or native generator.
-          # We still assert the actual machine/distro IMAGE_INSTALL metadata
-          # in the prior independent step, and verify all files after package.
+          # Run #40149024830 showed pinned OE-Core do_package is unusable
+          # with -b: package_pkgdata.bbclass hits a NameError. Do not patch
+          # upstream internals or falsely call staging a finished package.
+          # Assert real image/recipe metadata separately and verify do_install D.
           recipe="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/watch3-faces/watch3-faces_1.0.bb"
           test -f "$recipe"
           timeout --signal=TERM --kill-after=5s 600s \
-            bitbake -b "$recipe" -c package 2>&1 |
-            tee "$GITHUB_WORKSPACE/uglyos-logs/watch3-faces-isolated-package.log"
-      - name: Verify actual installed files and package staging against source
+            bitbake -b "$recipe" -c install 2>&1 |
+            tee "$GITHUB_WORKSPACE/uglyos-logs/watch3-faces-isolated-install.log"
+      - name: Verify actual BitBake installed files against source
         shell: bash
         run: |
           set -euo pipefail
@@ -218,15 +222,15 @@ jobs:
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
           bitbake -e watch3-faces > "$GITHUB_WORKSPACE/uglyos-logs/package-env.tmp"
-          python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_face_package.py" packaged \
+          python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_face_package.py" installed \
             "$GITHUB_WORKSPACE/uglyos-logs/package-env.tmp" \
             "$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/watch3-faces/watch3-faces"
           rm -f "$GITHUB_WORKSPACE/uglyos-logs/package-env.tmp"
           {
-            echo '## UgLy|OS actual R08 Yocto package passed'
-            echo '- Three QML faces plus edition metadata match sources byte-for-byte'
-            echo '- Actual BitBake metadata includes package in R08 asteroid-image'
-            echo '- NOT TESTED: Qt rendering, full rootfs, watch boot or flashing'
+            echo '## UgLy|OS R08 BitBake install staging passed'
+            echo '- Three QML faces and edition identity match installed files byte-for-byte'
+            echo '- Actual BitBake metadata selects the package in R08 asteroid-image'
+            echo '- NOT TESTED: do_package, package split, IPK creation, full rootfs, Qt rendering, watch boot or flashing'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload only bounded packaging logs
         if: always()
