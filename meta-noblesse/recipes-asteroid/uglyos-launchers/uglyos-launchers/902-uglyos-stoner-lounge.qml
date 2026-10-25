@@ -115,5 +115,8 @@ ListView {
         forbidBottom = false
         forbidLeft = false
         forbidRight = false
+        // Initial selector/grid positioning must show header and full first tile.
+        // Runs ONCE after component layout, never as an animation or timer.
+        Qt.callLater(function() { appsView.positionViewAtBeginning() })
     }
 }

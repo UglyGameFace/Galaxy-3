@@ -18,7 +18,7 @@ os.environ.setdefault("QT_OPENGL", "software")
 
 from PySide6.QtCore import (QAbstractListModel, QModelIndex, QObject, Property,
                              QPoint, QPointF, Qt, Slot, Signal, QUrl)
-from PySide6.QtGui import QGuiApplication, QImage, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPainterPath
 from PySide6.QtQuick import QQuickView
 from PySide6.QtTest import QTest
 
@@ -140,6 +140,7 @@ def render(app: QGuiApplication, qml: Path, size: int, palette: str, effects: st
     locale = FakeLocale()
     warnings = []
     view = QQuickView()
+    view.setColor(QColor("#070B09"))  # Simulate the launcher\u0027s dark backdrop.
     view.engine().addImportPath(str(FACES_FIXTURES))
     view.engine().addImportPath(str(FIXTURES))
     view.engine().warnings.connect(
@@ -205,6 +206,9 @@ def render(app: QGuiApplication, qml: Path, size: int, palette: str, effects: st
     point = QPoint(round(scene.x()), round(scene.y()))
     if not (0 <= point.x() < size and 0 <= point.y() < size):
         raise RuntimeError(f"First app location outside screen: {point} in {qml.name}")
+    if point.y() < size * .19:
+        raise RuntimeError(f"First app tile starts too high for the round screen: "
+                           f"{point.y()} < {size * .19} in {qml.name}")
     QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier, point)
     app.processEvents()
     if model.items[0].activations != 1:
