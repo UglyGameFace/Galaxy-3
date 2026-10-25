@@ -10,6 +10,14 @@ Item {
     property alias currentIndex: appsView.currentIndex
     property alias count: appsView.count
     property bool fakePressed: false
+    property bool firstAppPositioned: false
+    function positionFirstApp() {
+        if (firstAppPositioned || appsView.count < 1 || appsView.height < 1)
+            return
+        appsView.currentIndex = 0
+        appsView.positionViewAtIndex(0, GridView.Beginning)
+        firstAppPositioned = true
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -31,12 +39,15 @@ Item {
     }
     GridView {
         id: appsView
+        objectName: "uglyos-apps-view"
         anchors.fill: parent
         anchors.topMargin: uglyLauncherRoot.height * 0.18
         anchors.bottomMargin: uglyLauncherRoot.height * 0.08
         anchors.leftMargin: uglyLauncherRoot.width * 0.03
         anchors.rightMargin: uglyLauncherRoot.width * 0.03
         clip: true
+        onCountChanged: Qt.callLater(uglyLauncherRoot.positionFirstApp)
+        onHeightChanged: Qt.callLater(uglyLauncherRoot.positionFirstApp)
         cellWidth: width / 2
         cellHeight: Math.max(64, height * 0.265)
         cacheBuffer: height * 0.55
@@ -124,7 +135,7 @@ Item {
             forbidRight = false
             // Initial selector/grid positioning must show header and full first tile.
             // Runs ONCE after component layout, never as an animation or timer.
-            Qt.callLater(function() { appsView.positionViewAtBeginning() })
+            Qt.callLater(uglyLauncherRoot.positionFirstApp)
         }
     }
 
