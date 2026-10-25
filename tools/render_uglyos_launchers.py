@@ -179,7 +179,27 @@ def render(app: QGuiApplication, qml: Path, size: int, palette: str, effects: st
     # Click the actual first visible delegate, never a guessed screen pixel.
     first = view.rootObject().findChild(QObject, "uglyos-app-item-0")
     if first is None:
-        raise RuntimeError(f"First app delegate not instantiated by {qml.name}")
+        # Qt Quick's visual parent graph may differ from QObject ownership.
+        # Traverse instantiated visual delegates rather than using a fake tap.
+        stack = [view.rootObject()]
+        seen = set()
+        visible = []
+        while stack:
+            item = stack.pop()
+            if id(item) in seen:
+                continue
+            seen.add(id(item))
+            name = item.objectName()
+            if name:
+                visible.append(name)
+            if name == "uglyos-app-item-0":
+                first = item
+                break
+            if hasattr(item, "childItems"):
+                stack.extend(item.childItems())
+        if first is None:
+            raise RuntimeError(f"First app delegate not in visible Qt Quick tree for {qml.name}; "
+                               f"named items={visible[:35]}, model count={model.rowCount()}")
     local = QPointF(first.width() * 0.5, first.height() * 0.5)
     scene = first.mapToScene(local)
     point = QPoint(round(scene.x()), round(scene.y()))
