@@ -17,7 +17,7 @@ os.environ.setdefault("QT_QUICK_BACKEND", "software")
 os.environ.setdefault("QT_OPENGL", "software")
 
 from PySide6.QtCore import (QAbstractListModel, QModelIndex, QObject, Property,
-                             QPoint, Qt, Slot, Signal, QUrl)
+                             QPoint, QPointF, Qt, Slot, Signal, QUrl)
 from PySide6.QtGui import QGuiApplication, QImage, QPainter, QPainterPath
 from PySide6.QtQuick import QQuickView
 from PySide6.QtTest import QTest
@@ -176,14 +176,20 @@ def render(app: QGuiApplication, qml: Path, size: int, palette: str, effects: st
     if warnings:
         raise RuntimeError(f"Qt warnings from {qml.name}: {warnings}")
     lit = verify_pixels(img)
-    # Confirm this layout is actually actionable: first app dispatches through
-    # the unmodified launcherModel object's launchApplication method.
-    point = QPoint(size // 2 if qml.name.startswith(("900", "902")) else size // 4,
-                   int(size * 0.24))
+    # Click the actual first visible delegate, never a guessed screen pixel.
+    first = view.rootObject().findChild(QObject, "uglyos-app-item-0")
+    if first is None:
+        raise RuntimeError(f"First app delegate not instantiated by {qml.name}")
+    local = QPointF(first.width() * 0.5, first.height() * 0.5)
+    scene = first.mapToScene(local)
+    point = QPoint(round(scene.x()), round(scene.y()))
+    if not (0 <= point.x() < size and 0 <= point.y() < size):
+        raise RuntimeError(f"First app location outside screen: {point} in {qml.name}")
     QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier, point)
     app.processEvents()
     if model.items[0].activations != 1:
-        raise RuntimeError(f"First app activation missing in {qml.name}: {model.items[0].activations}")
+        raise RuntimeError(f"Click on first actual app delegate did not dispatch: "
+                           f"{qml.name}, hits={model.items[0].activations}, at={point}")
     view.close()
     view.deleteLater()
     app.processEvents()

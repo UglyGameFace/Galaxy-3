@@ -36,6 +36,7 @@ class LauncherContracts(unittest.TestCase):
                 self.assertLess(len(source), 6000)
                 self.assertIn("model: launcherModel", source)
                 self.assertIn("model.object.launchApplication()", source)
+                self.assertIn('objectName: "uglyos-app-item-" + index', source)
                 self.assertTrue("cacheBuffer: height * 0.55" in source or
                                 "cacheBuffer: height * 0.5" in source)
                 self.assertIn("enabled: !appsView.dragging", source)

@@ -40,6 +40,7 @@ ListView {
     footer: Item { width: appsView.width; height: appsView.height * 0.13 }
 
     delegate: MouseArea {
+        objectName: "uglyos-app-item-" + index
         id: row
         x: (appsView.width - width) / 2
         width: appsView.width * 0.79

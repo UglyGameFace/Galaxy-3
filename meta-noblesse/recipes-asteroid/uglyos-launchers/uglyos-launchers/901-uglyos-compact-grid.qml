@@ -32,6 +32,7 @@ GridView {
     footer: Item { width: appsView.width; height: appsView.height * 0.13 }
 
     delegate: MouseArea {
+        objectName: "uglyos-app-item-" + index
         id: appTile
         width: appsView.cellWidth
         height: appsView.cellHeight
