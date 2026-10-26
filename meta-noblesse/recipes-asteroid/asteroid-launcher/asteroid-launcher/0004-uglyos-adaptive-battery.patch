@@ -8,7 +8,7 @@ Subject: [PATCH] R08 event-driven reversible battery saver without background po
          defaultValue: true
      }
  
-+// Optional, resident, event-driven battery savings, R08 only.
++    // Optional, resident, event-driven battery savings, R08 only.
 +    // No polling, network activity or Bluetooth/Wi-Fi disconnection.
 +    Item {
 +        id: adaptiveBattery
