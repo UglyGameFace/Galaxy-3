@@ -3,7 +3,7 @@ Subject: [PATCH] R08 event-driven reversible battery saver without background po
 
 --- a/src/qml/MainScreen.qml
 +++ b/src/qml/MainScreen.qml
-@@ -141,8 +141,116 @@
+@@ -141,8 +141,151 @@
          key: "/org/asteroidos/settings/always-on-display"
          defaultValue: true
      }
@@ -31,6 +31,25 @@ Subject: [PATCH] R08 event-driven reversible battery saver without background po
 +            defaultValue: "extended"
 +            onValueChanged: adaptiveBattery.reconcile()
 +        }
++        // User-adjustable settings are read only before taking a snapshot.
++        ConfigurationValue {
++            id: adaptiveThreshold
++            key: "/desktop/uglyos/power/low-threshold"
++            defaultValue: "20"
++            onValueChanged: adaptiveBattery.reconcile()
++        }
++        ConfigurationValue {
++            id: adaptiveCustomAod
++            key: "/desktop/uglyos/power/custom-aod"
++            defaultValue: true
++            onValueChanged: adaptiveBattery.reconcile()
++        }
++        ConfigurationValue {
++            id: adaptiveCustomTilt
++            key: "/desktop/uglyos/power/custom-tilt"
++            defaultValue: false
++            onValueChanged: adaptiveBattery.reconcile()
++        }
 +        ConfigurationValue {
 +            id: adaptiveOriginal
 +            key: "/desktop/uglyos/power/adaptive-original"
@@ -45,28 +64,34 @@ Subject: [PATCH] R08 event-driven reversible battery saver without background po
 +        }
 +        function reconcile() {
 +            if (changing) return
-+            // Unknown gauge or charger state must never start an adjustment.
++            // Read known hardware events, but allow a manual Stop to restore
++            // already-owned changes even if the battery gauge becomes unknown.
 +            var amount = adaptiveGauge.percent
-+            if (typeof amount !== "number" || !isFinite(amount) ||
-+                amount < 0 || amount > 100 ||
-+                typeof mceChargerType.type !== "number") return
++            var validBattery = typeof amount === "number" && isFinite(amount) &&
++                amount >= 0 && amount <= 100
++            var validCharger = typeof mceChargerType.type === "number" &&
++                isFinite(mceChargerType.type)
 +            // Solo Saver and nightstand already own these controls.
 +            if (adaptiveSolo.value !== "" || nightstandMode.active) return
-+            var charging = mceChargerType.type !== MceChargerType.None
++            var charging = validCharger &&
++                mceChargerType.type !== MceChargerType.None
 +            if (adaptiveOriginal.value !== "") {
-+                // A saved snapshot is a single owner, not another fallback.
 +                var previous
 +                try { previous = JSON.parse(adaptiveOriginal.value) }
 +                catch (error) { return }
-+                if (!previous || previous.version !== 1 ||
++                if (!previous || (previous.version !== 1 && previous.version !== 2) ||
 +                    typeof previous.aod !== "boolean" ||
 +                    typeof previous.tilt !== "boolean" ||
 +                    typeof previous.changedAod !== "boolean" ||
 +                    typeof previous.changedTilt !== "boolean") return
-+                if (adaptiveEnabled.value === true && !charging &&
-+                    amount < 30) return
++                // Legacy v1 snapshots always restore at 30%. A v2 snapshot
++                // remembers its exact threshold, independent of later edits.
++                var restoreAt = previous.version === 1 ? 30 : previous.restoreAt
++                if ([25, 30, 35].indexOf(restoreAt) < 0) return
++                if (adaptiveEnabled.value === true && validBattery &&
++                    validCharger && !charging && amount < restoreAt) return
 +                changing = true
-+                // Do not override a user who has already enabled a control.
++                // Never re-disable a control manually turned back on.
 +                if (previous.changedAod && alwaysOnDisplay.value === false) {
 +                    alwaysOnDisplay.value = previous.aod
 +                    displaySettings.lowPowerModeEnabled = previous.aod
@@ -78,21 +103,31 @@ Subject: [PATCH] R08 event-driven reversible battery saver without background po
 +                changing = false
 +                return
 +            }
-+            if (adaptiveEnabled.value !== true || charging || amount > 20) return
-+            // Invalid preference must not silently choose the more disruptive mode.
-+            if (adaptiveProfile.value !== "connected" &&
-+                adaptiveProfile.value !== "extended") return
-+            var changeAod = alwaysOnDisplay.value === true
-+            // Connected: Pixel-like AOD saving, keep wrist wake. Extended:
-+            // preserve original PR #40 behavior, quiet both display controls.
-+            var changeTilt = adaptiveProfile.value === "extended" &&
-+                adaptiveTilt.available && adaptiveTilt.enabled === true
++            if (adaptiveEnabled.value !== true || !validBattery ||
++                !validCharger || charging) return
++            // Strict allowlists prevent corrupted configuration from choosing
++            // a surprising power policy.
++            if (["connected", "extended", "custom"].indexOf(adaptiveProfile.value) < 0 ||
++                ["15", "20", "25"].indexOf(adaptiveThreshold.value) < 0) return
++            var triggerAt = Number(adaptiveThreshold.value)
++            if (amount > triggerAt) return
++            if (adaptiveProfile.value === "custom" &&
++                (typeof adaptiveCustomAod.value !== "boolean" ||
++                 typeof adaptiveCustomTilt.value !== "boolean")) return
++            var wantsAod = adaptiveProfile.value !== "custom" ||
++                adaptiveCustomAod.value === true
++            var wantsTilt = adaptiveProfile.value === "extended" ||
++                (adaptiveProfile.value === "custom" &&
++                 adaptiveCustomTilt.value === true)
++            var changeAod = wantsAod && alwaysOnDisplay.value === true
++            var changeTilt = wantsTilt && adaptiveTilt.available &&
++                adaptiveTilt.enabled === true
 +            if (!changeAod && !changeTilt) return
 +            changing = true
-+            // Persist before modifying the live display/wake configuration.
++            // Persist before taking control; no polling, radios or root.
 +            adaptiveOriginal.value = JSON.stringify({
-+                version: 1, aod: !!alwaysOnDisplay.value,
-+                tilt: !!adaptiveTilt.enabled,
++                version: 2, aod: !!alwaysOnDisplay.value,
++                tilt: !!adaptiveTilt.enabled, restoreAt: triggerAt + 10,
 +                changedAod: changeAod, changedTilt: changeTilt
 +            })
 +            if (changeAod) {
