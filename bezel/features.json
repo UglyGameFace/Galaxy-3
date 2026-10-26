@@ -1,0 +1,169 @@
+{
+  "schema": 1,
+  "target": "Samsung Galaxy Watch3 45mm SM-R840X R08",
+  "physical_input_status": "stock-Tizen-node-identified; pinned vendor REL_WHEEL protocol reviewed; not validated in UgLyOS",
+  "app_state": "source-only-native-package; not in image; not booted",
+  "rules": {
+    "single_owner": "one BezelEngine for app-local input; no system-wide evdev grab",
+    "normal_scroll": "OS-wide wheel handling only after input adapter proof; avoid hijacking system events",
+    "haptics": "disabled until output device and rate limit verified",
+    "remote": "intent description only, no queued commands, no Bluetooth transport",
+    "security": "no privileges, no recording sensitive notification content or controlling phone without consent"
+  },
+  "features": [
+    {
+      "id": "command-ring",
+      "name": "Bezel Command Ring",
+      "state": "native-lab-source",
+      "adapter": "local QML WheelHandler; physical Qt event unverified",
+      "action": "ring selection and enter/back"
+    },
+    {
+      "id": "gestures",
+      "name": "Multi-function rotation patterns",
+      "state": "engine-implemented",
+      "adapter": "armed 2–8 detent local recorder; manual confirm; bounded settings persistence",
+      "action": "only local allowlisted target"
+    },
+    {
+      "id": "precision",
+      "name": "Adaptive Precision Dial",
+      "state": "engine-implemented",
+      "adapter": "fast rotation 3x capped, normal 1x",
+      "action": "local 0–100 control; no phone volume writes"
+    },
+    {
+      "id": "gaming",
+      "name": "Gaming Bezel",
+      "state": "engine-implemented",
+      "adapter": "24 slot local game selector",
+      "action": "local UI only"
+    },
+    {
+      "id": "button-combos",
+      "name": "Bezel + button combos",
+      "state": "adapter-blocked",
+      "adapter": "logical modifier supported; hardware hold events unknown and power key reserved",
+      "action": "no hardware button overrides"
+    },
+    {
+      "id": "gesture-recorder",
+      "name": "Custom gesture recording",
+      "state": "native-lab-source",
+      "adapter": "local allowlist, 6 bindings maximum, Nemo local config",
+      "action": "no macros to external apps"
+    },
+    {
+      "id": "eyes-free",
+      "name": "Eyes-Free Mode",
+      "state": "accessibility-prototype",
+      "adapter": "keyboard/Qt select/back plus optional screen alternatives",
+      "action": "haptics and physical buttons require verification"
+    },
+    {
+      "id": "notification-timeline",
+      "name": "Notification Time Machine",
+      "state": "provider-blocked",
+      "adapter": "requires authorized OS notification history with retention and privacy design",
+      "action": "no fake or stored private history"
+    },
+    {
+      "id": "rotary-keyboard",
+      "name": "Rotary Keyboard",
+      "state": "native-lab-source",
+      "adapter": "character ring + local confirm, 48-character max",
+      "action": "local text only"
+    },
+    {
+      "id": "haptic-navigation",
+      "name": "Haptic Navigation",
+      "state": "companion-and-hardware-blocked",
+      "adapter": "authorized Android navigation + verified watch haptics",
+      "action": "not triggered"
+    },
+    {
+      "id": "camera",
+      "name": "Remote Camera Dial",
+      "state": "companion-blocked",
+      "adapter": "user-approved Android camera zoom/shutter via future authenticated BLE",
+      "action": "no transport"
+    },
+    {
+      "id": "game-companion",
+      "name": "Gaming Companion Controller",
+      "state": "companion-and-sensor-blocked",
+      "adapter": "Android BLE HID or mutually authenticated companion, sensor verified",
+      "action": "no control transmitted"
+    },
+    {
+      "id": "context",
+      "name": "Smart Context Switching",
+      "state": "engine-implemented",
+      "adapter": "local explicit contexts everyday/gaming/work/accessibility",
+      "action": "no automatic spying on foreground apps"
+    },
+    {
+      "id": "audio",
+      "name": "DJ / Audio Scrubber",
+      "state": "companion-blocked",
+      "adapter": "phone media session and scrub permissions",
+      "action": "local dial and timeline available"
+    },
+    {
+      "id": "automations",
+      "name": "Bezel-driven Automations",
+      "state": "companion-blocked",
+      "adapter": "explicit user allowlist, confirmations, cooldowns and external credentials on phone",
+      "action": "no external actions"
+    },
+    {
+      "id": "virtual-dial",
+      "name": "Virtual Infinite Dial",
+      "state": "engine-implemented",
+      "adapter": "bounded circular selection and accumulated turns",
+      "action": "no constant animation or timer"
+    },
+    {
+      "id": "timeline",
+      "name": "Circular Timeline Editor",
+      "state": "engine-implemented",
+      "adapter": "bounded local timeline editing in 5s increments",
+      "action": "no calendar writes"
+    },
+    {
+      "id": "accessibility",
+      "name": "Bezel Accessibility Engine",
+      "state": "native-lab-source",
+      "adapter": "QML keyboard/back/select fallback, labels, touch controls",
+      "action": "OS-wide accessibility integration pending"
+    },
+    {
+      "id": "bezel-os",
+      "name": "Bezel OS Within OS",
+      "state": "native-lab-prototype",
+      "adapter": "contextual ring inside app; OS-level overlay permission/foreground proof pending",
+      "action": "no global overlay"
+    },
+    {
+      "id": "phone-games",
+      "name": "Watch-to-game bridge / Minecraft",
+      "state": "companion-blocked",
+      "adapter": "game-side opt-in integration, no generic input spoofing",
+      "action": "no external game input"
+    },
+    {
+      "id": "personal-language",
+      "name": "Personal Rotation Language",
+      "state": "engine-implemented",
+      "adapter": "armed sequence with bounded duration and explicit confirmation",
+      "action": "only known local actions"
+    },
+    {
+      "id": "themes",
+      "name": "Interactive stoner and gamer themes",
+      "state": "design-only",
+      "adapter": "later event-only smoke/arcade effects with frame/battery budget",
+      "action": "no continuous effects and no fake images"
+    }
+  ]
+}

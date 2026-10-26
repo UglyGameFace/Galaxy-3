@@ -1,0 +1,81 @@
+name: UgLy|OS R08 Bezel Engine and native source contracts (NO DEVICE)
+
+# Local engine + Qt6 source contract checks. No watch, root, SDB, flash or phone.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'bezel/**'
+      - 'meta-noblesse/recipes-asteroid/uglyos-bezel-lab/**'
+      - 'tests/test_watch3_r08_bezel_engine.py'
+      - 'tools/render_uglyos_bezel_lab.py'
+      - 'docs/uglyos-r08-bezel-engine.md'
+      - '.github/workflows/watch3-r08-bezel-engine.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bezel-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test real QML JS source, feature safety matrix and R08 package metadata
+        run: |
+          set -euo pipefail
+          node --version
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_bezel_engine.py' -v
+      - name: Verify pinned Samsung 4.9 vendor bezel report against reference (read-only)
+        run: |
+          set -euo pipefail
+          vendor="$RUNNER_TEMP/tizen_bezel.c"
+          curl -fL --retry 2 --max-time 30 -o "$vendor" \
+            https://raw.githubusercontent.com/UsrBinLuna/kernel_samsung_galileo/ec258e12887d37362b59e3291c1d3e5363c24bff/drivers/input/misc/tizen_bezel.c
+          grep -Fq 'input_report_rel(ddata->input_dev, REL_WHEEL, direction);' "$vendor"
+          grep -Fq 'input_report_rel(ddata->input_dev, REL_X,' "$vendor"
+          grep -Fq 'BZ_CC' "$vendor"
+          grep -Fq 'BZ_CW' "$vendor"
+          grep -Fq 'ddata->input_dev->name = BEZEL_NAME;' "$vendor"
+          printf 'PASS: pinned vendor REL_WHEEL and REL_X coexist; decoder ignores REL_X\n'
+          printf 'NOT TESTED: physical R08 Qt wheel delivery or custom OS boot\n'
+      - name: Install host-only Qt6 software renderer
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            fonts-noto-core libegl1 libopengl0 libxcb-cursor0
+          python3 -m pip install --disable-pip-version-check --no-cache-dir "PySide6==6.8.3"
+      - name: Render real QML Bezel Lab at 360 and 240 pixels, click through controls
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+          QT_OPENGL: software
+        run: |
+          set -euo pipefail
+          python3 tools/render_uglyos_bezel_lab.py --output bezel-evidence
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          proof=json.loads(Path('bezel-evidence/proof.json').read_text())
+          assert proof["physical_wheel_verified"] is False
+          assert proof["phone_transport_verified"] is False
+          assert len(proof["screenshots"]) == 4
+          assert all(s["bytes"] > 1000 and s["lit"] >= 25 for s in proof["screenshots"])
+          print("PASS: live Qt off-device QML screenshots, button interactions, safe proof labels")
+          PY
+      - name: Upload local Qt evidence (NOT FLASHABLE)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFDEVICE-NOT-FLASHABLE-r08-bezel-qt
+          retention-days: 14
+          if-no-files-found: warn
+          path: bezel-evidence/
+      - name: Validate no custom-OS installation path
+        run: |
+          set -euo pipefail
+          ! grep -R -E '^[[:space:]]*IMAGE_INSTALL:append.*uglyos-bezel-lab' meta-noblesse/recipes-core/images
+          git diff --check
+          echo 'OFFDEVICE-NOT-FLASHABLE: Bezel Lab source only'

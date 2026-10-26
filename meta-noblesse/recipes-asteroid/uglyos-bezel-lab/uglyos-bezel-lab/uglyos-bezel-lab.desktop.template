@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Categories=Applications;
+Exec=uglyos-bezel-lab
+Icon=ios-watchface-outline
+X-Asteroid-Center-Color=#205837
+X-Asteroid-Outer-Color=#06110B
