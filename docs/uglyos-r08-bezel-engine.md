@@ -107,8 +107,7 @@ Run **after this PR merges** using the watch's current trusted-network address:
 
 ```bash
 cd ~/Galaxy-3 && git pull --ff-only
-python tools/watch3_r08_android_sdb.py \\
-  --watch-ip 10.54.86.131 --bezel-only
+python tools/watch3_r08_android_sdb.py --watch-ip 10.54.86.131 --bezel-only
 cat ~/watch3-r08-bezel-redacted.json
 ```
 
