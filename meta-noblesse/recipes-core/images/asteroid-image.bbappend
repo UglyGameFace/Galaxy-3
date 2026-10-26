@@ -14,3 +14,6 @@ EXTRA_IMAGECMD:ext4:append:noblesse-r08 = " -O ^orphan_file"
 # launcher. AsteroidOS Settings discovers these additional .qml files.
 # Never add this package for other watches or all architectures.
 IMAGE_INSTALL:append:noblesse-r08 = " watch3-faces"
+
+# Two optional R08-only low-overhead app-launcher layouts. Stock stays default.
+IMAGE_INSTALL:append:noblesse-r08 = " uglyos-launchers"

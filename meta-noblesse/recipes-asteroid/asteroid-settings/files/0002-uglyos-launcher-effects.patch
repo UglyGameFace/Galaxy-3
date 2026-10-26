@@ -1,0 +1,68 @@
+From: UgLy|OS
+Subject: [PATCH] Add optional reduced effects on R08 AsteroidOS launcher selector
+
+---
+--- a/src/qml/LauncherPage.qml
++++ b/src/qml/LauncherPage.qml
+@@ -24,6 +24,7 @@
+ import QtQml.Models
+ 
+ Item {
++    id: uglyLauncherSettings
+     property int depth
+     property var pop
+     property alias displayAmbient: compositor.displayAmbient
+@@ -45,11 +46,23 @@
+         defaultValue: "file:///usr/share/asteroid-launcher/applauncher/000-default-horizontal.qml"
+     }
+ 
++    readonly property var motionOptions: [qsTr("Off"), qsTr("Subtle")]
++    readonly property var motionValues: ["off", "subtle"]
++
++    ConfigurationValue {
++        id: uglyMotionSetting
++        key: "/desktop/uglyos/appearance/effects"
++        defaultValue: "subtle"
++    }
++
+     GridView {
+         id: previewGrid
+         cellWidth: Dims.w(50)
+         cellHeight: Dims.h(40)
+-        anchors.fill: parent
++        anchors.top: parent.top
++        anchors.left: parent.left
++        anchors.right: parent.right
++        anchors.bottom: motionRow.top
+ 
+         model: FolderListModel {
+             id: folderModel
+@@ -204,4 +217,28 @@
+             }
+         }
+     }
++
++    // R08-only small touch-feedback setting below the unchanged launcher list.
++    Item {
++        id: motionRow
++        anchors.left: parent.left
++        anchors.right: parent.right
++        anchors.bottom: parent.bottom
++        anchors.bottomMargin: Dims.h(4)
++        height: Dims.h(22)
++        OptionCycler {
++            anchors.centerIn: parent
++            width: parent.width * 0.84
++            height: parent.height
++            text: qsTr("UgLy|OS effects")
++            valueArray: uglyLauncherSettings.motionOptions
++            currentValue: uglyLauncherSettings.motionOptions[
++                Math.max(0, uglyLauncherSettings.motionValues.indexOf(uglyMotionSetting.value))]
++            onValueChanged: (value) => {
++                const i = uglyLauncherSettings.motionOptions.indexOf(value)
++                if (i >= 0 && uglyMotionSetting.value !== uglyLauncherSettings.motionValues[i])
++                    uglyMotionSetting.value = uglyLauncherSettings.motionValues[i]
++            }
++        }
++    }
+ }

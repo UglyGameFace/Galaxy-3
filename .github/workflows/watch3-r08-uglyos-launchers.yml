@@ -1,0 +1,90 @@
+name: UgLy|OS R08 lightweight selectable launchers (NO DEVICE)
+
+# Host Qt 6 renders real QML against fake icons/apps; never runs on a watch.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'meta-noblesse/recipes-asteroid/uglyos-launchers/**'
+      - 'meta-noblesse/recipes-core/images/asteroid-image.bbappend'
+      - 'tools/render_uglyos_launchers.py'
+      - 'tools/uglyos-launcher-fixtures/**'
+      - 'tests/test_uglyos_launchers.py'
+      - '.github/workflows/watch3-r08-uglyos-launchers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-launcher-layout-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+      QT_QUICK_BACKEND: software
+      QT_OPENGL: software
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify machine-scoped and lightweight QML contracts
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/render_uglyos_launchers.py
+          python3 -m unittest discover -s tests -p test_uglyos_launchers.py -v
+      - name: Verify effects selector patch on exact pinned AsteroidOS Settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          checkout="$RUNNER_TEMP/uglyos-settings-pinned"
+          git init -q "$checkout"
+          git -C "$checkout" remote add origin https://github.com/AsteroidOS/asteroid-settings.git
+          git -C "$checkout" fetch --depth=1 origin 60340bd1c27a7b9e4884bd61c0563d091bc8b240
+          git -C "$checkout" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$checkout" rev-parse HEAD)" = 60340bd1c27a7b9e4884bd61c0563d091bc8b240
+          patch="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-settings/files/0002-uglyos-launcher-effects.patch"
+          git -C "$checkout" apply --check "$patch"
+          git -C "$checkout" apply "$patch"
+          git -C "$checkout" diff --check
+          grep -q '/desktop/uglyos/appearance/effects' "$checkout/src/qml/LauncherPage.qml"
+          grep -q 'UgLy|OS effects' "$checkout/src/qml/LauncherPage.qml"
+          grep -q '/desktop/asteroid/applauncher' "$checkout/src/qml/LauncherPage.qml"
+          echo 'PASS: real pinned Settings launcher selector keeps stock and adds Off/Subtle effect choice'
+      - name: Install host Qt software rendering prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            fonts-noto-core libegl1 libopengl0 libxcb-cursor0
+          python3 -m pip install --disable-pip-version-check --no-cache-dir "PySide6==6.8.3"
+      - name: Render real launcher QML with simulated installed applications
+        run: |
+          set -euo pipefail
+          python3 tools/render_uglyos_launchers.py --output uglyos-launcher-host-previews \
+            | tee uglyos-launcher-qt.log
+          test "$(find uglyos-launcher-host-previews -maxdepth 1 -name '*.png' | wc -l)" -eq 16
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("uglyos-launcher-host-previews/proof.json").read_text())
+          assert len(report["previews"]) == 16
+          assert all(r["lit_samples"] >= 45 for r in report["previews"])
+          print("PASS: 16 nonblank real-QML previews with mock app activation")
+          PY
+          {
+            echo '## UgLy|OS R08 Fast Launcher host-Qt proof'
+            echo '- Fast List, Compact Grid, Stoner Lounge and Gamer Arcade rendered with mock apps'
+            echo '- 360px and 240px round screens, Rose accent and touch effects On/Off'
+            echo '- Fake application click dispatch verified'
+            echo '- No shaders, looping effects, timers, background network polling or images'
+            echo '- NOT TESTED: target launcher, real apps, measured battery life or Watch3 boot'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload offline mock-data visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFDEVICE-MOCK-APPS-uglyos-launchers
+          path: |
+            uglyos-launcher-host-previews/
+            uglyos-launcher-qt.log
+          retention-days: 14
+          if-no-files-found: warn
