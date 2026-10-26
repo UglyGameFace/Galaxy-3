@@ -39,10 +39,22 @@ python tools/watch3_r08_power_baseline.py --compare ~/watch3-power-start.json ~/
 ```
 
 The client executes exactly one fixed read-only shell command:
-`cat /sys/class/power_supply/*/uevent`. It does not download or save raw
-uevent output. Only a device explicitly identifying as `TYPE=Battery` with
-a valid integer `CAPACITY=0..100` is accepted; multiple battery devices,
-a missing node, permission denial or missing gauge data fail closed.
+`cat /sys/class/power_supply/battery/uevent`, without a shell wildcard or
+other battery/USB device scans. **Kernel-source compatibility correction:**
+the pinned Samsung Linux 4.9 reference emits `POWER_SUPPLY_NAME=battery`
+and battery driver properties but **does not automatically emit
+`POWER_SUPPLY_TYPE`** in that uevent. The collector therefore requires
+the exact `NAME=battery` identity and a valid integer
+`CAPACITY=0..100`, tolerates missing TYPE, and rejects an explicitly
+contradictory TYPE, an absent battery, duplicate keys, a missing node,
+permission denial or missing gauge data. The actual R840X running
+firmware's sysfs accessibility remains **unverified**.
+
+Pinned sources (historical reference, not proof of matching retail firmware):
+- [power_supply_sysfs.c](https://github.com/UsrBinLuna/kernel_samsung_galileo/blob/ec258e12887d37362b59e3291c1d3e5363c24bff/drivers/power/supply/power_supply_sysfs.c)
+- [sec_battery.c](https://github.com/UsrBinLuna/kernel_samsung_galileo/blob/ec258e12887d37362b59e3291c1d3e5363c24bff/drivers/battery_v2/sec_battery.c)
+
+The client does not download or save raw uevent output.
 The redacted JSON contains percentage, charge state, UTC observation time
 and explicit accuracy limits, not the full power-supply details, serial,
 network identifiers, private keys or voltage/current estimates.
