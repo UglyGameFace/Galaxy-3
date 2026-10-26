@@ -1,5 +1,7 @@
 """Synthetic off-device Watch3 gauge, comparison and SDB allowlist tests."""
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
+import io
 import json
 from pathlib import Path
 import sys
@@ -106,6 +108,25 @@ class BatteryBaselineTests(unittest.TestCase):
     def _read(self, n):
         data, self._raw = self._raw[:n], self._raw[n:]
         return data
+
+    def test_cli_unavailable_has_no_false_measurement_success(self):
+        from watch3_r08_android_sdb import main
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "read-only.json"
+            output = io.StringIO()
+            args = ["watch3_r08_android_sdb.py", "--watch-ip", "192.168.1.22",
+                    "--power-only", "--report", str(dest)]
+            with patch.object(sys, "argv", args), patch(
+                "watch3_r08_android_sdb.collect",
+                return_value=({}, {"battery_uevent": "not accessible"}),
+            ) as collector, redirect_stdout(output):
+                self.assertEqual(main(), 0)
+            collector.assert_called_once()
+            self.assertIs(collector.call_args.kwargs["probes"], POWER_PROBES)
+            self.assertIn("UNAVAILABLE:", output.getvalue())
+            self.assertNotIn("PASS: privacy-filtered", output.getvalue())
+            report = json.loads(dest.read_text())
+            self.assertIsNone(report["capacity_percent"])
 
     def test_compare_rate_is_coarse_and_nonzero_only(self):
         with tempfile.TemporaryDirectory() as tmp:
