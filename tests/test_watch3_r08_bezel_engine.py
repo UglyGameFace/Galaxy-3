@@ -125,6 +125,16 @@ run('explicit context changes only; no app tracking',()=>{
   s=api.apply(s,{kind:'context',value:'superuser'});
   assert.equal(s.context,'gaming');
 });
+run('logical button+wheel changes only local context',()=>{
+  let s=api.makeState();
+  s=api.apply(s,{kind:'modifier',held:true});
+  s=wheel(s,1,100);
+  assert.equal(s.context,'gaming');
+  assert.equal(s.focus,0);
+  s=wheel(s,-1,110);assert.equal(s.context,'everyday');
+  s=api.apply(s,{kind:'modifier',held:false});
+  s=wheel(s,1,200);assert.equal(s.focus,1);
+});
 run('invalid or spurious events do not mutate controls',()=>{
   let s=api.makeState();
   s=wheel(s,0,0);
@@ -144,7 +154,7 @@ class BezelContractTests(unittest.TestCase):
             capture_output=True, text=True, timeout=20, check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + "\n" + result.stderr)
-        self.assertIn("TOTAL_PASSED=11", result.stdout)
+        self.assertIn("TOTAL_PASSED=12", result.stdout)
 
     def test_machine_scoped_native_app_and_no_flash(self):
         cmake = (APP / "CMakeLists.txt").read_text()
@@ -186,6 +196,9 @@ class BezelContractTests(unittest.TestCase):
         self.assertIn("hardwareWheelVerified: false",page)
         self.assertIn("companionConnected: false",page)
         self.assertIn("hapticsVerified: false",page)
+        self.assertIn('["RECORD", "RUN", "TARGET"]',page)
+        self.assertIn('["MODE", "INVERT"]',page)
+        self.assertIn('root.send({kind:"arm",record:false})',page)
 
     def test_feature_matrix_is_explicit_and_never_claims_live_on_watch(self):
         matrix=json.loads(MATRIX.read_text())
