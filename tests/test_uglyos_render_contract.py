@@ -40,7 +40,7 @@ class HostRenderContracts(unittest.TestCase):
         self.assertIn("mockAccentPreset", src)
         self.assertIn("Accent preset mismatch", src)
         self.assertIn("Accent palettes do not produce distinct renders", src)
-        self.assertIn('30 real QML previews', src)
+        self.assertIn('50 real QML previews', src)
         self.assertTrue((ROOT / "tools/uglyos-render-fixtures/Nemo/Configuration/qmldir").is_file())
 
     def test_mock_is_explicit_and_watch_writes_are_absent(self):

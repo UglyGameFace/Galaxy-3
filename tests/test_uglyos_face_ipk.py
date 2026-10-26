@@ -19,7 +19,8 @@ class OfflineIpkTests(unittest.TestCase):
         self.source.mkdir()
         self.stage = self.root / "image"
         share = self.stage / "usr/share"
-        for name in ("900-watch3-orbit.qml", "901-watch3-focus.qml", "902-watch3-signal.qml"):
+        for name in ("900-watch3-orbit.qml", "901-watch3-focus.qml", "902-watch3-signal.qml",
+                     "903-watch3-solo-arcade.qml", "904-watch3-solo-lounge.qml"):
             src = self.source / name
             src.write_text(f"// QML {name}")
             dest = share / "asteroid-launcher/watchfaces" / name

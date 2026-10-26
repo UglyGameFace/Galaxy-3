@@ -198,7 +198,7 @@ jobs:
           # Run #40134919700 hit its 20-minute timeout on task 655/3359:
           # bitbake watch3-faces recursively constructed the entire cold
           # target/native dependency closure, although this recipe installs
-          # only four text files and has INHIBIT_DEFAULT_DEPS=1.
+          # only six text files and has INHIBIT_DEFAULT_DEPS=1.
           #
           # Pinned BitBake 2.16 -b executes ONE named .bb and its own task
           # chain without rebuilding dependencies from other recipes. It is
@@ -231,7 +231,7 @@ jobs:
           rm -f "$GITHUB_WORKSPACE/uglyos-logs/package-env.tmp"
           {
             echo '## UgLy|OS R08 BitBake install staging passed'
-            echo '- Three QML faces and edition identity match installed files byte-for-byte'
+            echo '- Five QML faces and edition identity match installed files byte-for-byte'
             echo '- Actual BitBake metadata selects the package in R08 asteroid-image'
             echo '- NOT TESTED: do_package, package split, IPK creation, full rootfs, Qt rendering, watch boot or flashing'
           } >> "$GITHUB_STEP_SUMMARY"

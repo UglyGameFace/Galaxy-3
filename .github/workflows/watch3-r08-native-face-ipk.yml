@@ -242,7 +242,7 @@ jobs:
           rm -f "$GITHUB_WORKSPACE/native-face-logs/package.env.tmp"
           {
             echo '## Real Yocto IPK verified (off-device)'
-            echo '- Four source assets match actual native IPK payload and package split'
+            echo '- Six source assets match actual native IPK payload and package split'
             echo '- Native control must contain Depends: asteroid-launcher'
             echo '- NOT TESTED: opkg installation, firmware rootfs, boot, stock recovery, flashing'
           } >> "$GITHUB_STEP_SUMMARY"
