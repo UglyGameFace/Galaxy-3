@@ -243,7 +243,7 @@ s => {if(s.adaptiveOriginal.value!=='' || !s.alwaysOnDisplay.value ||
 test('invalid threshold fails closed', {enabled:true,threshold:"0"}, s => {
     if(s.adaptiveOriginal.value!=='' || !s.alwaysOnDisplay.value) throw Error('invalid trigger');
 });
-test('threshold edit cannot overwrite saved restoreAt', {enabled:true,threshold:"15"},
+test('threshold edit cannot overwrite saved restoreAt', {enabled:true,threshold:"15",level:15},
 (s,run) => {
     const previous=JSON.parse(s.adaptiveOriginal.value);
     if(previous.restoreAt!==25) throw Error('missing threshold snapshot');
