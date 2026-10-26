@@ -32,7 +32,7 @@ validated, and stock firmware recovery remains unproven. Do not flash.
   explicit stop. Existing version-one snapshots retain their original
   20%/30% semantics. Once a snapshot exists, profile and threshold
   controls cannot be changed until that cycle restores.
-- On **20% or less while discharging**, if neither Solo Saver nor nightstand
+- At the **selected threshold while discharging**, if neither Solo Saver nor nightstand
   owns the display, the controller saves exactly the controls it intends
   to change in existing Nemo.Configuration storage *before* changing them.
   A missing sensor capability is not treated as a functional switch.
