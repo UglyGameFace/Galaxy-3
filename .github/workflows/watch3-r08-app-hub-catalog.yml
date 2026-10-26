@@ -1,0 +1,58 @@
+name: UgLy|OS App Hub native/phone compatibility (OFF-DEVICE)
+
+# No APK downloads, package installation, Android account tokens, or watch access.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app-hub/**'
+      - 'tools/build_uglyos_app_hub.py'
+      - 'tests/test_uglyos_app_hub.py'
+      - '.github/workflows/watch3-r08-app-hub-catalog.yml'
+      - 'docs/uglyos-app-hub-architecture.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility-catalog:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify strict platform compatibility and zero install authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/build_uglyos_app_hub.py
+          python3 -m unittest discover -s tests -p 'test_uglyos_app_hub.py' -v
+      - name: Generate OFF-DEVICE read-only App Hub preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/build_uglyos_app_hub.py \
+            --catalog app-hub/catalog.json \
+            --output app-hub-preview/index.html
+          test -s app-hub-preview/index.html
+          if grep -Eiq 'adb install|fastboot flash|opkg install|download apk' app-hub-preview/index.html; then
+            echo "::error::Unsafe install instruction in read-only preview"
+            exit 1
+          fi
+          {
+            echo '## UgLy|OS App Hub compatibility proof'
+            echo '- Native AsteroidOS/IPK app packages are distinct from Android APKs'
+            echo '- Android/Samsung/Google integrations are modeled as future phone-side bridges'
+            echo '- Exactly zero app installation, signing, authentication or device actions'
+            echo '- Read-only static HTML preview built and inspected'
+            echo '- NOT TESTED: phone Bluetooth/SDKs, watch UI, stock recovery or boot'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload OFFDEVICE-NOT-INSTALLABLE App Hub preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFDEVICE-NOT-INSTALLABLE-uglyos-app-hub-preview
+          retention-days: 21
+          if-no-files-found: error
+          path: |
+            app-hub-preview/index.html
+            app-hub/catalog.json

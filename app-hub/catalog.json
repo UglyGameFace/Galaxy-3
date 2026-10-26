@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "edition": "UgLy|OS",
+  "target": "SM-R840X / NOBLESSE-LARGE-BT R08",
+  "policy": {
+    "install_enabled": false,
+    "watch_boot_verified": false,
+    "stock_recovery_verified": false,
+    "apk_runtime_available": false,
+    "third_party_distribution_authorized": false
+  },
+  "entries": [
+    {
+      "id": "uglyos-launchers",
+      "name": "UgLy|OS Launchers",
+      "category": "Personalization",
+      "kind": "native-watch",
+      "platform": "asteroidos-opkg",
+      "state": "source-built",
+      "source": "https://github.com/UglyGameFace/Galaxy-3/tree/main/meta-noblesse/recipes-asteroid/uglyos-launchers",
+      "summary": "Four custom layouts with a local favorites dock.",
+      "installable": false,
+      "requires_on_watch_boot": true
+    },
+    {
+      "id": "uglyos-watchfaces",
+      "name": "UgLy|OS Watchfaces",
+      "category": "Personalization",
+      "kind": "native-watch",
+      "platform": "asteroidos-opkg",
+      "state": "source-built",
+      "source": "https://github.com/UglyGameFace/Galaxy-3/tree/main/meta-noblesse/recipes-asteroid/watch3-faces",
+      "summary": "Three optional Qt watchfaces that leave original faces available.",
+      "installable": false,
+      "requires_on_watch_boot": true
+    },
+    {
+      "id": "asteroid-flashlight",
+      "name": "AsteroidOS Flashlight",
+      "category": "Utilities",
+      "kind": "native-watch",
+      "platform": "asteroidos-opkg",
+      "state": "upstream-source",
+      "source": "https://github.com/AsteroidOS/asteroid-flashlight",
+      "summary": "Upstream native Qt utility; R08 package and display behavior not verified.",
+      "installable": false,
+      "requires_on_watch_boot": true
+    },
+    {
+      "id": "asteroid-music",
+      "name": "AsteroidOS Music",
+      "category": "Media",
+      "kind": "native-watch",
+      "platform": "asteroidos-opkg",
+      "state": "upstream-source",
+      "source": "https://github.com/AsteroidOS/asteroid-music",
+      "summary": "Upstream music UI; Watch3 audio hardware not verified.",
+      "installable": false,
+      "requires_on_watch_boot": true
+    },
+    {
+      "id": "android-notifications",
+      "name": "Android Notification Bridge",
+      "category": "Connected",
+      "kind": "phone-bridge",
+      "platform": "android-companion",
+      "state": "existing-upstream-option",
+      "source": "https://wiki.asteroidos.org/index.php/Synchronization_Clients",
+      "summary": "Build on Gadgetbridge or AsteroidOSSync notification support; future UgLy|OS bridge not built.",
+      "installable": false,
+      "requires_on_watch_boot": true
+    },
+    {
+      "id": "samsung-health-connect",
+      "name": "Samsung Health via Health Connect",
+      "category": "Wellness",
+      "kind": "phone-bridge",
+      "platform": "android-companion",
+      "state": "research-backed",
+      "source": "https://developer.samsung.com/health/health-connect-faq.html",
+      "summary": "Consent-based data from Samsung Health through phone Health Connect; no UgLy|OS integration exists yet.",
+      "installable": false,
+      "requires_on_watch_boot": true
+    },
+    {
+      "id": "google-calendar",
+      "name": "Google Calendar Companion",
+      "category": "Connected",
+      "kind": "phone-bridge",
+      "platform": "android-companion",
+      "state": "planned",
+      "source": "https://developers.google.com/workspace/calendar/api/guides/overview",
+      "summary": "Calendar data through an authorized phone-side account integration. No OAuth implementation yet.",
+      "installable": false,
+      "requires_on_watch_boot": true
+    },
+    {
+      "id": "google-maps",
+      "name": "Phone-to-Watch Directions",
+      "category": "Navigation",
+      "kind": "phone-bridge",
+      "platform": "android-companion",
+      "state": "planned",
+      "source": "https://developers.google.com/maps/documentation",
+      "summary": "Phone handles Maps and permissions; watch receives compact navigation prompts when bridge exists.",
+      "installable": false,
+      "requires_on_watch_boot": true
+    },
+    {
+      "id": "google-play-apks",
+      "name": "Google Play APKs on Watch",
+      "category": "Compatibility",
+      "kind": "unsupported",
+      "platform": "android-apk",
+      "state": "not-compatible",
+      "source": "https://wiki.asteroidos.org/index.php/Creating_an_Asteroid_app",
+      "summary": "Wear OS and Android APKs require an Android runtime and services; not a native AsteroidOS package.",
+      "installable": false,
+      "requires_on_watch_boot": true
+    },
+    {
+      "id": "google-wallet",
+      "name": "Google Wallet on Watch",
+      "category": "Compatibility",
+      "kind": "unsupported",
+      "platform": "wear-os",
+      "state": "not-compatible",
+      "source": "https://support.google.com/wearos/answer/12059876",
+      "summary": "Google Wallet requires supported Wear OS, NFC and Google Play Services; no verified R08 path.",
+      "installable": false,
+      "requires_on_watch_boot": true
+    }
+  ]
+}
