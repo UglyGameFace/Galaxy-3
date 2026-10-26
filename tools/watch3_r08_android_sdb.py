@@ -3,7 +3,7 @@
 
 Only fixed boot, storage or battery sysfs reads in explicit allowlists may run.
 No root, reboot, device writes, partition reading, install or flashing.
-The Tizen Watch3 R840X handshake has not yet been verified on hardware.
+The battery sysfs uevent response is not yet verified on physical SM-R840X.
 """
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ from watch3_r08_power_baseline import summarize_power
 # sysfs paths, battery serial fields, or enable writes/reconfiguration.
 POWER_PROBES = {"battery_uevent": "cat /sys/class/power_supply/*/uevent"}
 
-# Explicit, fixed, read-only operations; extended storage set is ONLY used
-# when the user requests --storage-only. Normal boot collection stays unchanged.
+# Explicit, fixed, read-only operations; storage and battery probe sets run
+# only when expressly requested. Normal boot collection stays unchanged.
 ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES}
 
 PORT = 26101
