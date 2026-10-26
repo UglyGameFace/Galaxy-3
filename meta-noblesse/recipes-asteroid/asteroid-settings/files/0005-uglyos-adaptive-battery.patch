@@ -3,7 +3,7 @@ Subject: [PATCH] R08 live Battery & Power diagnostics and opt-in adaptive saver
 
 --- a/src/qml/main.qml
 +++ b/src/qml/main.qml
-@@ -22,8 +22,9 @@
+@@ -22,7 +22,8 @@
  import org.asteroid.utils
  import org.asteroid.settings
  import Nemo.Configuration
