@@ -19,6 +19,7 @@ SRC_URI = " \
     file://HubCatalog.js \
     file://uglyos-app-hub.in \
     file://uglyos-app-hub.desktop.template \
+    file://i18n/uglyos-app-hub.desktop.h \
 "
 S = "${UNPACKDIR}"
 FILES:${PN} += "${libdir}/uglyos-app-hub.so"

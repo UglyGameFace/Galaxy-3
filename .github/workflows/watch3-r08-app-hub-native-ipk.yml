@@ -1,0 +1,268 @@
+name: UgLy|OS R08 actual native App Hub BitBake dependency and IPK proof (NO DEVICE)
+
+# Actual R08 native Qt app; graph is bounded before long compilation.
+# This is OFF-DEVICE and NEVER proves install/flash safety.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-app-hub-native-ipk.yml'
+      - 'tools/validate_uglyos_native_app_hub.py'
+      - 'tests/test_uglyos_native_app_hub_ipk.py'
+      - 'meta-noblesse/recipes-asteroid/uglyos-app-hub/**'
+      - 'meta-noblesse/recipes-core/images/asteroid-image.bbappend'
+      - 'app-hub/catalog.json'
+  workflow_dispatch:
+    inputs:
+      compile_native:
+        description: 'Compile full Qt6 native IPK after reviewing the dependency graph'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: galaxy3-r08-native-app-hub-ipk
+  cancel-in-progress: false
+
+jobs:
+  asteroid-metadata:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    steps:
+      - name: Checkout Galaxy-3
+        uses: actions/checkout@v4
+      - name: Check free runner capacity before fetching pinned sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h "$GITHUB_WORKSPACE"
+          free -h
+          disk_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+          mem_kib="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+          if (( disk_kib < 30 * 1024 * 1024 || mem_kib < 4 * 1024 * 1024 )); then
+            echo "::error title=Runner capacity below package gate::Need >=30 GiB free disk and >=4 GiB RAM for small metadata package task. No build started."
+            exit 1
+          fi
+          echo 'PASS: available free runner supports bounded machine configuration package stage'
+      - name: Install metadata parsing prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git python3 python3-packaging python3-setuptools gawk diffstat chrpath zstd binutils
+      - name: Verify native App Hub source, desktop generator, and fail-closed package tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/validate_uglyos_native_app_hub.py
+          python3 -m unittest discover -s tests -p test_uglyos_app_hub.py -v
+          python3 -m unittest discover -s tests -p test_uglyos_native_app_hub.py -v
+          python3 -m unittest discover -s tests -p test_uglyos_native_app_hub_ipk.py -v
+          python3 tools/generate_uglyos_watch_catalog.py --catalog app-hub/catalog.json --output meta-noblesse/recipes-asteroid/uglyos-app-hub/uglyos-app-hub/HubCatalog.js --verify
+      - name: Fetch the upstream AsteroidOS metadata layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src preflight-logs
+          get_layer() {
+            local dest="$1" url="$2" branch="$3"
+            git clone --depth=1 --single-branch --branch "$branch" "$url" "src/$dest"
+            printf '%s %s %s\n' "$dest" "$branch" "$(git -C "src/$dest" rev-parse HEAD)" | tee -a preflight-logs/upstream-commits.txt
+          }
+          get_layer oe-core https://github.com/openembedded/openembedded-core.git whinlatter
+          get_layer oe-core/bitbake https://github.com/openembedded/bitbake.git 2.16
+          # Reuse the same known-good core revisions as the successful R08 Linux rootfs.
+          git -C src/oe-core fetch --depth=1 origin 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core checkout --detach 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core/bitbake fetch --depth=1 origin 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          git -C src/oe-core/bitbake checkout --detach 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          get_layer meta-openembedded https://github.com/openembedded/meta-openembedded.git whinlatter
+          get_layer meta-qt6 https://code.qt.io/yocto/meta-qt6.git 6.11
+          get_layer meta-smartphone https://github.com/shr-distribution/meta-smartphone.git whinlatter
+          get_layer meta-clang https://github.com/kraj/meta-clang.git whinlatter
+          get_layer meta-asteroid https://github.com/AsteroidOS/meta-asteroid.git master
+          get_layer meta-asteroid-community https://github.com/AsteroidOS/meta-asteroid-community.git master
+          get_layer meta-virtualization https://git.yoctoproject.org/meta-virtualization whinlatter
+          git -C src/meta-openembedded checkout --detach f52f32952cb9717949f8bc3d3ccf6c4c5a59521f
+          git -C src/meta-qt6 checkout --detach ec98b3ab1c8deeab9412ef6cbfd55729dc567b01
+          git -C src/meta-smartphone checkout --detach 0ef4e8979fbf3403ff8aef977874496dc312d913
+          git -C src/meta-clang checkout --detach cf20f8bd1366d41094c945597b95dd746e87b871
+          # master can advance after the shallow clone; explicitly fetch our tested commit.
+          git -C src/meta-asteroid fetch --depth=1 origin 1af66a6188f7909303cfcec779c8475be1bc4679
+          git -C src/meta-asteroid checkout --detach 1af66a6188f7909303cfcec779c8475be1bc4679
+          git -C src/meta-asteroid-community checkout --detach f911d8900b2da887d1486416a8c16b8f8f15dd35
+          git -C src/meta-virtualization checkout --detach 8f03a0cc8950ef5d5e4f11d9ae494946d1991e45
+          { echo 'PINNED CORE:'; git -C src/oe-core rev-parse HEAD; git -C src/oe-core/bitbake rev-parse HEAD; } | tee -a preflight-logs/upstream-commits.txt
+          echo 'AsteroidOS source layers downloaded; no kernel or operating system built.'
+      - name: Configure actual AsteroidOS distro with R08 machine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/conf preflight-logs
+          cat > build/conf/bblayers.conf <<'EOF'
+          BBPATH = "${TOPDIR}"
+          BBLAYERS = " \
+            ${TOPDIR}/../src/oe-core/meta \
+            ${TOPDIR}/../src/meta-qt6 \
+            ${TOPDIR}/../src/meta-asteroid \
+            ${TOPDIR}/../src/meta-asteroid-community \
+            ${TOPDIR}/../src/meta-openembedded/meta-oe \
+            ${TOPDIR}/../src/meta-openembedded/meta-multimedia \
+            ${TOPDIR}/../src/meta-openembedded/meta-gnome \
+            ${TOPDIR}/../src/meta-openembedded/meta-networking \
+            ${TOPDIR}/../src/meta-smartphone/meta-android \
+            ${TOPDIR}/../src/meta-openembedded/meta-python \
+            ${TOPDIR}/../src/meta-openembedded/meta-filesystems \
+            ${TOPDIR}/../src/meta-clang \
+            ${TOPDIR}/../src/meta-virtualization \
+            ${TOPDIR}/../meta-noblesse \
+          "
+          EOF
+          cat > build/conf/local.conf <<'EOF'
+          MACHINE = "noblesse-r08"
+          DISTRO = "asteroid"
+          PACKAGE_CLASSES = "package_ipk"
+          BB_NUMBER_THREADS = "3"
+          PARALLEL_MAKE = "-j3"
+          EOF
+          echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},8G,100K"' >> build/conf/local.conf
+      - name: Check that inode safety limit fits this free runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The previous 200M free-inode threshold meant 209,715,200
+          # inodes and stopped the build with ~18 million actually free.
+          df -h "$GITHUB_WORKSPACE"
+          df -i "$GITHUB_WORKSPACE"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          config = Path('build/conf/local.conf').read_text()
+          limits = [line for line in config.splitlines() if line.startswith('BB_DISKMON_DIRS = ')]
+          assert len(limits) == 1 and limits[0].endswith(',8G,100K"'), 'Unsafe BitBake disk/inode limit'
+          st = os.statvfs('build')
+          disk_gib = st.f_bavail * st.f_frsize / 1024**3
+          print(f'Free disk: {disk_gib:.1f} GiB; stop limit: 8 GiB')
+          assert disk_gib >= 20, 'Free disk too low for this build'
+          if st.f_files > 0 and st.f_favail >= 0:
+              print(f'Free inodes: {st.f_favail:,}; stop limit: 102,400')
+              assert st.f_favail >= 500_000, 'Free inodes too low for this build'
+          print('PASS: BitBake inode guard is realistic and filesystem has headroom')
+          PY
+      - name: Verify actual R08 App Hub and image metadata from pinned BitBake
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/native-hub-logs"
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e uglyos-app-hub > "$GITHUB_WORKSPACE/native-hub-logs/hub.env.tmp"
+          bitbake -e asteroid-image > "$GITHUB_WORKSPACE/native-hub-logs/image.env.tmp"
+          python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_native_app_hub.py" metadata \
+            "$GITHUB_WORKSPACE/native-hub-logs/hub.env.tmp" \
+            "$GITHUB_WORKSPACE/native-hub-logs/image.env.tmp"
+          rm -f "$GITHUB_WORKSPACE/native-hub-logs/"*.env.tmp
+          echo 'PASS native Hub metadata and R08 image inclusion' \
+            | tee "$GITHUB_WORKSPACE/native-hub-logs/01-metadata.txt"
+
+      - name: Inspect real dependency graph BEFORE any native Qt6 compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          timeout --signal=TERM --kill-after=5s 900s \
+            bitbake -g -c package_write_ipk uglyos-app-hub 2>&1 \
+            | tee "$GITHUB_WORKSPACE/native-hub-logs/02-graph.log"
+          cp pn-buildlist "$GITHUB_WORKSPACE/native-hub-logs/02-recipe-list.txt"
+          cp task-depends.dot "$GITHUB_WORKSPACE/native-hub-logs/02-task-depends.dot"
+          python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_native_app_hub.py" graph \
+            "$GITHUB_WORKSPACE/native-hub-logs/02-recipe-list.txt" \
+            "$GITHUB_WORKSPACE/native-hub-logs/02-task-depends.dot"
+          {
+            echo '## Native R08 App Hub dependency and packaging gate'
+            echo '- Real pinned BitBake image/package variables and Qt6 graph validated'
+            echo '- Native binary compilation is a separate **manual** dispatch input'
+            echo '- This PR success does NOT mean the compiled Qt6 .ipk exists'
+            echo '- NO Watch3 bootloader acceptance, installation or stock rescue proved'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore signature-validated Qt6 build cache (explicit native builds only)
+        if: github.event_name == 'workflow_dispatch' && inputs.compile_native == true
+        id: qt-cache
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: |
+            build/downloads
+            build/sstate-cache
+          key: uglyos-r08-native-app-hub-qt6-v1
+
+      - name: Explicitly compile actual native Qt6 IPK (long and off-device only)
+        if: github.event_name == 'workflow_dispatch' && inputs.compile_native == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          timeout --signal=TERM --kill-after=30s 10800s \
+            bitbake -c package_write_ipk uglyos-app-hub 2>&1 \
+            | tee "$GITHUB_WORKSPACE/native-hub-logs/03-real-qt6-native-build.log"
+
+      - name: Require actual ELF, desktop entry, invoker and byte-identical real IPK
+        if: github.event_name == 'workflow_dispatch' && inputs.compile_native == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e uglyos-app-hub > "$GITHUB_WORKSPACE/native-hub-logs/package.env.tmp"
+          package_dir="$GITHUB_WORKSPACE/build/tmp/deploy/ipk"
+          count="$(find "$package_dir" -type f -name 'uglyos-app-hub_*.ipk' | wc -l)"
+          test "$count" -eq 1 || { echo "::error::Expected exactly one native Hub IPK, got $count"; exit 1; }
+          archive="$(find "$package_dir" -type f -name 'uglyos-app-hub_*.ipk' -print -quit)"
+          python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_native_app_hub.py" native-ipk \
+            "$GITHUB_WORKSPACE/native-hub-logs/package.env.tmp" "$archive" \
+            | tee "$GITHUB_WORKSPACE/native-hub-logs/04-native-ipk-proof.txt"
+          mkdir -p "$GITHUB_WORKSPACE/native-hub-logs/verified"
+          cp "$archive" "$GITHUB_WORKSPACE/native-hub-logs/verified/"
+          rm -f "$GITHUB_WORKSPACE/native-hub-logs/package.env.tmp"
+          echo 'PASS[hub-native]: actual native IPK staged and inspected. NOT safe to flash.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Optionally save bounded sstate for later native validation
+        if: github.event_name == 'workflow_dispatch' && inputs.compile_native == true && steps.qt-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/downloads
+            build/sstate-cache
+          key: uglyos-r08-native-app-hub-qt6-v1
+
+      - name: Upload genuine OFFDEVICE-NOT-FLASHABLE native App Hub IPK if built
+        if: github.event_name == 'workflow_dispatch' && inputs.compile_native == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFDEVICE-NOT-FLASHABLE-native-uglyos-app-hub-ipk
+          retention-days: 7
+          if-no-files-found: error
+          path: native-hub-logs/verified/*.ipk
+
+      - name: Upload exact metadata and bounded dependency diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uglyos-r08-native-app-hub-graph-evidence
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            native-hub-logs/*.txt
+            native-hub-logs/*.log

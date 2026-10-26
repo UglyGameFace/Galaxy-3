@@ -144,6 +144,38 @@ categories. It is a preview of the *catalog*, not a working app store.
 It contains honest source/compatibility links, no APK downloads and
 no software install buttons.
 
+## Native package-build verification stage
+
+The actual native App Hub source from PR #35 uses AsteroidApp6 and Qt6.
+A pinned upstream source check found a real missing dependency that off-device
+QML rendering could not catch: Asteroid6Translations provides the CMake
+generate_desktop() function, and the native asteroid-generate-desktop shell
+requires a machine-local i18n/uglyos-app-hub.desktop.h header. Those inputs
+are now present and covered by source tests, rather than being hidden behind
+loosened checks.
+
+The R08-specific workflow
+.github/workflows/watch3-r08-app-hub-native-ipk.yml checks the actual
+BitBake environment and bounded dependency graph FIRST. It validates real
+machine architecture, IMAGE_INSTALL inclusion, package name, sources,
+Qt6 dependencies, graph task count, and ensures the graph does not expand
+to a full kernel or root filesystem build. Ordinary PR checks do not
+start the several-hour Qt6 build.
+
+After review, the GitHub Actions manual workflow input compile_native=true
+can run real bitbake -c package_write_ipk uglyos-app-hub. It then requires
+a genuine Yocto IPK, matching actual package-split staging, ELF library,
+AsteroidApp6 invoker script, and generated desktop entry with title.
+All IPKs are labeled OFFDEVICE-NOT-FLASHABLE and checks include no watch
+connection. A successful preflight does NOT establish a native compile.
+A successful compile still does NOT prove physical R840X bootability,
+display, Bluetooth pairing, or an installable Google Play APK runtime.
+
+Next separate active development slice after native packaging: Android
+UgLy|OS Connect scaffold, using documented Gadgetbridge/AsteroidOS protocols
+for notification mirroring, optional Samsung/Google health and calendar
+consent controls. This is NOT part of the native binary verification PR.
+
 ## Current implementation gates
 
 - R08 native AsteroidOS .ipk software may be built off-device:

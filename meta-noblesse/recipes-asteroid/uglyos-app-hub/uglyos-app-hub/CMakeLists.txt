@@ -6,6 +6,7 @@ set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH} ${ASTEROID_MODULE_PATH})
 include(FeatureSummary)
 include(GNUInstallDirs)
 include(Asteroid6CMakeSettings)
+include(Asteroid6Translations)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/uglyos-app-hub.in
                ${CMAKE_BINARY_DIR}/uglyos-app-hub @ONLY)
 install(PROGRAMS ${CMAKE_BINARY_DIR}/uglyos-app-hub
