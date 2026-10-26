@@ -177,57 +177,44 @@ def render(app: QGuiApplication, qml: Path, size: int, palette: str, effects: st
     if warnings:
         raise RuntimeError(f"Qt warnings from {qml.name}: {warnings}")
     lit = verify_pixels(img)
-    # Click the actual first visible delegate, never a guessed screen pixel.
-    first = view.rootObject().findChild(QObject, "uglyos-app-item-0")
-    if first is None:
-        # Qt Quick's visual parent graph may differ from QObject ownership.
-        # Traverse instantiated visual delegates rather than using a fake tap.
-        stack = [view.rootObject()]
-        seen = set()
-        visible = []
-        while stack:
-            item = stack.pop()
-            if id(item) in seen:
-                continue
-            seen.add(id(item))
-            name = item.objectName()
-            if name:
-                visible.append(name)
-            if name == "uglyos-app-item-0":
+    # Test the REAL rendered app label, not a guessed pixel or the delegate
+    # objectName. ListView recycles delegates and may expose different QObject
+    # ownership from its visual item tree under the host Qt software backend.
+    visual = [view.rootObject()]
+    labels = []
+    first = None
+    inspected = 0
+    while visual:
+        item = visual.pop()
+        inspected += 1
+        if inspected > 450:
+            raise RuntimeError(f"Unexpectedly deep Qt Quick item tree: {qml.name}")
+        label = item.property("text")
+        if isinstance(label, str) and label:
+            labels.append((label, item.x(), item.y()))
+            if label == model.items[0].title and first is None:
                 first = item
-                break
-            if hasattr(item, "childItems"):
-                stack.extend(item.childItems())
-        if first is None:
-            apps = view.rootObject().findChild(QObject, "uglyos-apps-view")
-            if apps is None:
-                apps = next((v for v in view.rootObject().childItems()
-                             if v.objectName() == "uglyos-apps-view"), None)
-            attrs = ("contentY", "originY", "contentHeight", "currentIndex",
-                     "count", "atYBeginning", "atYEnd")
-            state = {name: apps.property(name) for name in attrs} if apps else {}
-            if apps:
-                state.update(width=apps.width(), height=apps.height(), y=apps.y())
-            coords = {}
-            for item in (apps.childItems() if apps else []):
-                if item.objectName().startswith("uglyos-app-item-"):
-                    coords[item.objectName()] = (item.x(), item.y(), item.height())
-            raise RuntimeError(f"First app delegate not in visible Qt Quick tree for {qml.name}; "
-                               f"named items={visible[:35]}, model count={model.rowCount()}, "
-                               f"view={state}, delegate_coordinates={coords}")
-    local = QPointF(first.width() * 0.5, first.height() * 0.5)
-    scene = first.mapToScene(local)
-    point = QPoint(round(scene.x()), round(scene.y()))
+        if hasattr(item, "childItems"):
+            visual.extend(item.childItems())
+
+    if first is None:
+        raise RuntimeError(
+            f"First app label {model.items[0].title!r} absent from real rendered Qt tree "
+            f"in {qml.name}; labels={labels[:25]}, items={inspected}, "
+            f"model_count={model.rowCount()}")
+    center = first.mapToScene(QPointF(first.width() / 2, first.height() / 2))
+    point = QPoint(round(center.x()), round(center.y()))
     if not (0 <= point.x() < size and 0 <= point.y() < size):
-        raise RuntimeError(f"First app location outside screen: {point} in {qml.name}")
+        raise RuntimeError(f"First app label outside screen: {point}, {qml.name}")
     if point.y() < size * .19:
-        raise RuntimeError(f"First app tile starts too high for the round screen: "
-                           f"{point.y()} < {size * .19} in {qml.name}")
+        raise RuntimeError(f"First app label clipped by round display: y={point.y()}, "
+                           f"minimum={size * .19}, {qml.name}")
     QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier, point)
     app.processEvents()
     if model.items[0].activations != 1:
-        raise RuntimeError(f"Click on first actual app delegate did not dispatch: "
-                           f"{qml.name}, hits={model.items[0].activations}, at={point}")
+        raise RuntimeError(
+            f"Tapping actual Agenda label failed to launch first app in {qml.name}; "
+            f"hits={model.items[0].activations}, point={point}, labels={labels[:10]}")
     view.close()
     view.deleteLater()
     app.processEvents()
