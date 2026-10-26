@@ -1,0 +1,335 @@
+name: UgLy|OS R08 smoke Psplash + genuine initramfs proof (NO DEVICE)
+
+# Genuine R08-only Psplash and early-boot archive; keep exact checksum and
+# graph limits. Cold Yocto native builds need separate time and cache budgets.
+# This is OFF-DEVICE and NEVER proves install/flash safety.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-native-smoke-initramfs.yml'
+      - 'meta-noblesse/conf/machine/noblesse-r08.conf'
+      - 'meta-noblesse/recipes-core/psplash/**'
+      - 'tools/validate_uglyos_psplash_initramfs.py'
+      - 'tools/verify_uglyos_boot_asset.py'
+      - 'tests/test_uglyos_psplash_initramfs.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: galaxy3-r08-native-smoke-initramfs
+  cancel-in-progress: false
+
+jobs:
+  asteroid-metadata:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    steps:
+      - name: Checkout Galaxy-3
+        uses: actions/checkout@v4
+      - name: Check free runner capacity before fetching pinned sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h "$GITHUB_WORKSPACE"
+          free -h
+          disk_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+          mem_kib="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+          if (( disk_kib < 30 * 1024 * 1024 || mem_kib < 4 * 1024 * 1024 )); then
+            echo "::error title=Runner capacity below package gate::Need >=30 GiB free disk and >=4 GiB RAM for small metadata package task. No build started."
+            exit 1
+          fi
+          echo 'PASS: available free runner supports bounded machine configuration package stage'
+      - name: Install metadata parsing prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git python3 python3-packaging python3-setuptools gawk diffstat chrpath zstd binutils cpio
+      - name: Check exact smoke asset and source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --no-cache-dir "Pillow==11.3.0"
+          python3 -m py_compile tools/validate_uglyos_psplash_initramfs.py
+          python3 -m unittest discover -s tests -p 'test_uglyos_psplash_initramfs.py' -v
+          python3 tools/verify_uglyos_boot_asset.py
+      - name: Fetch the upstream AsteroidOS metadata layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src preflight-logs
+          get_layer() {
+            local dest="$1" url="$2" branch="$3"
+            git clone --depth=1 --single-branch --branch "$branch" "$url" "src/$dest"
+            printf '%s %s %s\n' "$dest" "$branch" "$(git -C "src/$dest" rev-parse HEAD)" | tee -a preflight-logs/upstream-commits.txt
+          }
+          get_layer oe-core https://github.com/openembedded/openembedded-core.git whinlatter
+          get_layer oe-core/bitbake https://github.com/openembedded/bitbake.git 2.16
+          # Reuse the same known-good core revisions as the successful R08 Linux rootfs.
+          git -C src/oe-core fetch --depth=1 origin 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core checkout --detach 8751ec83421192fc0f8495fb95798f9eb7be77a0
+          git -C src/oe-core/bitbake fetch --depth=1 origin 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          git -C src/oe-core/bitbake checkout --detach 713fbbdb9ecc195ceb2216a2345e0d79dbee2135
+          get_layer meta-openembedded https://github.com/openembedded/meta-openembedded.git whinlatter
+          get_layer meta-qt6 https://code.qt.io/yocto/meta-qt6.git 6.11
+          get_layer meta-smartphone https://github.com/shr-distribution/meta-smartphone.git whinlatter
+          get_layer meta-clang https://github.com/kraj/meta-clang.git whinlatter
+          get_layer meta-asteroid https://github.com/AsteroidOS/meta-asteroid.git master
+          get_layer meta-asteroid-community https://github.com/AsteroidOS/meta-asteroid-community.git master
+          get_layer meta-virtualization https://git.yoctoproject.org/meta-virtualization whinlatter
+          git -C src/meta-openembedded checkout --detach f52f32952cb9717949f8bc3d3ccf6c4c5a59521f
+          git -C src/meta-qt6 checkout --detach ec98b3ab1c8deeab9412ef6cbfd55729dc567b01
+          git -C src/meta-smartphone checkout --detach 0ef4e8979fbf3403ff8aef977874496dc312d913
+          git -C src/meta-clang checkout --detach cf20f8bd1366d41094c945597b95dd746e87b871
+          # master can advance after the shallow clone; explicitly fetch our tested commit.
+          git -C src/meta-asteroid fetch --depth=1 origin 1af66a6188f7909303cfcec779c8475be1bc4679
+          git -C src/meta-asteroid checkout --detach 1af66a6188f7909303cfcec779c8475be1bc4679
+          git -C src/meta-asteroid-community checkout --detach f911d8900b2da887d1486416a8c16b8f8f15dd35
+          git -C src/meta-virtualization checkout --detach 8f03a0cc8950ef5d5e4f11d9ae494946d1991e45
+          { echo 'PINNED CORE:'; git -C src/oe-core rev-parse HEAD; git -C src/oe-core/bitbake rev-parse HEAD; } | tee -a preflight-logs/upstream-commits.txt
+          echo 'AsteroidOS source layers downloaded; no kernel or operating system built.'
+      - name: Configure actual AsteroidOS distro with R08 machine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/conf preflight-logs
+          cat > build/conf/bblayers.conf <<'EOF'
+          BBPATH = "${TOPDIR}"
+          BBLAYERS = " \
+            ${TOPDIR}/../src/oe-core/meta \
+            ${TOPDIR}/../src/meta-qt6 \
+            ${TOPDIR}/../src/meta-asteroid \
+            ${TOPDIR}/../src/meta-asteroid-community \
+            ${TOPDIR}/../src/meta-openembedded/meta-oe \
+            ${TOPDIR}/../src/meta-openembedded/meta-multimedia \
+            ${TOPDIR}/../src/meta-openembedded/meta-gnome \
+            ${TOPDIR}/../src/meta-openembedded/meta-networking \
+            ${TOPDIR}/../src/meta-smartphone/meta-android \
+            ${TOPDIR}/../src/meta-openembedded/meta-python \
+            ${TOPDIR}/../src/meta-openembedded/meta-filesystems \
+            ${TOPDIR}/../src/meta-clang \
+            ${TOPDIR}/../src/meta-virtualization \
+            ${TOPDIR}/../meta-noblesse \
+          "
+          EOF
+          cat > build/conf/local.conf <<'EOF'
+          MACHINE = "noblesse-r08"
+          DISTRO = "asteroid"
+          PACKAGE_CLASSES = "package_ipk"
+          BB_NUMBER_THREADS = "3"
+          PARALLEL_MAKE = "-j3"
+          EOF
+          echo 'BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},8G,100K"' >> build/conf/local.conf
+      - name: Check that inode safety limit fits this free runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The previous 200M free-inode threshold meant 209,715,200
+          # inodes and stopped the build with ~18 million actually free.
+          df -h "$GITHUB_WORKSPACE"
+          df -i "$GITHUB_WORKSPACE"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          config = Path('build/conf/local.conf').read_text()
+          limits = [line for line in config.splitlines() if line.startswith('BB_DISKMON_DIRS = ')]
+          assert len(limits) == 1 and limits[0].endswith(',8G,100K"'), 'Unsafe BitBake disk/inode limit'
+          st = os.statvfs('build')
+          disk_gib = st.f_bavail * st.f_frsize / 1024**3
+          print(f'Free disk: {disk_gib:.1f} GiB; stop limit: 8 GiB')
+          assert disk_gib >= 20, 'Free disk too low for this build'
+          if st.f_files > 0 and st.f_favail >= 0:
+              print(f'Free inodes: {st.f_favail:,}; stop limit: 102,400')
+              assert st.f_favail >= 500_000, 'Free inodes too low for this build'
+          print('PASS: BitBake inode guard is realistic and filesystem has headroom')
+          PY
+      - name: Restore pinned Yocto downloads and signature-verified sstate
+        id: yocto-cache
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: |
+            build/downloads
+            build/sstate-cache
+          # SSTATE reuse is still protected by BitBake task signatures.
+          # The metadata commit pins are fixed in the fetch workflow.
+          key: uglyos-r08-smoke-native-v1-${{ runner.os }}-${{ hashFiles('meta-noblesse/conf/machine/noblesse-r08.conf', 'meta-noblesse/recipes-core/psplash/psplash_%.bbappend') }}
+      - name: Verify actual R08 Psplash and initramfs BitBake configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/native-smoke-logs"
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e psplash > "$GITHUB_WORKSPACE/native-smoke-logs/psplash.env.tmp"
+          bitbake -e initramfs-android-image > "$GITHUB_WORKSPACE/native-smoke-logs/initramfs.env.tmp"
+          python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_psplash_initramfs.py" metadata \
+            "$GITHUB_WORKSPACE/native-smoke-logs/psplash.env.tmp" \
+            "$GITHUB_WORKSPACE/native-smoke-logs/initramfs.env.tmp"
+          rm -f "$GITHUB_WORKSPACE/native-smoke-logs/"*.env.tmp
+          echo 'PASS: real R08 initramfs image includes animated Psplash' \
+            | tee "$GITHUB_WORKSPACE/native-smoke-logs/01-metadata.txt"
+
+      - name: Fail-closed budget for true Psplash native IPK dependency graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          timeout --signal=TERM --kill-after=5s 900s \
+            bitbake -g -c package_write_ipk psplash 2>&1 \
+            | tee "$GITHUB_WORKSPACE/native-smoke-logs/02-psplash-graph.log"
+          cp pn-buildlist "$GITHUB_WORKSPACE/native-smoke-logs/02-psplash-recipe-list.txt"
+          cp task-depends.dot "$GITHUB_WORKSPACE/native-smoke-logs/02-psplash-task-depends.dot"
+          python3 - "$GITHUB_WORKSPACE/native-smoke-logs" <<'PY'
+          from pathlib import Path
+          import re,sys
+          root=Path(sys.argv[1])
+          recipes=set((root/"02-psplash-recipe-list.txt").read_text().splitlines())
+          graph=(root/"02-psplash-task-depends.dot").read_text()
+          tasks=set(re.findall(r'"([^"]+\.do_[^"]+)"',graph))
+          assert "psplash" in recipes and tasks, "No real Psplash build graph"
+          forbidden={"qtbase","qtbase-native","qtdeclarative","qtdeclarative-native",
+                     "asteroid-launcher","linux-noblesse","asteroid-image","initramfs-android-image"}
+          assert not recipes & forbidden, f"Unexpected expensive dependencies: {sorted(recipes & forbidden)}"
+          assert len(tasks) <= 3000, f"Native Psplash task graph exceeds 3000: {len(tasks)}"
+          print(f"PASS[psplash-graph]: {len(recipes)} recipes / {len(tasks)} tasks")
+          PY
+
+      - name: Build genuine Yocto R08 Psplash IPK
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          timeout --signal=TERM --kill-after=30s 6600s \
+            bitbake -c package_write_ipk psplash 2>&1 \
+            | tee "$GITHUB_WORKSPACE/native-smoke-logs/03-psplash-build.log"
+
+      - name: Verify both native Psplash packages, split ELF and smoke/fallback bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e psplash > "$GITHUB_WORKSPACE/native-smoke-logs/psplash.env.tmp"
+          mkdir -p "$GITHUB_WORKSPACE/native-smoke-logs/psplash-ipk"
+          pkgdir="$GITHUB_WORKSPACE/build/tmp/deploy/ipk"
+          count="$(find "$pkgdir" -type f -name 'psplash_*.ipk' | wc -l)"
+          default_count="$(find "$pkgdir" -type f -name 'psplash-default_*.ipk' | wc -l)"
+          test "$count" -eq 1 || { echo "::error::Expected one native Psplash GIF IPK, got $count"; exit 1; }
+          test "$default_count" -eq 1 || { echo "::error::Expected one compiled psplash-default IPK, got $default_count"; exit 1; }
+          archive="$(find "$pkgdir" -type f -name 'psplash_*.ipk' -print -quit)"
+          default_archive="$(find "$pkgdir" -type f -name 'psplash-default_*.ipk' -print -quit)"
+          python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_psplash_initramfs.py" native-ipk \
+            "$GITHUB_WORKSPACE/native-smoke-logs/psplash.env.tmp" "$archive" "$default_archive" \
+            | tee "$GITHUB_WORKSPACE/native-smoke-logs/04-native-package-proof.txt"
+          cp "$archive" "$default_archive" "$GITHUB_WORKSPACE/native-smoke-logs/psplash-ipk/"
+          rm -f "$GITHUB_WORKSPACE/native-smoke-logs/psplash.env.tmp"
+
+      - name: Bound build reuse cache before early-boot stage
+        id: cache-budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          bytes="$(du -sb build/downloads build/sstate-cache 2>/dev/null | awk '{n += $1} END {print n + 0}')"
+          if (( bytes > 0 && bytes <= 6 * 1024 * 1024 * 1024 )); then
+            echo 'save=true' >> "$GITHUB_OUTPUT"
+            echo "PASS: cache under 6 GiB; completed native Psplash build is reusable"
+          else
+            echo 'save=false' >> "$GITHUB_OUTPUT"
+            echo "SKIP: cache outside 6 GiB bound; no effect on IPK or initramfs proof"
+          fi
+
+      - name: Save completed native Psplash build for subsequent reruns
+        if: steps.cache-budget.outputs.save == 'true' && steps.yocto-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: |
+            build/downloads
+            build/sstate-cache
+          key: uglyos-r08-smoke-native-v1-${{ runner.os }}-${{ hashFiles('meta-noblesse/conf/machine/noblesse-r08.conf', 'meta-noblesse/recipes-core/psplash/psplash_%.bbappend') }}
+
+      - name: Check actual early-boot image graph without compiling kernel/rootfs
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          timeout --signal=TERM --kill-after=5s 900s \
+            bitbake -g -c image_complete initramfs-android-image 2>&1 \
+            | tee "$GITHUB_WORKSPACE/native-smoke-logs/05-initramfs-graph.log"
+          cp pn-buildlist "$GITHUB_WORKSPACE/native-smoke-logs/05-initramfs-recipe-list.txt"
+          cp task-depends.dot "$GITHUB_WORKSPACE/native-smoke-logs/05-initramfs-task-depends.dot"
+          python3 - "$GITHUB_WORKSPACE/native-smoke-logs" <<'PY'
+          from pathlib import Path
+          import re,sys
+          root=Path(sys.argv[1])
+          recipes=set((root/"05-initramfs-recipe-list.txt").read_text().splitlines())
+          graph=(root/"05-initramfs-task-depends.dot").read_text()
+          tasks=set(re.findall(r'"([^"]+\.do_[^"]+)"',graph))
+          assert "initramfs-android-image" in recipes and "psplash" in recipes and tasks, (
+              "Missing Psplash or real initramfs in task graph")
+          forbidden={"asteroid-image","qtbase","qtdeclarative","asteroid-launcher","linux-noblesse"}
+          assert not recipes & forbidden, f"Unexpected expensive kernel/Qt build: {sorted(recipes & forbidden)}"
+          assert len(tasks) <= 3000, f"Real initramfs graph exceeds 3000 tasks: {len(tasks)}"
+          print(f"PASS[initramfs-graph]: {len(recipes)} recipes / {len(tasks)} tasks")
+          PY
+
+      - name: Build actual Android-style early-boot R08 cpio.gz
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          timeout --signal=TERM --kill-after=30s 6000s \
+            bitbake -c image_complete initramfs-android-image 2>&1 \
+            | tee "$GITHUB_WORKSPACE/native-smoke-logs/06-initramfs-build.log"
+
+      - name: Verify smoke, stock fallback, real ELF and init script in generated cpio
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$GITHUB_WORKSPACE/build/tmp/deploy/images/noblesse-r08"
+          test -d "$dir"
+          count="$(find "$dir" -maxdepth 1 -type f -name 'initramfs-android-image*.cpio.gz' | wc -l)"
+          test "$count" -eq 1 || { echo "::error::Expected one real initramfs cpio.gz, got $count"; exit 1; }
+          archive="$(find "$dir" -maxdepth 1 -type f -name 'initramfs-android-image*.cpio.gz' -print -quit)"
+          python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_psplash_initramfs.py" initramfs \
+            "$archive" | tee "$GITHUB_WORKSPACE/native-smoke-logs/07-early-boot-proof.txt"
+          {
+            echo '## R08 native Psplash and early-boot image proof'
+            echo '- Real Psplash and psplash-default IPKs contain approved smoke, distinct stock backup and compiled ELF'
+            echo '- Real initramfs contains exact smoke, fallback, native ELF and Psplash boot script'
+            echo '- NOT TESTED: physical Watch3, framebuffer, signature acceptance, recovery or flashing'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload OFFDEVICE-NOT-FLASHABLE native Psplash IPK
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFDEVICE-NOT-FLASHABLE-uglyos-smoke-psplash-ipk
+          retention-days: 7
+          if-no-files-found: error
+          path: native-smoke-logs/psplash-ipk/*.ipk
+
+      - name: Upload bounded dependency and early-boot diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uglyos-r08-psplash-early-boot-proofs
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            native-smoke-logs/*.txt
+            native-smoke-logs/*.log
