@@ -33,7 +33,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           source = Path('tools/watch3_r08_android_sdb.py').read_text()
-          assert 'POWER_PROBES = {"battery_uevent": "cat /sys/class/power_supply/*/uevent"}' in source
+          assert 'POWER_PROBES = {"battery_uevent": "cat /sys/class/power_supply/battery/uevent"}' in source
           assert 'ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES}' in source
           assert 'Only predefined boot, storage or battery' in source
           flow = Path('.github/workflows/watch3-r08-battery-baseline.yml').read_text()
