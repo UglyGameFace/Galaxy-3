@@ -16,7 +16,8 @@ from validate_watch3_native_face_ipk import read_real_ipk
 
 PN = "uglyos-launchers"
 ASSETS = ("900-uglyos-fast-list.qml", "901-uglyos-compact-grid.qml",
-          "902-uglyos-stoner-lounge.qml", "903-uglyos-gamer-arcade.qml")
+          "902-uglyos-stoner-lounge.qml", "903-uglyos-gamer-arcade.qml",
+          "uglyos-favorites.js")
 SUBDIR = "asteroid-launcher/applauncher"
 
 
@@ -51,11 +52,11 @@ def check_metadata(info: dict[str, str], image: dict[str, str]) -> None:
 
 
 def expected_assets(source: Path) -> dict[str, bytes]:
-    if sorted(p.name for p in source.glob("*.qml")) != sorted(ASSETS):
-        raise PackageError("Unexpected/missing source launcher QML files")
+    if sorted(p.name for p in source.glob("*") if p.is_file()) != sorted(ASSETS):
+        raise PackageError("Unexpected/missing source launcher QML or JS assets")
     data = {f"{SUBDIR}/{name}": (source / name).read_bytes() for name in ASSETS}
     if any(not content for content in data.values()):
-        raise PackageError("Empty launchable QML source asset")
+        raise PackageError("Empty launcher source asset")
     return data
 
 
@@ -99,9 +100,9 @@ def check_ipk(info: dict[str, str], source: Path, archive: Path) -> str:
     packed = {p.removeprefix("usr/share/"): content for p, content in payload.items()
               if p.startswith("usr/share/")}
     if len(packed) != len(payload) or packed != data:
-        raise PackageError(f"Yocto IPK contents don't match four QML sources: {sorted(set(packed) ^ set(data))}")
+        raise PackageError(f"Yocto IPK contents don't match four QML + favorites JS sources: {sorted(set(packed) ^ set(data))}")
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    print(f"PASS[launcher-ipk]: Yocto-native {name} contains exactly four original QML assets")
+    print(f"PASS[launcher-ipk]: Yocto-native {name} contains exactly four QML layouts and favorites JS helper")
     print(f"PASS[launcher-ipk]: install and package-split trees match bytes; Depends: asteroid-launcher")
     print(f"SHA256: {digest}")
     print("NOT TESTED: native Settings build, rootfs boot, actual launcher execution, watch flashing")

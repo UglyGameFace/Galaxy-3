@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 COMPATIBLE_MACHINE = "(noblesse-r08)"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 INHIBIT_DEFAULT_DEPS = "1"
-SRC_URI = " file://900-uglyos-fast-list.qml file://901-uglyos-compact-grid.qml file://902-uglyos-stoner-lounge.qml file://903-uglyos-gamer-arcade.qml "
+SRC_URI = " file://900-uglyos-fast-list.qml file://901-uglyos-compact-grid.qml file://902-uglyos-stoner-lounge.qml file://903-uglyos-gamer-arcade.qml file://uglyos-favorites.js "
 do_configure[noexec] = "1"
 do_compile[noexec] = "1"
 do_install() {
@@ -14,8 +14,9 @@ do_install() {
     for layout in 900-uglyos-fast-list.qml 901-uglyos-compact-grid.qml 902-uglyos-stoner-lounge.qml 903-uglyos-gamer-arcade.qml; do
         install -m 0644 "${UNPACKDIR}/$layout" "${D}${datadir}/asteroid-launcher/applauncher/$layout"
     done
+    install -m 0644 "${UNPACKDIR}/uglyos-favorites.js" "${D}${datadir}/asteroid-launcher/applauncher/uglyos-favorites.js"
 }
-FILES:${PN} = "${datadir}/asteroid-launcher/applauncher/*.qml"
+FILES:${PN} = "${datadir}/asteroid-launcher/applauncher/*.qml ${datadir}/asteroid-launcher/applauncher/uglyos-favorites.js"
 RDEPENDS:${PN} = "asteroid-launcher"
 
 # For this R08 data-only recipe, a single unversioned runtime dependency

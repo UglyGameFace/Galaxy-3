@@ -37,6 +37,36 @@ The machine's current Linux 4.9.59 reference kernel and ARM64 image
 are not known to boot on this device. No flashing, stock recovery
 changes, partition writes or sideloading are permitted.
 
-Next work can add opt-in favorites, search, configurable shortcuts,
+## R08 local Favorites Dock (next launcher improvement)
+
+All four selectable UgLy|OS launchers include the SAME optional four-app
+dock, backed by /desktop/uglyos/launcher/favorites in the existing
+Nemo.Configuration local settings store. **Press and hold** an installed
+app tile to pin or unpin it. Long-press never also launches the app.
+A single tap still opens the normal application.
+
+The round-screen dock displays one pinned app at a time.
+Tap its name to launch, or use the left/right arrows to switch between up
+to four pins. If empty, it reads "Hold app to pin" instead of pretending a
+favorite exists. This adds no launcher-visible custom app or background service.
+
+The shared JS stores the installed app's upstream LauncherItem.fileID, *not*
+a translated title, arbitrary command, or copied app binary. It validates and
+deduplicates IDs, never accepts shell/URL input, and resolves pins against
+the **currently installed** upstream launcherModel. Uninstalled apps are
+silently omitted, while the persisted list stays intact for a later reinstall.
+When a fifth app is pinned, the oldest pin drops off.
+
+The existing four layouts and stock launcher picker stay untouched. Qt Quick
+uses only bounded list/grid virtualization; no timers, shaders, background
+polling or high-power effects. Off-device CI runs JS functional tests,
+real 360px Qt Long Press -> Pin -> Dock Click tests using a mock app model,
+and checks five exact assets inside the native Yocto IPK.
+
+This is an **off-device software feature**. No saved pins on Tizen or physical
+Watch3 performance/persistence has yet been verified. A passing host test
+does not establish bootloader acceptance or allow flashing.
+
+Next work can add optional search, configurable shortcuts,
 offline utility apps and phone-assisted features. Performance and
 feature-superiority claims over newer watches require real benchmarks.

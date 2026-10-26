@@ -219,7 +219,7 @@ jobs:
           rm -f "$GITHUB_WORKSPACE/native-launcher-logs/package.env.tmp"
           {
             echo '## Native Yocto UgLy|OS launcher IPK (off-device)'
-            echo '- Four exact QML files verified inside real BitBake staging, package split and archive'
+            echo '- Four exact QML files and local favorites JS verified in native BitBake staging, package split and archive'
             echo '- Native opkg Depends: asteroid-launcher preserved'
             echo '- Does NOT verify actual app launch, Settings runtime, installed rootfs, boot or flash'
           } >> "$GITHUB_STEP_SUMMARY"
