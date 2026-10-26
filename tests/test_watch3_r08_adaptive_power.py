@@ -142,7 +142,7 @@ test('20% turns off only screen wake controls', {enabled:true,level:20},
 (s, run) => {
     if(s.alwaysOnDisplay.value || s.adaptiveTilt.enabled) throw Error('did not conserve');
     const previous=JSON.parse(s.adaptiveOriginal.value);
-    if(previous.version!==1||!previous.changedAod||!previous.changedTilt)
+    if(previous.version!==2||previous.restoreAt!==30||!previous.changedAod||!previous.changedTilt)
         throw Error('missing reversible snapshot');
     s.adaptiveGauge.percent=25;
     run();
