@@ -1,0 +1,82 @@
+name: UgLy|OS R08 actual native App Hub source and round Qt UI (NO DEVICE)
+
+# Fast host Qt checks. No SDB, opkg install, downloads or firmware writes.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-native-app-hub.yml'
+      - 'app-hub/catalog.json'
+      - 'tools/build_uglyos_app_hub.py'
+      - 'tools/generate_uglyos_watch_catalog.py'
+      - 'tools/render_uglyos_native_app_hub.py'
+      - 'tests/test_uglyos_native_app_hub.py'
+      - 'meta-noblesse/recipes-asteroid/uglyos-app-hub/**'
+      - 'meta-noblesse/recipes-core/images/asteroid-image.bbappend'
+      - 'docs/uglyos-app-hub-architecture.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-app-hub-qt-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      QT_QPA_PLATFORM: offscreen
+      QT_QUICK_BACKEND: software
+      QT_OPENGL: software
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate exact native watch catalog and no installer privileges
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/build_uglyos_app_hub.py \
+            tools/generate_uglyos_watch_catalog.py \
+            tools/render_uglyos_native_app_hub.py
+          python3 -m unittest discover -s tests -p 'test_uglyos_app_hub.py' -v
+          python3 -m unittest discover -s tests -p 'test_uglyos_native_app_hub.py' -v
+          python3 tools/generate_uglyos_watch_catalog.py \
+            --catalog app-hub/catalog.json \
+            --output meta-noblesse/recipes-asteroid/uglyos-app-hub/uglyos-app-hub/HubCatalog.js \
+            --verify
+      - name: Install software-only host Qt6 test dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            fonts-noto-core libegl1 libopengl0 libxcb-cursor0
+          python3 -m pip install --disable-pip-version-check --no-cache-dir "PySide6==6.8.3"
+      - name: Render real Qt App Hub 360/240 round-screen filters and detail interaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/render_uglyos_native_app_hub.py --output native-hub-evidence
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("native-hub-evidence")
+          data=json.loads((root/"proof.json").read_text())
+          assert data["installs_allowed"] is False
+          assert len(data["screenshots"]) == 8
+          assert all(item["lit"] >= 35 and item["bytes"] >= 1500 for item in data["screenshots"])
+          print("PASS: actual responsive QML UI, 8 filter views, detail/back, no installer")
+          PY
+          {
+            echo '## UgLy|OS actual native App Hub Qt6 host proof'
+            echo '- 10 reviewed catalog entries, exact JS output hash/parity'
+            echo '- Native QML 360/240 round renders, Watch/Phone/Limits filters'
+            echo '- App detail and back interaction on real host Qt Quick'
+            echo '- R08-only AsteroidApp6 native CMake/opkg source package'
+            echo '- NOT TESTED: genuine Yocto native IPK, watch install, BLE, physical boot'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload off-device native hub visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFDEVICE-NOT-FLASHABLE-uglyos-native-hub-qt-previews
+          retention-days: 14
+          if-no-files-found: warn
+          path: native-hub-evidence/
