@@ -8,7 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from validate_uglyos_face_package import PackageError
 from validate_uglyos_psplash_initramfs import (check_metadata, variables,
-                                                EXPECTED_MACHINE)
+                                                expected_native_version, EXPECTED_MACHINE,
+                                                EXPECTED_SRCREV)
 from verify_uglyos_boot_asset import verify_gif
 
 
@@ -53,12 +54,34 @@ class R08SmokeBootIntegrationTests(unittest.TestCase):
         with self.assertRaises(PackageError):
             check_metadata(bad, self.initrd)
 
+    def test_pinned_git_revision_package_version_not_raw_pv(self):
+        source = {"PV": "0.1+git", "PR": "r0", "SRCREV": EXPECTED_SRCREV}
+        self.assertEqual(expected_native_version(source),
+                         "0.1+git0+53ae74a36b-r0")
+        for key, wrong in (("SRCREV", "0" * 40),
+                           ("PV", "0.1+gitfake"), ("PR", "r1")):
+            modified = source.copy()
+            modified[key] = wrong
+            with self.subTest(key=key), self.assertRaises(PackageError):
+                expected_native_version(modified)
+
+    def test_native_psplash_binary_is_split_into_default_subpackage(self):
+        code = (ROOT / "tools/validate_uglyos_psplash_initramfs.py").read_text()
+        self.assertIn('split / "psplash-default"', code)
+        self.assertIn('usr/bin/psplash-default', code)
+        self.assertIn('read_real_ipk(default_ipk)', code)
+        self.assertIn('Need both main Psplash and psplash-default native IPKs', code)
+        self.assertIn('psplash-default executable', code)
+        self.assertIn('update-alternatives psplash link', code)
+
     def test_runner_really_builds_psplash_and_initramfs(self):
         code = (ROOT / "tools/validate_uglyos_psplash_initramfs.py").read_text()
         ast.parse(code)
         workflow = (ROOT / ".github/workflows/watch3-r08-native-smoke-initramfs.yml").read_text()
         self.assertIn("bitbake -g -c package_write_ipk psplash", workflow)
         self.assertIn("bitbake -c package_write_ipk psplash", workflow)
+        self.assertIn("'psplash-default_*.ipk'", workflow)
+        self.assertIn('"$default_archive"', workflow)
         self.assertIn("bitbake -g -c image_complete initramfs-android-image", workflow)
         self.assertIn("bitbake -c image_complete initramfs-android-image", workflow)
         self.assertIn("assert len(tasks) <= 3000", workflow)

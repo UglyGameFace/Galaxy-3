@@ -201,7 +201,7 @@ jobs:
             bitbake -c package_write_ipk psplash 2>&1 \
             | tee "$GITHUB_WORKSPACE/native-smoke-logs/03-psplash-build.log"
 
-      - name: Verify real package split, ELF and exact smoke/fallback bytes
+      - name: Verify both native Psplash packages, split ELF and smoke/fallback bytes
         shell: bash
         run: |
           set -euo pipefail
@@ -212,12 +212,15 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/native-smoke-logs/psplash-ipk"
           pkgdir="$GITHUB_WORKSPACE/build/tmp/deploy/ipk"
           count="$(find "$pkgdir" -type f -name 'psplash_*.ipk' | wc -l)"
-          test "$count" -eq 1 || { echo "::error::Expected one native Psplash IPK, got $count"; exit 1; }
+          default_count="$(find "$pkgdir" -type f -name 'psplash-default_*.ipk' | wc -l)"
+          test "$count" -eq 1 || { echo "::error::Expected one native Psplash GIF IPK, got $count"; exit 1; }
+          test "$default_count" -eq 1 || { echo "::error::Expected one compiled psplash-default IPK, got $default_count"; exit 1; }
           archive="$(find "$pkgdir" -type f -name 'psplash_*.ipk' -print -quit)"
+          default_archive="$(find "$pkgdir" -type f -name 'psplash-default_*.ipk' -print -quit)"
           python3 "$GITHUB_WORKSPACE/tools/validate_uglyos_psplash_initramfs.py" native-ipk \
-            "$GITHUB_WORKSPACE/native-smoke-logs/psplash.env.tmp" "$archive" \
+            "$GITHUB_WORKSPACE/native-smoke-logs/psplash.env.tmp" "$archive" "$default_archive" \
             | tee "$GITHUB_WORKSPACE/native-smoke-logs/04-native-package-proof.txt"
-          cp "$archive" "$GITHUB_WORKSPACE/native-smoke-logs/psplash-ipk/"
+          cp "$archive" "$default_archive" "$GITHUB_WORKSPACE/native-smoke-logs/psplash-ipk/"
           rm -f "$GITHUB_WORKSPACE/native-smoke-logs/psplash.env.tmp"
 
       - name: Check actual early-boot image graph without compiling kernel/rootfs
@@ -271,7 +274,7 @@ jobs:
             "$archive" | tee "$GITHUB_WORKSPACE/native-smoke-logs/07-early-boot-proof.txt"
           {
             echo '## R08 native Psplash and early-boot image proof'
-            echo '- Real native IPK contains approved smoke, distinct stock backup and Psplash ELF'
+            echo '- Real Psplash and psplash-default IPKs contain approved smoke, distinct stock backup and compiled ELF'
             echo '- Real initramfs contains exact smoke, fallback, native ELF and Psplash boot script'
             echo '- NOT TESTED: physical Watch3, framebuffer, signature acceptance, recovery or flashing'
           } >> "$GITHUB_STEP_SUMMARY"

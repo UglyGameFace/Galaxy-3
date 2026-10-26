@@ -22,12 +22,14 @@ FILENAME = "uglyos-smoke.gif"
 FALLBACK = "psplash-upstream.gif"
 PN = "psplash"
 EXPECTED_MACHINE = "noblesse-r08"
+# Exact psplash revision pinned in OE-Core and meta-asteroid for this build.
+EXPECTED_SRCREV = "53ae74a36bf17675228552abb927d2f981940a6a"
 
 
 def variables(path: Path) -> dict[str, str]:
     fields = ("PN", "MACHINE", "DISTRO", "PACKAGE_ARCH", "PACKAGECONFIG",
               "IMAGE_INSTALL", "ANDROID_EXTRA_INITRAMFS_IMAGE_INSTALL", "SRC_URI",
-              "D", "PKGDEST", "PACKAGES", "datadir", "PV", "PR")
+              "D", "PKGDEST", "PACKAGES", "datadir", "PV", "PR", "SRCREV")
     parsed: dict[str, str] = {}
     for line in path.read_text().splitlines():
         line = line.removeprefix("export ")
@@ -71,43 +73,85 @@ def _real_dir(root: str, name: str) -> Path:
     return path
 
 
-def check_package(env: dict[str, str], ipk: Path) -> None:
+def expected_native_version(env: dict[str, str]) -> str:
+    """Match pinned BitBake git package version, not incomplete recipe PV-PR.
+
+    OE package_setup_pkgv appends its git sortable revision to PKGV at
+    do_package time; bitbake -e PV alone excludes the appended revision.
+    Pinned git sortable revision is "0+" plus ten SRCREV hex digits.
+    """
+    if env.get("SRCREV") != EXPECTED_SRCREV:
+        raise PackageError("Unexpected pinned Psplash source revision")
+    pv, pr = env.get("PV", ""), env.get("PR", "")
+    if pv != "0.1+git" or pr != "r0":
+        raise PackageError(f"Unexpected source recipe PV/PR: {pv!r}/{pr!r}")
+    version = f"{pv}0+{EXPECTED_SRCREV[:10]}-{pr}"
+    if not re.fullmatch(r"[0-9A-Za-z.+_~-]+", version):
+        raise PackageError("Unsafe native opkg version")
+    return version
+
+
+def _check_elf(elf: bytes | None, label: str) -> None:
+    if not elf or len(elf) < 5000 or not elf.startswith(b"\x7fELF"):
+        raise PackageError(f"Real compiled Psplash ELF missing: {label}")
+
+
+def check_package(env: dict[str, str], ipk: Path, default_ipk: Path) -> None:
     verify_gif()
-    version = env.get("PV", "") + "-" + env.get("PR", "")
+    version = expected_native_version(env)
     arch = env.get("PACKAGE_ARCH")
-    if not re.fullmatch(r"[A-Za-z0-9.+_~-]+", version) or arch != "noblesse_r08":
-        raise PackageError("Unknown package version/arch")
+    if arch != "noblesse_r08":
+        raise PackageError("Wrong R08 IPK package architecture")
     if ipk.name != f"{PN}_{version}_{arch}.ipk":
-        raise PackageError(f"Unexpected native Yocto package name: {ipk.name}")
+        raise PackageError(f"Wrong real Psplash GIF package filename: {ipk.name}")
+    if default_ipk.name != f"psplash-default_{version}_{arch}.ipk":
+        raise PackageError(f"Wrong native Psplash executable package: {default_ipk.name}")
     source = ASSET.read_bytes()
-    for root in (_real_dir(env.get("D", ""), "D"),
-                 _real_dir(env.get("PKGDEST", ""), "PKGDEST") / PN):
+    install = _real_dir(env.get("D", ""), "D")
+    split = _real_dir(env.get("PKGDEST", ""), "PKGDEST")
+    for root in (install, split / PN):
         share = root / "usr/share"
-        main = share / "psplash.gif"
-        backup = share / FALLBACK
+        main, backup = share / "psplash.gif", share / FALLBACK
         if not main.is_file() or main.is_symlink() or main.read_bytes() != source:
-            raise PackageError(f"Real Yocto staging lacks exact smoke asset: {main}")
+            raise PackageError(f"Native Psplash staging lacks exact smoke: {main}")
         if not backup.is_file() or backup.is_symlink() or backup.stat().st_size < 500:
-            raise PackageError(f"Real Yocto staging lacks preserved stock fallback: {backup}")
+            raise PackageError(f"Native Psplash staging lacks upstream GIF: {backup}")
         if backup.read_bytes() == source:
-            raise PackageError("Fallback was accidentally overwritten with new smoke")
-        if not (root / "usr/bin/psplash").is_file():
-            raise PackageError(f"Real Yocto staging missing native Psplash executable: {root}")
-    controls, contents = read_real_ipk(ipk)
-    if controls.get("Package") != PN or controls.get("Architecture") != arch:
-        raise PackageError("Real opkg Psplash control mismatch")
-    if controls.get("Version") != version:
-        raise PackageError("Real opkg Psplash version mismatch")
+            raise PackageError("Stock fallback unexpectedly replaced with smoke GIF")
+    # Pinned psplash_git.bb puts /usr/bin/psplash-default in the separate
+    # psplash-default package via SPLASH_IMAGES + update-alternatives.
+    for root in (install, split / "psplash-default"):
+        binary = root / "usr/bin/psplash-default"
+        if not binary.is_file() or binary.is_symlink():
+            raise PackageError(f"Native Psplash default executable not staged: {binary}")
+        _check_elf(binary.read_bytes(), str(binary))
+    control, contents = read_real_ipk(ipk)
+    if control.get("Package") != PN or control.get("Architecture") != arch:
+        raise PackageError("Real Psplash asset control fields mismatch")
+    if control.get("Version") != version:
+        raise PackageError("Real Psplash asset control version mismatch")
+    depends = control.get("Depends", "")
+    if not re.search(r"(?:^|,\s*)psplash-default(?:\s|,|$)", depends):
+        raise PackageError("Psplash main package must depend on psplash-default executable")
     if contents.get("usr/share/psplash.gif") != source:
-        raise PackageError("Real native IPK doesn't contain exact smoke GIF")
-    backup = contents.get(f"usr/share/{FALLBACK}")
-    if backup is None or len(backup) < 500 or backup == source:
-        raise PackageError("Real native IPK missing independent original fallback")
-    if "usr/bin/psplash" not in contents:
-        raise PackageError("Real native IPK contains no Psplash executable")
-    digest = hashlib.sha256(ipk.read_bytes()).hexdigest()
-    print("PASS[psplash-native]: real IPK plus D/packages-split contain exact user smoke and fallback")
-    print(f"PASS[psplash-native]: original smoke SHA256 {EXPECTED_SHA256}; IPK SHA256 {digest}")
+        raise PackageError("Native Psplash main IPK lacks approved smoke bytes")
+    original = contents.get(f"usr/share/{FALLBACK}")
+    if not original or len(original) < 500 or original == source:
+        raise PackageError("Native Psplash main IPK lacks distinct stock fallback")
+    binary_control, binary_files = read_real_ipk(default_ipk)
+    for field, expected in (("Package", "psplash-default"), ("Version", version),
+                            ("Architecture", arch)):
+        if binary_control.get(field) != expected:
+            raise PackageError(f"Native executable IPK {field} mismatch")
+    binary = binary_files.get("usr/bin/psplash-default")
+    _check_elf(binary, "psplash-default IPK")
+    staged = (split / "psplash-default/usr/bin/psplash-default").read_bytes()
+    if binary != staged:
+        raise PackageError("Native executable archive bytes do not match package split")
+    print("PASS[psplash-native]: approved smoke and stock fallback present in native main IPK")
+    print("PASS[psplash-native]: distinct psplash-default IPK includes exact compiled ELF")
+    print(f"PASS[psplash-native]: main SHA256 {hashlib.sha256(ipk.read_bytes()).hexdigest()}")
+    print(f"PASS[psplash-native]: default SHA256 {hashlib.sha256(default_ipk.read_bytes()).hexdigest()}")
 
 
 def cpio_extract(archive: Path, member: str) -> bytes:
@@ -133,14 +177,20 @@ def check_initramfs(archive: Path) -> None:
         raise PackageError("Suspiciously small early-boot initramfs")
     main = cpio_extract(archive, "usr/share/psplash.gif")
     original = cpio_extract(archive, f"usr/share/{FALLBACK}")
-    program = cpio_extract(archive, "usr/bin/psplash")
+    program = cpio_extract(archive, "usr/bin/psplash-default")
     boot_init = cpio_extract(archive, "init")
     if hashlib.sha256(main).hexdigest() != EXPECTED_SHA256:
         raise PackageError("ACTUAL initramfs smoke GIF is not the approved video derivative")
     if len(original) < 500 or main == original:
         raise PackageError("No distinct original Psplash fallback in actual initramfs")
-    if len(program) < 5000 or not program.startswith(b"\x7fELF"):
-        raise PackageError("Initramfs Psplash executable is missing or not ELF")
+    _check_elf(program, "real initramfs psplash-default")
+    # update-alternatives links /usr/bin/psplash to psplash-default when
+    # the initramfs rootfs is assembled. The launcher script uses psplash.
+    compressed = gzip.decompress(archive.read_bytes())
+    names = subprocess.run(["cpio", "-it", "--quiet"], input=compressed,
+                           capture_output=True, check=True).stdout.decode().splitlines()
+    if not any(x.lstrip("./") == "usr/bin/psplash" for x in names):
+        raise PackageError("Early-boot initramfs has no update-alternatives psplash link")
     if b"psplash" not in boot_init:
         raise PackageError("Initramfs boot script doesn't launch Psplash")
     print(f"PASS[psplash-initramfs]: actual {archive.name} includes smoke, distinct fallback, ELF, launcher")
@@ -152,6 +202,7 @@ def main() -> int:
     parser.add_argument("mode", choices=("metadata", "native-ipk", "initramfs"))
     parser.add_argument("first", type=Path)
     parser.add_argument("second", type=Path, nargs="?")
+    parser.add_argument("third", type=Path, nargs="?")
     args = parser.parse_args()
     try:
         if args.mode == "metadata":
@@ -159,9 +210,9 @@ def main() -> int:
                 raise PackageError("Need psplash and initramfs BitBake -e snapshots")
             check_metadata(variables(args.first), variables(args.second))
         elif args.mode == "native-ipk":
-            if args.second is None:
-                raise PackageError("Need real Yocto archive alongside -e snapshot")
-            check_package(variables(args.first), args.second)
+            if args.second is None or args.third is None:
+                raise PackageError("Need both main Psplash and psplash-default native IPKs")
+            check_package(variables(args.first), args.second, args.third)
         else:
             check_initramfs(args.first)
         return 0
