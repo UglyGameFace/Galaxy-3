@@ -13,8 +13,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 os.environ.setdefault("QT_OPENGL", "software")
 
-from PySide6.QtCore import QPoint, QPointF, Qt, QUrl
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QCoreApplication, QPoint, QPointF, Qt, QUrl
+from PySide6.QtGui import QGuiApplication, QWheelEvent
 from PySide6.QtQuick import QQuickView
 from PySide6.QtTest import QTest
 
@@ -41,6 +41,18 @@ def click(view, name):
     QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier,
                      QPoint(round(center.x()), round(center.y())))
     QTest.qWait(60)
+    QGuiApplication.processEvents()
+
+
+def wheel(view, angle):
+    """Synthetic Qt6 QWheelEvent, not a live Linux/Watch3 hardware signal."""
+    center = QPointF(view.width() / 2, view.height() / 2)
+    event = QWheelEvent(
+        center, center, QPoint(0, 0), QPoint(0, angle),
+        Qt.NoButton, Qt.NoModifier, Qt.ScrollUpdate, False,
+    )
+    QCoreApplication.sendEvent(view, event)
+    QTest.qWait(70)
     QGuiApplication.processEvents()
 
 
@@ -94,6 +106,14 @@ def run(output):
             root = view.rootObject()
             if displayed(root) != "RING":
                 raise RuntimeError("Initial ring not rendered: " + str(displayed(root)))
+            # Actual Qt input routing to QML WheelHandler, separately from
+            # our existing on-screen mock buttons. This is still OFF DEVICE.
+            wheel(view, 120)
+            if displayed(root) != "PRECISION":
+                raise RuntimeError("Qt WheelHandler did not handle CW wheel event: " + str(displayed(root)))
+            wheel(view, -120)
+            if displayed(root) != "RING":
+                raise RuntimeError("Qt WheelHandler did not handle CCW wheel event: " + str(displayed(root)))
             click(view, "uglyos-bezel-action-2")
             if displayed(root) != "PRECISION":
                 raise RuntimeError("Clockwise did not move ring: " + str(displayed(root)))
@@ -131,10 +151,11 @@ def run(output):
         "kind": "OFFDEVICE-QT-MOCK-NOT-WATCH-BOOT",
         "screenshots": screenshots,
         "physical_wheel_verified": False,
-        "phone_transport_verified": False
+        "phone_transport_verified": False,
+        "synthetic_qt_wheel_verified": True
     }
     (output/"proof.json").write_text(json.dumps(proof, indent=2)+"\n")
-    print("PASS[bezel-qt]: 360px/240px actual QML rendered; touch detents, select, dial, back")
+    print("PASS[bezel-qt]: 360px/240px QML; synthetic Qt wheel CW/CCW, touch, select, dial, back")
     print("NOT TESTED: real Watch3 bezel, keys, input backend, Android, boot or flash")
 
 
