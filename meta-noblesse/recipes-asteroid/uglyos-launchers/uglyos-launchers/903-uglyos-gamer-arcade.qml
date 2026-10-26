@@ -76,7 +76,7 @@ Item {
 
             Rectangle {
                 id: frame
-                width: parent.width * 0.66
+                width: Math.min(parent.width * 0.60, parent.height * 0.55)
                 height: width
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: parent.top

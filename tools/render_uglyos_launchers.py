@@ -202,6 +202,16 @@ def render(app: QGuiApplication, qml: Path, size: int, palette: str, effects: st
             f"First app label {model.items[0].title!r} absent from real rendered Qt tree "
             f"in {qml.name}; labels={labels[:25]}, items={inspected}, "
             f"model_count={model.rowCount()}")
+    # Grid labels must remain inside the owning tile. A label that spills
+    # into the next row looks readable but taps a DIFFERENT app.
+    tile = first.parentItem()
+    if tile is None:
+        raise RuntimeError(f"Visible app label has no visual tile parent: {qml.name}")
+    if first.y() < -0.5 or first.y() + first.height() > tile.height() + 0.5:
+        raise RuntimeError(
+            f"First app label overlaps adjacent tile in {qml.name}: "
+            f"text_y={first.y():.1f} text_h={first.height():.1f} "
+            f"tile_h={tile.height():.1f}")
     center = first.mapToScene(QPointF(first.width() / 2, first.height() / 2))
     point = QPoint(round(center.x()), round(center.y()))
     if not (0 <= point.x() < size and 0 <= point.y() < size):

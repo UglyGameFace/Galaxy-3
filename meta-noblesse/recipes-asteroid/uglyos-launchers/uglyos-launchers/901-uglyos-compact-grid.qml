@@ -82,7 +82,7 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: parent.top
                 anchors.topMargin: parent.height * 0.08
-                width: parent.width * 0.51
+                width: Math.min(parent.width * 0.51, parent.height * 0.55)
                 height: width
                 radius: width / 2
                 color: appTile.pressed ? "#234936" : "#172920"
