@@ -1,0 +1,108 @@
+From: UgLy|OS
+Subject: [PATCH] R08 event-driven reversible battery saver without background polling
+
+--- a/src/qml/MainScreen.qml
++++ b/src/qml/MainScreen.qml
+@@ -141,8 +141,102 @@
+         key: "/org/asteroidos/settings/always-on-display"
+         defaultValue: true
+     }
+ 
++// Optional, resident, event-driven battery savings, R08 only.
++    // No polling, network activity or Bluetooth/Wi-Fi disconnection.
++    Item {
++        id: adaptiveBattery
++        width: 0
++        height: 0
++        property bool changing: false
++        MceBatteryLevel { id: adaptiveGauge }
++        TiltToWake { id: adaptiveTilt }
++        ConfigurationValue {
++            id: adaptiveEnabled
++            key: "/desktop/uglyos/power/adaptive-enabled"
++            defaultValue: false
++            onValueChanged: adaptiveBattery.reconcile()
++        }
++        ConfigurationValue {
++            id: adaptiveOriginal
++            key: "/desktop/uglyos/power/adaptive-original"
++            defaultValue: ""
++            onValueChanged: adaptiveBattery.reconcile()
++        }
++        ConfigurationValue {
++            id: adaptiveSolo
++            key: "/desktop/uglyos/solo/previous-controls"
++            defaultValue: ""
++            onValueChanged: adaptiveBattery.reconcile()
++        }
++        function reconcile() {
++            if (changing) return
++            // Unknown gauge or charger state must never start an adjustment.
++            var amount = adaptiveGauge.percent
++            if (typeof amount !== "number" || !isFinite(amount) ||
++                amount < 0 || amount > 100 ||
++                typeof mceChargerType.type !== "number") return
++            // Solo Saver and nightstand already own these controls.
++            if (adaptiveSolo.value !== "" || nightstandMode.active) return
++            var charging = mceChargerType.type !== MceChargerType.None
++            if (adaptiveOriginal.value !== "") {
++                // A saved snapshot is a single owner, not another fallback.
++                var previous
++                try { previous = JSON.parse(adaptiveOriginal.value) }
++                catch (error) { return }
++                if (!previous || previous.version !== 1 ||
++                    typeof previous.aod !== "boolean" ||
++                    typeof previous.tilt !== "boolean" ||
++                    typeof previous.changedAod !== "boolean" ||
++                    typeof previous.changedTilt !== "boolean") return
++                if (adaptiveEnabled.value === true && !charging &&
++                    amount < 30) return
++                changing = true
++                // Do not override a user who has already enabled a control.
++                if (previous.changedAod && alwaysOnDisplay.value === false) {
++                    alwaysOnDisplay.value = previous.aod
++                    displaySettings.lowPowerModeEnabled = previous.aod
++                }
++                if (previous.changedTilt && adaptiveTilt.available &&
++                    adaptiveTilt.enabled === false)
++                    adaptiveTilt.enabled = previous.tilt
++                adaptiveOriginal.value = ""
++                changing = false
++                return
++            }
++            if (adaptiveEnabled.value !== true || charging || amount > 20) return
++            var changeAod = alwaysOnDisplay.value === true
++            var changeTilt = adaptiveTilt.available && adaptiveTilt.enabled === true
++            if (!changeAod && !changeTilt) return
++            changing = true
++            // Persist before modifying the live display/wake configuration.
++            adaptiveOriginal.value = JSON.stringify({
++                version: 1, aod: !!alwaysOnDisplay.value,
++                tilt: !!adaptiveTilt.enabled,
++                changedAod: changeAod, changedTilt: changeTilt
++            })
++            if (changeAod) {
++                alwaysOnDisplay.value = false
++                displaySettings.lowPowerModeEnabled = false
++            }
++            if (changeTilt) adaptiveTilt.enabled = false
++            changing = false
++        }
++        Connections {
++            target: adaptiveGauge
++            function onPercentChanged() { adaptiveBattery.reconcile() }
++        }
++        Connections {
++            target: mceChargerType
++            function onTypeChanged() { adaptiveBattery.reconcile() }
++        }
++        Connections {
++            target: nightstandMode
++            function onActiveChanged() { adaptiveBattery.reconcile() }
++        }
++        Component.onCompleted: reconcile()
++    }
+     Item {
+         id: burnInProtectionManager
+ 
+         // Maximum offset before components from other grid becomes visible.
