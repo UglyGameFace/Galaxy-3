@@ -457,9 +457,13 @@ def main():
               "hotspot/TCP, SDB handshake and read-only shell problems.",
               file=sys.stderr)
         return 1
-    print("PASS: privacy-filtered Watch3 " +
-          ("power" if args.power_only else "storage" if args.storage_only else "boot") +
-          " report saved locally.")
+    if args.power_only and report["status"] != "OBSERVED_TIZEN_BATTERY":
+        print("UNAVAILABLE: Watch battery gauge not confirmed; no battery "
+              "percentage or drain inferred. Redacted report saved locally.")
+    else:
+        print("PASS: privacy-filtered Watch3 " +
+              ("power" if args.power_only else "storage" if args.storage_only else "boot") +
+              " report saved locally.")
     print("Report path:", dest)
     print("NO bootloader acceptance or stock recovery proven. NOT FLASHABLE.")
     return 0
