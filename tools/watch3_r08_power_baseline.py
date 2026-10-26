@@ -13,28 +13,38 @@ from pathlib import Path
 import re
 import sys
 
-_KEYS = {"NAME", "TYPE", "CAPACITY", "STATUS"}
+_KEYS = {"NAME", "TYPE", "CAPACITY", "STATUS", "PRESENT"}
 _STATES = {"Charging", "Discharging", "Full", "Not charging", "Unknown"}
 _SCHEMA = "uglyos-watch3-power-v1"
 
 
-def _battery_records(raw: str) -> list[dict[str, str]]:
-    """Parse concatenated Linux power_supply uevents without retaining raw data."""
-    records: list[dict[str, str]] = []
-    current: dict[str, str] = {}
+def _battery_record(raw: str) -> dict[str, str] | None:
+    """Read only the pinned Samsung 'battery' uevent; no arbitrary supply scans.
+
+    The pinned vendor 4.9 kernel publishes NAME and driver properties, but
+    does not publish TYPE in the uevent unless the battery driver explicitly
+    includes it. NAME=battery is the verified battery power_supply descriptor.
+    """
+    fields: dict[str, str] = {}
     for line in raw[:65536].splitlines():
         if not line.startswith("POWER_SUPPLY_") or "=" not in line:
             continue
         key, value = line[len("POWER_SUPPLY_"):].split("=", 1)
-        if key == "NAME":
-            if current:
-                records.append(current)
-            current = {}
-        if key in _KEYS and len(value) <= 80:
-            current[key] = value
-    if current:
-        records.append(current)
-    return [row for row in records if row.get("TYPE", "").lower() == "battery"]
+        if key not in _KEYS:
+            continue
+        if key in fields or len(value) > 80:
+            return None
+        fields[key] = value
+    if fields.get("NAME") != "battery":
+        return None
+    # TYPE is optional on the Samsung 4.9 reference, but if it is exported
+    # it must not contradict the known exact battery device.
+    if fields.get("TYPE", "Battery") != "Battery":
+        return None
+    # Some battery drivers report a temporarily absent battery as PRESENT=0.
+    if fields.get("PRESENT", "1") != "1":
+        return None
+    return fields
 
 
 def summarize_power(
@@ -44,7 +54,7 @@ def summarize_power(
     now = sampled_at or datetime.now(timezone.utc)
     if now.tzinfo is None:
         raise ValueError("Power capture timestamp must contain a timezone")
-    batteries = _battery_records(observations.get("battery_uevent", ""))
+    battery = _battery_record(observations.get("battery_uevent", ""))
     report = {
         "schema": _SCHEMA,
         "status": "CAPACITY_UNAVAILABLE",
@@ -57,18 +67,17 @@ def summarize_power(
         "privacy": "Raw sysfs, watch IP, serial, keys and identifiers not retained",
         "limits": "Read-only rounded capacity, NOT physical power or UgLy|OS drain proof",
     }
-    # Do not silently pick a USB/charger device or an arbitrary one of
-    # several batteries. Fail closed when the kernel layout is uncertain.
-    if len(batteries) != 1:
+    # The exact path returned no valid, unambiguous battery event or
+    # the SDB probe reported an access problem: never guess a percentage.
+    if battery is None or problems:
         return report
-    record = batteries[0]
-    percent = record.get("CAPACITY", "")
+    percent = battery.get("CAPACITY", "")
     if not re.fullmatch(r"\d{1,3}", percent):
         return report
     amount = int(percent)
     if amount > 100:
         return report
-    state = record.get("STATUS", "Unknown")
+    state = battery.get("STATUS", "Unknown")
     if state not in _STATES:
         state = "Unknown"
     report.update(status="OBSERVED_TIZEN_BATTERY", capacity_percent=amount,

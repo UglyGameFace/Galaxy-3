@@ -15,10 +15,10 @@ from watch3_r08_android_sdb import (
     Connection, POWER_PROBES, VERSION, SdbError, collect, frame, receive,
 )
 
+# Matches the pinned Samsung Linux 4.9 source: NAME is emitted but TYPE
+# is not emitted unless explicitly listed as a driver property.
 SAMPLE = (
-    "POWER_SUPPLY_NAME=usb\nPOWER_SUPPLY_TYPE=USB\n"
-    "POWER_SUPPLY_STATUS=Charging\n"
-    "POWER_SUPPLY_NAME=battery\nPOWER_SUPPLY_TYPE=Battery\n"
+    "POWER_SUPPLY_NAME=battery\n"
     "POWER_SUPPLY_CAPACITY=79\nPOWER_SUPPLY_STATUS=Discharging\n"
     "POWER_SUPPLY_SERIAL_NUMBER=PRIVATE-WATCH-SECRET\n"
     "POWER_SUPPLY_VOLTAGE_NOW=3900000\n"
@@ -53,7 +53,7 @@ class FakeSocket:
 
 
 class BatteryBaselineTests(unittest.TestCase):
-    def test_one_battery_not_usb_and_no_raw_data_leak(self):
+    def test_kernel_49_event_missing_type_and_no_raw_data_leak(self):
         at = datetime(2026, 10, 26, 15, tzinfo=timezone.utc)
         report = summarize_power({"battery_uevent": SAMPLE}, {}, at)
         self.assertEqual(report["status"], "OBSERVED_TIZEN_BATTERY")
@@ -65,7 +65,7 @@ class BatteryBaselineTests(unittest.TestCase):
         self.assertTrue(report["captured_at_utc"].startswith("2026-10-26"))
 
     def test_unavailable_data_never_invents_battery_number(self):
-        for raw in ("", "cat: /sys/class/power_supply/*/uevent: No such file",
+        for raw in ("", "cat: /sys/class/power_supply/battery/uevent: No such file",
                     "POWER_SUPPLY_NAME=battery\nPOWER_SUPPLY_TYPE=Battery\n"
                     "POWER_SUPPLY_CAPACITY=101\n",
                     "POWER_SUPPLY_NAME=battery\nPOWER_SUPPLY_TYPE=Battery\n"
@@ -79,11 +79,31 @@ class BatteryBaselineTests(unittest.TestCase):
 
     def test_ambiguous_multiple_batteries_fail_closed(self):
         two = SAMPLE + (
-            "POWER_SUPPLY_NAME=other\nPOWER_SUPPLY_TYPE=Battery\n"
+            "POWER_SUPPLY_NAME=battery\nPOWER_SUPPLY_TYPE=Battery\n"
             "POWER_SUPPLY_CAPACITY=80\nPOWER_SUPPLY_STATUS=Discharging\n"
         )
         self.assertIsNone(summarize_power({"battery_uevent": two}, {})
                           ["capacity_percent"])
+
+    def test_explicit_type_matches_or_rejects_conflicts(self):
+        compatible = SAMPLE + "POWER_SUPPLY_TYPE=Battery\n"
+        self.assertEqual(
+            summarize_power({"battery_uevent": compatible}, {})["capacity_percent"],
+            79)
+        for raw in (
+            SAMPLE.replace("NAME=battery", "NAME=usb"),
+            SAMPLE + "POWER_SUPPLY_TYPE=USB\n",
+            SAMPLE + "POWER_SUPPLY_PRESENT=0\n",
+            SAMPLE + "POWER_SUPPLY_PRESENT=bad\n",
+            SAMPLE + "POWER_SUPPLY_CAPACITY=99\n",
+            SAMPLE + "POWER_SUPPLY_NAME=battery\n",
+        ):
+            with self.subTest(raw=raw):
+                self.assertIsNone(
+                    summarize_power({"battery_uevent": raw}, {})["capacity_percent"])
+        self.assertIsNone(
+            summarize_power({"battery_uevent": SAMPLE},
+                            {"battery_uevent": "SDB shell failed"})["capacity_percent"])
 
     def test_only_one_fixed_probe_through_real_sdb_protocol(self):
         fake = FakeSocket(SAMPLE)
@@ -101,7 +121,7 @@ class BatteryBaselineTests(unittest.TestCase):
         while self._raw:
             frames.append(receive(incoming))
         openings = [x[3] for x in frames if x[0] == b"OPEN"]
-        self.assertEqual(openings, [b"shell:cat /sys/class/power_supply/*/uevent\x00"])
+        self.assertEqual(openings, [b"shell:cat /sys/class/power_supply/battery/uevent\x00"])
         with self.assertRaisesRegex(SdbError, "allowlist"):
             Connection(FakeSocket(""), Path("/unused")).shell("power_supply")
 
