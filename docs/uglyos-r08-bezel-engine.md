@@ -101,12 +101,54 @@ only during interaction, with GPU/software-backend fallback and watch
 battery/performance budgets. Don't run a constantly animating background
 to show off a power-saving watch.
 
+## Verified off-device Qt wheel delivery (still not live Watch3 input)
+
+CI injects actual synthetic `QWheelEvent` objects into the native
+`BezelPage.qml` at **360×360** and **240×240**, observes the existing
+`WheelHandler` selecting the next/previous ring entry, then validates
+touch selection, precision adjustment and back navigation. This proves
+the current QML wheel handler can process Qt wheel events **in host Qt**;
+it does not prove Samsung evdev `REL_WHEEL` is forwarded by the watch's
+compositor or libinput plugin. No Tizen event nodes were opened.
+
+## Next input proof: instant, read-only Termux capability report
+
+Run **after this PR merges** using the watch's current trusted-network address:
+
+```bash
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_android_sdb.py --watch-ip 10.54.86.131 --bezel-only
+cat ~/watch3-r08-bezel-redacted.json
+```
+
+The phone-to-watch SDB call executes precisely one allowlisted shell command:
+`cat /proc/bus/input/devices`. It **does not open input event nodes**,
+read keypress history, set permissions, run apps or flash any partition.
+The parser selects one exact `N: Name="tizen_detent"` device and discovers
+its current `eventN` handler instead of hardcoding `event18`. It checks
+the Linux capability bitsets `B: EV` and `B: REL`, including
+`EV_REL=2` and `REL_WHEEL=8`. No other devices, serials, product IDs,
+physical paths, raw bitmaps or keys are saved.
+
+`BEZEL_REL_WHEEL_ADVERTISED` is **only kernel capability evidence**:
+it does not mean the watch generated real CW/CCW events, that the
+Qt input stack received a wheel event, or that custom OS navigation works.
+`BEZEL_CAPABILITY_UNAVAILABLE` means unreadable, missing, ambiguous or
+invalid metadata; `BEZEL_WHEEL_NOT_ADVERTISED` means an exact detent device
+was found but it did not advertise REL_WHEEL. Neither warrants altering
+Tizen system permissions, direct evdev reads or guessing a different path.
+
+If the watch's Wi-Fi IP has changed, replace it. The previously documented
+address is just the last observed connection, never a hardcoded identity.
+
 ## Gate order for user-safe development
 
-1. This PR: compile-independent source engine and native app scaffolding,
+1. Merged PR #43: compile-independent source engine and native app scaffolding,
    test synthetic signed detents, exact Samsung driver code audit and strict
    local-only action boundaries. Keep app **not installed by default**.
-2. Verify Qt6 native package build and Wayland/LinuxFB startup **off-device**.
+2. This PR: verify read-only physical Tizen input capability metadata and
+   host Qt WheelHandler delivery independently; then verify Qt6 native IPK
+   build and Wayland/LinuxFB startup **off-device**.
 3. Verify input device name/EV_REL capability via strictly read-only SDB,
    then verify `REL_WHEEL` under a safe custom boot (after stock recovery
    has been proven); preserve normal swipe/touch navigation.

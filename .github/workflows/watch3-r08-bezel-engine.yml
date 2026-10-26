@@ -8,6 +8,9 @@ on:
       - 'bezel/**'
       - 'meta-noblesse/recipes-asteroid/uglyos-bezel-lab/**'
       - 'tests/test_watch3_r08_bezel_engine.py'
+      - 'tests/test_watch3_r08_bezel_capabilities.py'
+      - 'tools/watch3_r08_android_sdb.py'
+      - 'tools/watch3_r08_bezel_capabilities.py'
       - 'tools/render_uglyos_bezel_lab.py'
       - 'docs/uglyos-r08-bezel-engine.md'
       - '.github/workflows/watch3-r08-bezel-engine.yml'
@@ -27,6 +30,9 @@ jobs:
           set -euo pipefail
           node --version
           python3 -m unittest discover -s tests -p 'test_watch3_r08_bezel_engine.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_bezel_capabilities.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_power_baseline.py' -v
+          python3 -m py_compile tools/watch3_r08_android_sdb.py tools/watch3_r08_bezel_capabilities.py
       - name: Verify pinned Samsung 4.9 vendor bezel report against reference (read-only)
         run: |
           set -euo pipefail
@@ -61,6 +67,7 @@ jobs:
           proof=json.loads(Path('bezel-evidence/proof.json').read_text())
           assert proof["physical_wheel_verified"] is False
           assert proof["phone_transport_verified"] is False
+          assert proof["synthetic_qt_wheel_verified"] is True
           assert len(proof["screenshots"]) == 4
           assert all(s["bytes"] > 1000 and s["lit"] >= 25 for s in proof["screenshots"])
           print("PASS: live Qt off-device QML screenshots, button interactions, safe proof labels")
