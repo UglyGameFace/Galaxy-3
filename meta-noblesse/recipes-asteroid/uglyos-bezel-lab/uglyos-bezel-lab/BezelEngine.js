@@ -20,7 +20,7 @@ function makeState() {
         page: "ring", context: "everyday", focus: 0, dial: 50, timelineSeconds: 0,
         gameSlot: 0, keyboardIndex: 0, keyboardText: "", lastTurnMs: -1,
         totalTurns: 0, gestureArmed: false, gestureRecord: false,
-        gestureSteps: [], gestureStartedMs: -1, gestures: [],
+        gestureSteps: [], gestureStartedMs: -1, gestures: [], gestureTarget: "ring",
         notifications: [], selectedNotification: 0,
         modifier: false, lastResult: "Normal navigation", assistive: false,
         // No action executes off-device; remote and haptic transports are absent.
@@ -57,6 +57,21 @@ function registerGesture(state, pattern, target) {
     prior.push({key:key, target:target});
     next.gestures = prior;
     next.lastResult = "Local gesture saved";
+    return next;
+}
+function loadGestures(state, input) {
+    var next = JSON.parse(JSON.stringify(state));
+    if (!Array.isArray(input) || input.length > MAX_GESTURES) return next;
+    var clean = [], seen = {};
+    for (var i = 0; i < input.length; i++) {
+        var item = input[i];
+        if (!item || typeof item.key !== "string" ||
+            !/^[RL]{2,8}$/.test(item.key) || seen[item.key] ||
+            LOCAL_ACTIONS.indexOf(item.target) < 0) return next;
+        seen[item.key] = true;
+        clean.push({key:item.key, target:item.target});
+    }
+    next.gestures = clean;
     return next;
 }
 function clearGesture(state, key) {
@@ -103,6 +118,11 @@ function apply(state, event) {
         s.lastResult = s.gestureRecord ? "Recording local pattern" : "Enter pattern, confirm";
         return s;
     }
+    if (event.kind === "target") {
+        if (LOCAL_ACTIONS.indexOf(event.value) >= 0)
+            s.gestureTarget = event.value;
+        return s;
+    }
     if (event.kind === "cancel") {
         s.gestureArmed = false;
         s.gestureRecord = false;
@@ -124,7 +144,7 @@ function apply(state, event) {
             if (!validPattern(s.gestureSteps)) {
                 s.lastResult = "Use 2–8 detents";
             } else if (s.gestureRecord) {
-                s = registerGesture(s, s.gestureSteps, "ring");
+                s = registerGesture(s, s.gestureSteps, s.gestureTarget);
             } else {
                 var key = patternKey(s.gestureSteps);
                 var match = s.gestures.filter(function(x) { return x.key === key; })[0];
