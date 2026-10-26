@@ -9,8 +9,12 @@ stock recovery has been validated. No firmware writes or flash authorization.**
   core 1.15 GHz, 1 GB RAM, 8 GB storage, 360×360 AMOLED, **340 mAh nominal
   battery**. The 41mm SM-R850 has **247 mAh**, so its raw runtime comparison
   is not interchangeable with this 45mm device.
-- Galaxy Watch Active2 is a useful Exynos 9110 comparison device, not proof
-  that its governors, display drivers or battery runtime transfer unchanged.
+- Samsung's Galaxy Watch Active2 **44mm** is the closest published hardware
+  comparison: the same Exynos 9110, 360×360 AMOLED and 340 mAh nominal
+  battery, but 768 MB RAM and 4 GB storage in the Bluetooth version versus
+  the Watch3's 1 GB/8 GB. Similar hardware is not proof that governors,
+  drivers, kernel policy or real-life runtime transfer unchanged.
+  Samsung reference: https://news.samsung.com/global/galaxy-watch-active2-designed-to-help-balance-wellness-with-upgraded-connectivity
 - AsteroidOS already offers AoD, tilt-to-wake and display management. Its
   documentation explicitly warns that tilt-to-wake can cost battery through
   accidental activations. Our R08 Solo Saver's reversibility is documented in
