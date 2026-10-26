@@ -168,6 +168,15 @@ function apply(state, event) {
             Math.abs(event.steps) > 8 || safeTime(event.ms) < 0) return s;
         var direction = event.steps > 0 ? 1 : -1;
         var steps = Math.abs(event.steps);
+        // Future button+bezel adapter may hold a *logical* modifier.
+        // It can switch safe local contexts, NEVER seize KEY_POWER or
+        // invoke phone, payment, OTA, boot or unapproved system actions.
+        if (s.modifier && !s.gestureArmed) {
+            s.context = CONTEXTS[circular(CONTEXTS.indexOf(s.context),
+                                           event.steps, CONTEXTS.length)];
+            s.lastResult = "Context: " + s.context;
+            return s;
+        }
         if (s.gestureArmed) {
             if (s.gestureStartedMs >= 0 && (event.ms < s.gestureStartedMs ||
                 event.ms - s.gestureStartedMs > 2000)) {
