@@ -25,6 +25,8 @@ class SmokeKeyTests(unittest.TestCase):
         self.assertEqual(REFERENCE_URL, "https://youtu.be/WqeCrfgum38")
         self.assertIn("chromakey=0x00FF00", code)
         self.assertIn("despill=type=green", code)
+        self.assertIn("hue=s=0", code)
+        self.assertIn("palettegen=max_colors=24", code)
         self.assertIn("background", code)
         self.assertIn("not_tested", code)
         self.assertNotIn("fastboot flash", code)

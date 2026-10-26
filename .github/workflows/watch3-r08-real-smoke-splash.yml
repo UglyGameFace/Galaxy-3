@@ -1,0 +1,48 @@
+name: UgLy|OS R08 exact smoke-only Psplash asset (NO DEVICE)
+
+# Source and binary checksum validation only. This does NOT boot or flash a watch.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'meta-noblesse/recipes-core/psplash/**'
+      - 'tools/verify_uglyos_boot_asset.py'
+      - 'tools/build_uglyos_smoke_splash.py'
+      - 'tests/test_uglyos_real_smoke_boot.py'
+      - 'docs/uglyos-smoke-boot-plan.md'
+      - '.github/workflows/watch3-r08-real-smoke-splash.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-real-smoke-asset:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Pillow for exact GIF inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --no-cache-dir "Pillow==11.3.0"
+      - name: Verify that only R08 overrides upstream Psplash
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/verify_uglyos_boot_asset.py tools/build_uglyos_smoke_splash.py
+          python3 -m unittest discover -s tests -p 'test_uglyos_real_smoke_boot.py' -v
+      - name: Require the ACTUAL user-supplied smoke GIF in PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_uglyos_boot_asset.py
+          {
+            echo '## Authentic UgLy|OS R08 smoke asset passed'
+            echo '- Source: user-uploaded smoke burst; no download or fake/generated substitute'
+            echo '- SHA-256 pinned to exact reviewed 222599-byte monochrome 280x280 GIF'
+            echo '- 3s / 30 frames / 10fps; pure black, no green background'
+            echo '- Machine-scoped Psplash replacement with upstream GIF backup'
+            echo '- NOT TESTED: native psplash binary, initramfs/rootfs, boot, recovery or flashing'
+          } >> "$GITHUB_STEP_SUMMARY"
