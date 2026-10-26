@@ -101,6 +101,16 @@ only during interaction, with GPU/software-backend fallback and watch
 battery/performance budgets. Don't run a constantly animating background
 to show off a power-saving watch.
 
+## Verified off-device Qt wheel delivery (still not live Watch3 input)
+
+CI injects actual synthetic `QWheelEvent` objects into the native
+`BezelPage.qml` at **360×360** and **240×240**, observes the existing
+`WheelHandler` selecting the next/previous ring entry, then validates
+touch selection, precision adjustment and back navigation. This proves
+the current QML wheel handler can process Qt wheel events **in host Qt**;
+it does not prove Samsung evdev `REL_WHEEL` is forwarded by the watch's
+compositor or libinput plugin. No Tizen event nodes were opened.
+
 ## Next input proof: instant, read-only Termux capability report
 
 Run **after this PR merges** using the watch's current trusted-network address:
