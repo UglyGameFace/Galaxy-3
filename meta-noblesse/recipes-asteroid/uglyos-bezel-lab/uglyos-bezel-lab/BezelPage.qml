@@ -181,6 +181,7 @@ Item {
         Repeater {
             model: ["‹", "OK", "›", "BACK"]
             delegate: Rectangle {
+                objectName: "uglyos-bezel-action-" + index
                 width: Math.max(40, root.width * (index === 3 ? 0.20 : 0.17))
                 height: Math.max(30, root.height * 0.105)
                 radius: height / 2
@@ -215,6 +216,7 @@ Item {
             model: root.snapshot.page === "gestures" ?
                    ["RECORD", "RUN", "TARGET"] : ["MODE", "INVERT"]
             delegate: Rectangle {
+                objectName: "uglyos-bezel-secondary-" + index
                 width: root.width * (root.snapshot.page === "gestures" ? 0.22 : 0.31)
                 height: root.height * 0.075
                 radius: height / 2
