@@ -87,6 +87,13 @@ class R08SmokeBootIntegrationTests(unittest.TestCase):
         self.assertIn("assert len(tasks) <= 3000", workflow)
         self.assertIn("validate_uglyos_psplash_initramfs.py", workflow)
         self.assertIn("OFFDEVICE-NOT-FLASHABLE", workflow)
+        self.assertIn("timeout-minutes: 240", workflow)
+        self.assertIn("timeout --signal=TERM --kill-after=30s 6600s", workflow)
+        self.assertIn("timeout --signal=TERM --kill-after=30s 6000s", workflow)
+        self.assertIn("actions/cache/restore@v4", workflow)
+        self.assertIn("actions/cache/save@v4", workflow)
+        self.assertIn("bytes <= 6 * 1024 * 1024 * 1024", workflow)
+        self.assertIn("assert len(tasks) <= 3000", workflow)
         self.assertNotIn("fastboot flash", workflow)
         self.assertNotIn("sdb shell", workflow)
 

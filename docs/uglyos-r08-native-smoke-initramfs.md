@@ -45,3 +45,21 @@ No host-rendered test proves physical Watch3 bootloader acceptance,
 correct graphics/framebuffer, actual Psplash playback, stock recovery,
 or flash safety. The exact R840X recovery/boot-chain acceptance is
 still unverified. Do NOT install or flash the resulting archives.
+
+## CI runtime correction (2026-10-26)
+
+The prior head run #40319035583 failed with exit code 124 solely because
+`timeout 3300s` stopped the native package build after reaching task 935/974.
+Its source tests, actual BitBake variables and 974-task graph had passed.
+No compiler failure or unsafe dependency was reported.
+
+The same exact pinned layer source, QML-independent build graph, R08
+package validation, smoke SHA256 gate and stock fallback checks are retained.
+The native build has a 6600-second bounded timeout; the early-boot cpio
+build has 6000 seconds within a 240-minute workflow ceiling. This changes
+CI execution time, not acceptable output, dependencies, or device safety.
+
+GitHub Actions now restores signature-verified Yocto download/sstate caches,
+and after native Psplash succeeds optionally checkpoints at most 6 GiB
+before the image stage. Cache save failures cannot waive the real IPK or
+initramfs verification. Build graph limits remain 3000 tasks per stage.

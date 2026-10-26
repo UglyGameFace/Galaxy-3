@@ -1,6 +1,7 @@
 name: UgLy|OS R08 smoke Psplash + genuine initramfs proof (NO DEVICE)
 
-# Genuine R08-only asset IPK, task-budgeted without building entire Qt launcher.
+# Genuine R08-only Psplash and early-boot archive; keep exact checksum and
+# graph limits. Cold Yocto native builds need separate time and cache budgets.
 # This is OFF-DEVICE and NEVER proves install/flash safety.
 on:
   pull_request:
@@ -24,7 +25,7 @@ concurrency:
 jobs:
   asteroid-metadata:
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 240
     steps:
       - name: Checkout Galaxy-3
         uses: actions/checkout@v4
@@ -146,6 +147,17 @@ jobs:
               assert st.f_favail >= 500_000, 'Free inodes too low for this build'
           print('PASS: BitBake inode guard is realistic and filesystem has headroom')
           PY
+      - name: Restore pinned Yocto downloads and signature-verified sstate
+        id: yocto-cache
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: |
+            build/downloads
+            build/sstate-cache
+          # SSTATE reuse is still protected by BitBake task signatures.
+          # The metadata commit pins are fixed in the fetch workflow.
+          key: uglyos-r08-smoke-native-v1-${{ runner.os }}-${{ hashFiles('meta-noblesse/conf/machine/noblesse-r08.conf', 'meta-noblesse/recipes-core/psplash/psplash_%.bbappend') }}
       - name: Verify actual R08 Psplash and initramfs BitBake configuration
         shell: bash
         run: |
@@ -197,7 +209,7 @@ jobs:
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
-          timeout --signal=TERM --kill-after=5s 3300s \
+          timeout --signal=TERM --kill-after=30s 6600s \
             bitbake -c package_write_ipk psplash 2>&1 \
             | tee "$GITHUB_WORKSPACE/native-smoke-logs/03-psplash-build.log"
 
@@ -222,6 +234,30 @@ jobs:
             | tee "$GITHUB_WORKSPACE/native-smoke-logs/04-native-package-proof.txt"
           cp "$archive" "$default_archive" "$GITHUB_WORKSPACE/native-smoke-logs/psplash-ipk/"
           rm -f "$GITHUB_WORKSPACE/native-smoke-logs/psplash.env.tmp"
+
+      - name: Bound build reuse cache before early-boot stage
+        id: cache-budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          bytes="$(du -sb build/downloads build/sstate-cache 2>/dev/null | awk '{n += $1} END {print n + 0}')"
+          if (( bytes > 0 && bytes <= 6 * 1024 * 1024 * 1024 )); then
+            echo 'save=true' >> "$GITHUB_OUTPUT"
+            echo "PASS: cache under 6 GiB; completed native Psplash build is reusable"
+          else
+            echo 'save=false' >> "$GITHUB_OUTPUT"
+            echo "SKIP: cache outside 6 GiB bound; no effect on IPK or initramfs proof"
+          fi
+
+      - name: Save completed native Psplash build for subsequent reruns
+        if: steps.cache-budget.outputs.save == 'true' && steps.yocto-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: |
+            build/downloads
+            build/sstate-cache
+          key: uglyos-r08-smoke-native-v1-${{ runner.os }}-${{ hashFiles('meta-noblesse/conf/machine/noblesse-r08.conf', 'meta-noblesse/recipes-core/psplash/psplash_%.bbappend') }}
 
       - name: Check actual early-boot image graph without compiling kernel/rootfs
         shell: bash
@@ -257,7 +293,7 @@ jobs:
           set +u
           source src/oe-core/oe-init-build-env build >/dev/null
           set -u
-          timeout --signal=TERM --kill-after=5s 3000s \
+          timeout --signal=TERM --kill-after=30s 6000s \
             bitbake -c image_complete initramfs-android-image 2>&1 \
             | tee "$GITHUB_WORKSPACE/native-smoke-logs/06-initramfs-build.log"
 
