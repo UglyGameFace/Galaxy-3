@@ -14,7 +14,6 @@ Item {
     property bool actualButtonCombosVerified: false
     property bool companionConnected: false
     property bool hapticsVerified: false
-    property bool reverseDirection: false
 
     ConfigurationValue {
         id: storedGestures
@@ -207,41 +206,47 @@ Item {
         }
     }
     Row {
+        id: secondaryControls
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: actions.top
         anchors.bottomMargin: root.height * 0.017
-        spacing: Math.max(6, root.width * 0.025)
-        Rectangle {
-            visible: root.snapshot.page === "gestures"
-            width: root.width * 0.35
-            height: root.height * 0.075
-            radius: height / 2
-            color: "#18402A"
-            Text {
-                anchors.centerIn: parent
-                text: root.snapshot.gestureArmed ? "CANCEL" : "RECORD"
-                color: "#E8FFEF"
-                font.pixelSize: Math.max(10,parent.height * 0.38)
+        spacing: Math.max(5, root.width * 0.015)
+        Repeater {
+            model: root.snapshot.page === "gestures" ?
+                   ["RECORD", "RUN", "TARGET"] : ["MODE", "INVERT"]
+            delegate: Rectangle {
+                width: root.width * (root.snapshot.page === "gestures" ? 0.22 : 0.31)
+                height: root.height * 0.075
+                radius: height / 2
+                color: "#18402A"
+                border.color: "#4F9770"
+                Text {
+                    anchors.centerIn: parent
+                    text: modelData
+                    color: "#E8FFEF"
+                    font.pixelSize: Math.max(10,parent.height * 0.38)
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        if (root.snapshot.page === "gestures") {
+                            if (index === 0)
+                                root.send(root.snapshot.gestureArmed ?
+                                          {kind:"cancel"} : {kind:"arm",record:true})
+                            else if (index === 1)
+                                root.send({kind:"arm",record:false})
+                            else root.showTarget()
+                        } else if (index === 0) {
+                            const contexts = Bezel.CONTEXTS
+                            const pos = contexts.indexOf(root.snapshot.context)
+                            root.send({kind:"context",value:contexts[(pos+1)%contexts.length]})
+                        } else {
+                            directionPreference.value = directionPreference.value !== true
+                            root.send({kind:"context",value:root.snapshot.context})
+                        }
+                    }
+                }
             }
-            MouseArea {
-                anchors.fill: parent
-                onClicked: root.send(root.snapshot.gestureArmed ?
-                                     {kind:"cancel"} : {kind:"arm",record:true})
-            }
-        }
-        Rectangle {
-            visible: root.snapshot.page === "gestures"
-            width: root.width * 0.35
-            height: root.height * 0.075
-            radius: height / 2
-            color: "#18402A"
-            Text {
-                anchors.centerIn: parent
-                text: "TARGET"
-                color: "#E8FFEF"
-                font.pixelSize: Math.max(10,parent.height * 0.38)
-            }
-            MouseArea { anchors.fill: parent; onClicked: root.showTarget() }
         }
     }
     // No live remote command dispatch, fake notifications, continuous
