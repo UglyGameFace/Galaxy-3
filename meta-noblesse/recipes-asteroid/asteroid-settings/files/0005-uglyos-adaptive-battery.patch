@@ -17,7 +17,7 @@ Subject: [PATCH] R08 live Battery & Power diagnostics and opt-in adaptive saver
              }
          }
      }
-+    // no match without running synthetic drain or wakeup tests.
+++    // Show live power signals without running synthetic drain or wakeup tests. without running synthetic drain or wakeup tests.
 +    // The resident launcher, not Settings, owns event-driven auto changes.
 +    Component {
 +        id: adaptivePowerLayer
@@ -120,9 +120,9 @@ Subject: [PATCH] R08 live Battery & Power diagnostics and opt-in adaptive saver
                      iconName: "ios-moon-outline"
                      onClicked: layerStack.push(soloSaverLayer)
                  }
-+ListItem {
++                ListItem {
 +                    title: qsTr("Battery & Power")
-+                    iconName: "ios-battery-full"
++                    iconName: "ios-power-outline"
 +                    onClicked: layerStack.push(adaptivePowerLayer)
 +                }
                  ListItem {
