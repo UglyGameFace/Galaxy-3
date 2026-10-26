@@ -1,0 +1,44 @@
+name: Watch3 R08 battery baseline synthetic tests (NO WATCH)
+
+# No real device connection, no watch IP, no flash/reboot or network discovery.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/watch3_r08_android_sdb.py'
+      - 'tools/watch3_r08_power_baseline.py'
+      - 'tests/test_watch3_r08_power_baseline.py'
+      - 'tests/test_watch3_r08_android_sdb.py'
+      - 'docs/uglyos-r08-battery-baseline.md'
+      - '.github/workflows/watch3-r08-battery-baseline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-power-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and test read-only power collection, privacy and rates
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/watch3_r08_power_baseline.py tools/watch3_r08_android_sdb.py
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_power_baseline.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_android_sdb.py' -v
+          python3 tools/watch3_r08_power_baseline.py --help >/dev/null
+          python3 tools/watch3_r08_android_sdb.py --help >/dev/null
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('tools/watch3_r08_android_sdb.py').read_text()
+          assert 'POWER_PROBES = {"battery_uevent": "cat /sys/class/power_supply/*/uevent"}' in source
+          assert 'ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES}' in source
+          assert 'Only predefined boot, storage or battery' in source
+          flow = Path('.github/workflows/watch3-r08-battery-baseline.yml').read_text()
+          assert 'NO WATCH' in flow
+          assert '--watch-ip' not in '\n'.join(line for line in flow.splitlines()
+                                               if line.lstrip().startswith('python3 tools/'))
+          print('PASS: off-device fixed read-only battery operation only')
+          PY

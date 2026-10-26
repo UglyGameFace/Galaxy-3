@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Termux-to-Tizen read-only SDB, without a computer or Samsung SDK.
 
-Only the seven fixed commands from watch3_r08_live_boot_probe may run.
+Only fixed boot, storage or battery sysfs reads in explicit allowlists may run.
 No root, reboot, device writes, partition reading, install or flashing.
-The Tizen Watch3 R840X handshake has not yet been verified on hardware.
+The battery sysfs uevent response is not yet verified on physical SM-R840X.
 """
 from __future__ import annotations
 
@@ -19,10 +19,15 @@ import sys
 
 from watch3_r08_live_boot_probe import PROBES, STORAGE_PROBES, summarize
 from watch3_r08_storage_mapping import summarize_storage
+from watch3_r08_power_baseline import summarize_power
 
-# Explicit, fixed, read-only operations; extended storage set is ONLY used
-# when the user requests --storage-only. Normal boot collection stays unchanged.
-ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES}
+# Read the kernel's read-only power_supply uevents; never inspect arbitrary
+# sysfs paths, battery serial fields, or enable writes/reconfiguration.
+POWER_PROBES = {"battery_uevent": "cat /sys/class/power_supply/*/uevent"}
+
+# Explicit, fixed, read-only operations; storage and battery probe sets run
+# only when expressly requested. Normal boot collection stays unchanged.
+ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES}
 
 PORT = 26101
 VERSION = 0x00100000
@@ -360,8 +365,8 @@ def diagnose(ip, key_path, timeout=4, output=print):
 def collect(ip, key_path, timeout=8, probes=PROBES):
     ip = private_watch_ip(ip)
     observations, problems = {}, {}
-    if probes is not PROBES and probes is not STORAGE_PROBES:
-        raise SdbError("Only predefined boot or storage probe sets are allowed")
+    if probes is not PROBES and probes is not STORAGE_PROBES and probes is not POWER_PROBES:
+        raise SdbError("Only predefined boot, storage or battery probe sets are allowed")
     for name in probes:
         try:
             with socket.create_connection((ip, PORT), timeout=timeout) as sock:
@@ -409,13 +414,16 @@ def main():
     parser.add_argument("--storage-only", action="store_true",
                         help="Read only fixed /proc/mounts and /sys eMMC "
                              "device mapper dependencies; redacted report")
+    parser.add_argument("--power-only", action="store_true",
+                        help="Collect one redacted, read-only Tizen battery gauge "
+                             "snapshot; never writes to the watch")
     parser.add_argument("--report", type=Path,
                         help="Optional local privacy-filtered JSON destination")
     parser.add_argument("--key-path", type=Path,
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     args = parser.parse_args()
-    if args.diagnose_only and args.storage_only:
-        parser.error("Choose --diagnose-only or --storage-only, not both")
+    if sum((args.diagnose_only, args.storage_only, args.power_only)) > 1:
+        parser.error("Choose at most one of --diagnose-only, --storage-only or --power-only")
     if args.diagnose_only:
         try:
             diagnose(args.watch_ip, args.key_path)
@@ -424,7 +432,13 @@ def main():
             return 1
         return 0
     try:
-        if args.storage_only:
+        if args.power_only:
+            values, errors = collect(args.watch_ip, args.key_path,
+                                     probes=POWER_PROBES)
+            report = summarize_power(values, errors)
+            dest = args.report or (Path.home() /
+                                   "watch3-r08-battery-redacted.json")
+        elif args.storage_only:
             values, errors = collect(args.watch_ip, args.key_path,
                                      probes=STORAGE_PROBES)
             report = summarize_storage(values, errors)
@@ -443,9 +457,13 @@ def main():
               "hotspot/TCP, SDB handshake and read-only shell problems.",
               file=sys.stderr)
         return 1
-    print("PASS: privacy-filtered Watch3 " +
-          ("storage" if args.storage_only else "boot") +
-          " report saved locally.")
+    if args.power_only and report["status"] != "OBSERVED_TIZEN_BATTERY":
+        print("UNAVAILABLE: Watch battery gauge not confirmed; no battery "
+              "percentage or drain inferred. Redacted report saved locally.")
+    else:
+        print("PASS: privacy-filtered Watch3 " +
+              ("power" if args.power_only else "storage" if args.storage_only else "boot") +
+              " report saved locally.")
     print("Report path:", dest)
     print("NO bootloader acceptance or stock recovery proven. NOT FLASHABLE.")
     return 0
