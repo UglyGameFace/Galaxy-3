@@ -1,0 +1,131 @@
+From: UgLy|OS
+Subject: [PATCH] R08 live Battery & Power diagnostics and opt-in adaptive saver
+
+--- a/src/qml/main.qml
++++ b/src/qml/main.qml
+@@ -22,7 +22,8 @@
+ import org.asteroid.utils
+ import org.asteroid.settings
+ import Nemo.Configuration
+ import Connman
++import Nemo.Mce
+ 
+ Application {
+     id: app
+@@ -164,8 +165,102 @@
+                 }
+             }
+         }
+     }
++    // Show live power signals without running synthetic drain or wakeup tests.
++    // The resident launcher, not Settings, owns event-driven auto changes.
++    Component {
++        id: adaptivePowerLayer
++        Item {
++            id: powerDiagnostics
++            property int depth
++            property var pop
++            MceBatteryLevel { id: powerLevel }
++            MceChargerType { id: powerCharger }
++            ConfigurationValue {
++                id: powerEnabled
++                key: "/desktop/uglyos/power/adaptive-enabled"
++                defaultValue: false
++            }
++            ConfigurationValue {
++                id: powerSaved
++                key: "/desktop/uglyos/power/adaptive-original"
++                defaultValue: ""
++            }
++            ConfigurationValue {
++                id: powerAod
++                key: "/org/asteroidos/settings/always-on-display"
++                defaultValue: true
++            }
++            TiltToWake { id: powerTilt }
++            readonly property var choices: [qsTr("Off"), qsTr("Auto at 20%")]
++            Column {
++                anchors.centerIn: parent
++                width: parent.width * 0.82
++                spacing: Dims.h(5)
++                Label {
++                    width: parent.width
++                    text: qsTr("Battery & Power")
++                    font.bold: true
++                    font.pixelSize: Dims.l(7)
++                    horizontalAlignment: Text.AlignHCenter
++                }
++                Label {
++                    width: parent.width
++                    wrapMode: Text.WordWrap
++                    font.pixelSize: Dims.l(5)
++                    horizontalAlignment: Text.AlignHCenter
++                    text: powerLevel.percent >= 0 && powerLevel.percent <= 100
++                          ? qsTr("Live battery: %1%").arg(powerLevel.percent)
++                          : qsTr("Live battery unavailable")
++                }
++                Label {
++                    width: parent.width
++                    wrapMode: Text.WordWrap
++                    font.pixelSize: Dims.l(4)
++                    horizontalAlignment: Text.AlignHCenter
++                    text: qsTr("Always-on: %1 | Tilt: %2")
++                          .arg(powerAod.value ? qsTr("On") : qsTr("Off"))
++                          .arg(!powerTilt.available ? qsTr("Unsupported") :
++                               powerTilt.enabled ? qsTr("On") : qsTr("Off"))
++                }
++                OptionCycler {
++                    width: parent.width
++                    height: Dims.h(22)
++                    text: qsTr("Adaptive saver")
++                    valueArray: powerDiagnostics.choices
++                    currentValue: powerDiagnostics.choices[powerEnabled.value === true ? 1 : 0]
++                    onValueChanged: (selected) => {
++                        powerEnabled.value = selected === powerDiagnostics.choices[1]
++                    }
++                }
++                Label {
++                    width: parent.width
++                    wrapMode: Text.WordWrap
++                    horizontalAlignment: Text.AlignHCenter
++                    font.pixelSize: Dims.l(4)
++                    text: powerSaved.value !== ""
++                          ? qsTr("Adaptive saver requested. Original settings recorded.")
++                          : powerEnabled.value === true
++                            ? qsTr("Watching battery changes. No changes above 20%.")
++                            : qsTr("Automatic adjustments off.")
++                }
++                ListItem {
++                    width: parent.width
++                    title: qsTr("Stop & restore saver")
++                    enabled: powerEnabled.value === true || powerSaved.value !== ""
++                    onClicked: powerEnabled.value = false
++                }
++                Label {
++                    width: parent.width
++                    wrapMode: Text.WordWrap
++                    horizontalAlignment: Text.AlignHCenter
++                    font.pixelSize: Dims.l(3.7)
++                    text: qsTr("At 20% turns off always-on and tilt when supported; restores at 30% or when disabled. Phone Bluetooth and Wi-Fi stay on. No drain test is performed.")
++                }
++            }
++        }
++    }
+     Component { id: soundLayer;                 SoundPage      { } }
+ 
+     // R08-only UgLy|OS notification controls. Shared Nemo settings keys are
+     // read by the pinned upstream NotificationPreview QML patch.
+@@ -358,8 +453,13 @@
+                     title: qsTr("Watch-only Solo")
+                     iconName: "ios-moon-outline"
+                     onClicked: layerStack.push(soloSaverLayer)
+                 }
++                ListItem {
++                    title: qsTr("Battery & Power")
++                    iconName: "ios-power-outline"
++                    onClicked: layerStack.push(adaptivePowerLayer)
++                }
+                 ListItem {
+                     //% "WiFi"
+                     title: qsTrId("id-wifi-page")
+                     iconName: "ios-wifi-outline"

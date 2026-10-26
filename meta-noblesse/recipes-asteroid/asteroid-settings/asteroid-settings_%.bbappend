@@ -7,3 +7,5 @@ SRC_URI:append:noblesse-r08 = " file://0002-uglyos-launcher-effects.patch"
 SRC_URI:append:noblesse-r08 = " file://0003-uglyos-notification-preferences.patch"
 # Watch-Only Solo Saver controls are sourced from pinned upstream radio/display interfaces.
 SRC_URI:append:noblesse-r08 = " file://0004-uglyos-solo-saver.patch"
+# Opt-in low-battery check and shared adaptive power status UI (off by default).
+SRC_URI:append:noblesse-r08 = " file://0005-uglyos-adaptive-battery.patch"

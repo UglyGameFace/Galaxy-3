@@ -11,6 +11,7 @@ on:
       - '.github/workflows/watch3-r08-uglyos-notifications.yml'
       - 'tests/test_uglyos_notification_previews.py'
       - 'tests/test_watch3_r08_solo.py'
+      - 'tests/test_watch3_r08_adaptive_power.py'
       - 'meta-noblesse/recipes-asteroid/watch3-faces/**'
       - 'docs/uglyos-notification-roadmap.md'
   workflow_dispatch:
@@ -30,6 +31,7 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s tests -p test_uglyos_notification_previews.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_solo.py -v
+          python3 -m unittest discover -s tests -p test_watch3_r08_adaptive_power.py -v
       - name: Fetch exact pinned AsteroidOS launcher and Settings
         shell: bash
         run: |
@@ -55,6 +57,9 @@ jobs:
           patch="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher/0003-uglyos-notification-previews.patch"
           git -C "$launcher" apply --check "$patch"
           git -C "$launcher" apply "$patch"
+          battery_patch="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher/0004-uglyos-adaptive-battery.patch"
+          git -C "$launcher" apply --check "$battery_patch"
+          git -C "$launcher" apply "$battery_patch"
           git -C "$launcher" diff --check
           python3 - "$launcher" <<'PY'
           import sys
@@ -67,7 +72,12 @@ jobs:
           assert 'interval: notificationWindow.previewMilliseconds' in preview
           assert 'notificationWindow.privacy === "hidden"' in preview
           assert 'notificationWindow.privacy === "full"' in preview
-          print("PASS[watch notification]: genuine pinned UI keeps defaults and fixes Dismiss")
+          main=(root/"src/qml/MainScreen.qml").read_text()
+          assert 'id: adaptiveBattery' in main
+          assert '/desktop/uglyos/power/adaptive-enabled' in main
+          assert 'onPercentChanged' in main and 'onTypeChanged' in main
+          assert 'displaySettings.lowPowerModeEnabled = false' in main
+          print("PASS[watch notification+power]: pinned event-driven resident launcher")
           PY
       - name: Apply Settings preferences after existing R08 overlays
         shell: bash
@@ -78,7 +88,8 @@ jobs:
           for patch in 0001-uglyos-watchface-accent.patch \
                        0002-uglyos-launcher-effects.patch \
                        0003-uglyos-notification-preferences.patch \
-                       0004-uglyos-solo-saver.patch; do
+                       0004-uglyos-solo-saver.patch \
+                       0005-uglyos-adaptive-battery.patch; do
             git -C "$settings" apply --check "$source/$patch"
             git -C "$settings" apply "$source/$patch"
           done
@@ -102,6 +113,11 @@ jobs:
           assert 'soloConfirm.start()' in main
           assert 'Tap-to-wake stays unchanged' in main
           assert "Preview privacy does not hide" in main
+          assert 'id: adaptivePowerLayer' in main
+          assert 'layerStack.push(adaptivePowerLayer)' in main
+          assert '/desktop/uglyos/power/adaptive-enabled' in main
+          assert 'Live battery:' in main
+          assert 'Stop & restore saver' in main
           print("PASS[Settings]: pinned preferences work with existing R08 overlays")
           PY
           {
