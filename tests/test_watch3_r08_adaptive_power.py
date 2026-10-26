@@ -13,6 +13,7 @@ SP = SETTINGS / "files/0005-uglyos-adaptive-battery.patch"
 LP = LAUNCHER / "asteroid-launcher/0004-uglyos-adaptive-battery.patch"
 CONFIG_ENABLED = "/desktop/uglyos/power/adaptive-enabled"
 CONFIG_ORIGINAL = "/desktop/uglyos/power/adaptive-original"
+CONFIG_PROFILE = "/desktop/uglyos/power/adaptive-profile"
 
 
 def added_source(patch: Path) -> str:
@@ -52,7 +53,7 @@ class AdaptiveBatteryContracts(unittest.TestCase):
             launcher)
         self.assertNotIn("SRC_URI:append = ", setting + launcher)
         ss, ls = added_source(SP), added_source(LP)
-        for key in (CONFIG_ENABLED, CONFIG_ORIGINAL):
+        for key in (CONFIG_ENABLED, CONFIG_ORIGINAL, CONFIG_PROFILE):
             self.assertIn(key, ss)
             self.assertIn(key, ls)
         self.assertIn("defaultValue: false", ss)
@@ -63,6 +64,13 @@ class AdaptiveBatteryContracts(unittest.TestCase):
         self.assertIn("Live battery", ss)
         self.assertIn('onClicked: layerStack.push(adaptivePowerLayer)', ss)
         self.assertIn("restore", ss.lower())
+        self.assertIn('defaultValue: "extended"', ss)
+        self.assertIn('defaultValue: "extended"', ls)
+        self.assertIn('enabled: powerSaved.value === ""', ss)
+        self.assertIn('id: powerContents', ss)
+        self.assertIn('Flickable {', ss)
+        self.assertIn("Keep wrist wake", ss)
+        self.assertIn("Quiet display", ss)
 
     def test_no_unattended_network_or_fake_benchmark(self):
         ls = added_source(LP)
@@ -95,6 +103,7 @@ function test(name, opts, checks) {
     const state = {
        changing: false,
        adaptiveEnabled: {value: opts.enabled === true},
+       adaptiveProfile: {value: opts.profile ?? "extended"},
        adaptiveOriginal: {value: ''},
        adaptiveSolo: {value: opts.solo ? '{"version":1}' : ''},
        adaptiveGauge: {percent: opts.level ?? 18},
@@ -153,6 +162,36 @@ test('opt-out restores and preserves manual AOD override', {enabled:true},
     if(!s.alwaysOnDisplay.value || !s.adaptiveTilt.enabled ||
        s.adaptiveOriginal.value!=='') throw Error('manual override clobbered');
 });
+test('connected saver only changes AOD, preserves wrist wake', {enabled:true, profile:'connected'},
+(s, run) => {
+    if (s.alwaysOnDisplay.value || !s.adaptiveTilt.enabled) throw Error('connected wake broken');
+    let previous = JSON.parse(s.adaptiveOriginal.value);
+    if(!previous.changedAod || previous.changedTilt) throw Error('wrong ownership');
+    s.adaptiveGauge.percent=30; run();
+    if (!s.alwaysOnDisplay.value || !s.adaptiveTilt.enabled ||
+        s.adaptiveOriginal.value!=='') throw Error('not restored');
+});
+test('connected saver does nothing when AOD already off', {enabled:true, profile:'connected', aod:false},
+s => {
+    if(s.adaptiveOriginal.value!=='' || s.alwaysOnDisplay.value) throw Error('unwanted snapshot');
+});
+test('invalid profile never defaults to aggressive behavior', {enabled:true, profile:'bad'},
+s => {
+    if(s.adaptiveOriginal.value!=='' || !s.alwaysOnDisplay.value ||
+       !s.adaptiveTilt.enabled) throw Error('unverified policy changed screen');
+});
+test('profile change during snapshot is deferred until restore', {enabled:true, profile:'extended'},
+(s,run) => {
+    if(!s.adaptiveOriginal.value) throw Error('no snapshot');
+    s.adaptiveProfile.value = 'connected';
+    run();
+    if (s.adaptiveTilt.enabled || s.alwaysOnDisplay.value) throw Error('active switch');
+    s.adaptiveEnabled.value=false;run();
+    if(!s.alwaysOnDisplay.value || !s.adaptiveTilt.enabled ||
+       s.adaptiveOriginal.value!=='') throw Error('lost old settings');
+    s.adaptiveEnabled.value=true;run();
+    if(s.alwaysOnDisplay.value || !s.adaptiveTilt.enabled) throw Error('new profile');
+});
 """
         r = subprocess.run(
             ["node", "-e", js],
@@ -160,7 +199,7 @@ test('opt-out restores and preserves manual AOD override', {enabled:true},
             text=True, capture_output=True, check=False, timeout=20,
         )
         self.assertEqual(r.returncode, 0, r.stdout + "\n" + r.stderr)
-        self.assertEqual(r.stdout.count("PASS:"), 8, r.stdout)
+        self.assertEqual(r.stdout.count("PASS:"), 12, r.stdout)
 
 
 if __name__ == "__main__":
