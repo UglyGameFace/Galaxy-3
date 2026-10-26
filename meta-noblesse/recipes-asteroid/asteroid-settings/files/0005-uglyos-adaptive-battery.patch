@@ -17,7 +17,7 @@ Subject: [PATCH] R08 live Battery & Power diagnostics and opt-in adaptive saver
              }
          }
      }
-++    // Show live power signals without running synthetic drain or wakeup tests. without running synthetic drain or wakeup tests.
++    // Show live power signals without running synthetic drain or wakeup tests.
 +    // The resident launcher, not Settings, owns event-driven auto changes.
 +    Component {
 +        id: adaptivePowerLayer
