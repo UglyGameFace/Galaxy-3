@@ -1,0 +1,84 @@
+name: UgLy|OS R08 first-boot recovery NO-GO gate (NO DEVICE)
+
+# Offline-only, zero SDB and zero firmware/flash commands.
+# This workflow is fast and must NEVER compile a cold Yocto image.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-firstboot-recovery-gate.yml'
+      - 'tools/watch3_r08_first_boot_readiness.py'
+      - 'tests/test_watch3_r08_first_boot_readiness.py'
+      - 'tools/watch3_r08_live_boot_probe.py'
+      - 'tools/watch3_r08_storage_mapping.py'
+      - 'docs/watch3-r08-firstboot-readiness.md'
+      - 'docs/watch3-r08-first-boot-proof-matrix.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-safe-readiness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout R08 evidence code
+        uses: actions/checkout@v4
+      - name: Validate real probe-report integration with synthetic inputs only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            tools/watch3_r08_first_boot_readiness.py \
+            tools/watch3_r08_live_boot_probe.py \
+            tools/watch3_r08_storage_mapping.py
+          python3 -m unittest discover -s tests \
+            -p 'test_watch3_r08_first_boot_readiness.py' -v
+          python3 -m unittest discover -s tests \
+            -p 'test_watch3_reference_boot_audit.py' -v
+          python3 -m unittest discover -s tests \
+            -p 'test_watch3_r08_storage_mapping.py' -v
+      - name: Require actual fail-closed no-install decision
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p firstboot-evidence
+          python3 tools/watch3_r08_first_boot_readiness.py \
+            --output firstboot-evidence/readiness.json \
+            --markdown firstboot-evidence/README.md
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('firstboot-evidence/readiness.json')
+          data=json.loads(p.read_text())
+          assert data['decision'] == 'NO_GO'
+          assert data['install_authorized'] is False
+          assert data['flash_authorized'] is False
+          assert data['watch_accessed'] is False
+          assert len(data['blocking_reasons']) >= 5
+          print('PASS: offline readiness report blocks installation')
+          PY
+          set +e
+          python3 tools/watch3_r08_first_boot_readiness.py \
+            --output firstboot-evidence/enforced.json --enforce-install
+          status=$?
+          set -e
+          test "$status" -eq 4
+          echo 'PASS: install mode correctly exits 4 (NO_GO)'
+          {
+            echo '## Galaxy Watch3 SM-R840X first-boot NO-GO evidence gate'
+            echo '- SDB/Termux, signing, bootloader and recovery remain unverified'
+            echo '- Reports are privacy-filtered; CI inputs are entirely synthetic'
+            echo '- Optional local artifact hashes do not authorize installation'
+            echo '- No firmware, flash, kernel build, connected device or unlock'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload OFFDEVICE-NOT-FLASHABLE readiness report
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFDEVICE-NOT-FLASHABLE-r08-firstboot-readiness
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            firstboot-evidence/readiness.json
+            firstboot-evidence/README.md

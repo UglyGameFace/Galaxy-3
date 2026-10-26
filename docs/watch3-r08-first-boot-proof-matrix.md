@@ -5,6 +5,20 @@ firmware **R840XXXU1AUA2**, Tizen 5.5, Linux 4.9.59.
 This is an **engineering decision record**, not installation instructions.
 No device writes, unlock attempts, or unverified images are authorized.
 
+## Automated first-boot safety gate (2026-10-26)
+
+The **R08 first-boot readiness and recovery gate** is available at
+[readiness instructions](watch3-r08-firstboot-readiness.md). It combines
+the existing redacted Android/SDB boot and storage reports, optional
+pinned historical reference audit, and optional LOCAL artifact checksums
+into one NO-GO report. This is a documentation/CI safeguard, **not**
+proof that custom Samsung boot images are accepted.
+
+The GitHub Actions validation uses synthetic evidence only, runs quickly
+without Yocto compilation, and requires --enforce-install to block
+with code 4. Verified smoke Psplash/early-boot packages are software
+progress, not stock rescue, successful physical boot or flash permission.
+
 ## Already established for this specific device
 
 Read-only SDB inspection established the board and Exynos 9110 revision,
