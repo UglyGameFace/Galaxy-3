@@ -1,0 +1,148 @@
+From: UgLy|OS
+Subject: [PATCH] R08 Solo Saver using existing reversible radio and display controls
+
+--- a/src/qml/main.qml
++++ b/src/qml/main.qml
+@@ -22,5 +22,6 @@
+ import org.asteroid.settings
+ import Nemo.Configuration
++import Connman
+ 
+ Application {
+     id: app
+@@ -47,4 +48,121 @@
+     Component { id: bluetoothLayer;             BluetoothPage  { } }
+     Component { id: wifiLayer;                  WiFiPage       { } }
+     Component { id: displayLayer;               DisplayPage    { } }
++    // R08-only Watch-Only Saver uses EXISTING upstream radio/display controls.
++    // It does not pretend that an unverified kernel or driver supports them.
++    Component {
++        id: soloSaverLayer
++        Item {
++            id: soloSaver
++            property int depth
++            property var pop
++            BluetoothStatus { id: soloBt }
++            NetworkTechnology {
++                id: soloWifi
++                path: "/net/connman/technology/wifi"
++            }
++            DisplaySettings { id: soloDisplay }
++            TiltToWake { id: soloTilt }
++            ConfigurationValue {
++                id: soloAod
++                key: "/org/asteroidos/settings/always-on-display"
++                defaultValue: true
++            }
++            ConfigurationValue {
++                id: soloSnapshot
++                key: "/desktop/uglyos/solo/previous-controls"
++                defaultValue: ""
++            }
++            readonly property bool radiosOff: !soloBt.powered &&
++                (!DeviceSpecs.hasWlan || !soloWifi.powered)
++            readonly property bool displaySaving: !soloAod.value &&
++                (!soloTilt.available || !soloTilt.enabled)
++            function goSolo() {
++                // Store old states BEFORE making a disruptive change.
++                soloSnapshot.value = JSON.stringify({
++                    version: 1, bt: !!soloBt.powered,
++                    wifi: DeviceSpecs.hasWlan && !!soloWifi.powered,
++                    aod: !!soloAod.value,
++                    tilt: !!soloTilt.enabled
++                })
++                soloBt.powered = false
++                if (DeviceSpecs.hasWlan)
++                    soloWifi.powered = false
++                soloAod.value = false
++                soloDisplay.lowPowerModeEnabled = false
++                if (soloTilt.available)
++                    soloTilt.enabled = false
++            }
++            function resume() {
++                var previous = null
++                try { previous = JSON.parse(soloSnapshot.value) }
++                catch (err) { return }
++                if (!previous || previous.version !== 1 ||
++                    typeof previous.bt !== "boolean" ||
++                    typeof previous.aod !== "boolean" ||
++                    typeof previous.tilt !== "boolean" ||
++                    typeof previous.wifi !== "boolean")
++                    return
++                soloBt.powered = previous.bt
++                if (DeviceSpecs.hasWlan)
++                    soloWifi.powered = previous.wifi
++                soloAod.value = previous.aod
++                soloDisplay.lowPowerModeEnabled = previous.aod
++                if (soloTilt.available)
++                    soloTilt.enabled = previous.tilt
++                soloSnapshot.value = ""
++            }
++            RemorseTimer {
++                id: soloConfirm
++                duration: 3000
++                cancelText: qsTr("Tap to cancel")
++                onTriggered: soloSaver.goSolo()
++            }
++            Column {
++                anchors.centerIn: parent
++                width: parent.width * 0.82
++                spacing: Dims.h(5)
++                Label {
++                    width: parent.width
++                    text: qsTr("UgLy|OS Solo Saver")
++                    horizontalAlignment: Text.AlignHCenter
++                    font.pixelSize: Dims.l(7)
++                    font.bold: true
++                }
++                Label {
++                    width: parent.width
++                    text: soloSaver.radiosOff && soloSaver.displaySaving
++                         ? qsTr("Radios off; display saver active")
++                         : qsTr("Phone or display features may still be active")
++                    horizontalAlignment: Text.AlignHCenter
++                    wrapMode: Text.WordWrap
++                    font.pixelSize: Dims.l(4)
++                }
++                ListItem {
++                    width: parent.width
++                    title: qsTr("Go Solo")
++                    enabled: soloSnapshot.value === ""
++                    iconName: "ios-moon-outline"
++                    onClicked: {
++                        soloConfirm.action = qsTr("Disconnect phone & Wi-Fi")
++                        soloConfirm.start()
++                    }
++                }
++                ListItem {
++                    width: parent.width
++                    title: qsTr("Restore previous")
++                    iconName: "ios-bluetooth-outline"
++                    enabled: soloSnapshot.value !== ""
++                    onClicked: soloSaver.resume()
++                }
++                Label {
++                    width: parent.width
++                    text: qsTr("No phone alerts while disconnected. Your local apps and faces stay available. Tap-to-wake stays unchanged.")
++                    horizontalAlignment: Text.AlignHCenter
++                    wrapMode: Text.WordWrap
++                    font.pixelSize: Dims.l(3.9)
++                }
++            }
++        }
++    }
+     Component { id: soundLayer;                 SoundPage      { } }
+@@ -178,8 +295,13 @@
+                 ListItem {
+                     //% "Bluetooth"
+                     title: qsTrId("id-bluetooth-page")
+                     iconName: "ios-bluetooth-outline"
+                     onClicked: layerStack.push(bluetoothLayer)
+                 }
++                ListItem {
++                    title: qsTr("Watch-only Solo")
++                    iconName: "ios-moon-outline"
++                    onClicked: layerStack.push(soloSaverLayer)
++                }
+                 ListItem {
+                     //% "WiFi"

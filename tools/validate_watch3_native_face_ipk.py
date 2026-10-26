@@ -112,7 +112,7 @@ def verify_native_ipk(info: dict[str, str], source: Path, package: Path) -> str:
         if not payload[name] or payload[name] != (source / original).read_bytes():
             raise PackageError(f"Native IPK payload mismatch: {name}")
     digest = hashlib.sha256(package.read_bytes()).hexdigest()
-    print(f"PASS[native-ipk]: Yocto-built {package.name} contains four identical installed assets")
+    print(f"PASS[native-ipk]: Yocto-built {package.name} contains six identical installed assets")
     print(f"SHA256: {digest}")
     print("NOT TESTED: rootfs integration, opkg install, watch boot, stock recovery or flashing")
     return digest

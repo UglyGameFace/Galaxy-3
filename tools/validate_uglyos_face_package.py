@@ -13,7 +13,8 @@ from pathlib import Path
 import sys
 
 FACES = ("900-watch3-orbit.qml", "901-watch3-focus.qml",
-         "902-watch3-signal.qml")
+         "902-watch3-signal.qml", "903-watch3-solo-arcade.qml",
+         "904-watch3-solo-lounge.qml")
 PACKAGE = "watch3-faces"
 
 
@@ -95,7 +96,7 @@ def inspect_installed(info: dict[str, str], source: Path) -> None:
     if found != set(expected):
         raise PackageError(f"Unexpected installed assets: {sorted(found ^ set(expected))}")
     verify_identity(stage / "uglyos/edition.json")
-    print("PASS[installed]: 3 QML faces + identity match actual BitBake D")
+    print("PASS[installed]: 5 QML faces + identity match actual BitBake D")
     print("NOT TESTED: do_package, package split, IPK, image, Qt or watch boot")
 
 
@@ -120,7 +121,7 @@ def inspect_package(info: dict[str, str], source: Path) -> None:
     expected.add("uglyos/edition.json")
     if actual != expected:
         raise PackageError(f"Unexpected package-split assets: {sorted(actual ^ expected)}")
-    print("PASS[package]: all four sources match the real package split")
+    print("PASS[package]: all six sources match the real package split")
 
 
 def main() -> int:

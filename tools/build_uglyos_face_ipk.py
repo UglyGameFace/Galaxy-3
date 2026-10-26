@@ -80,7 +80,7 @@ def create_ipk(info: dict[str, str], source: Path, destination: Path) -> Path:
     target = destination / f"{PACKAGE}_{version}_{meta['PACKAGE_ARCH']}.ipk"
     target.write_bytes(archive)
     verify_ipk(target, info, payload)
-    print(f"PASS[offline-ipk]: ar/opkg archive and all 4 embedded files verified: {target.name}")
+    print(f"PASS[offline-ipk]: ar/opkg archive and all 6 embedded files verified: {target.name}")
     print("NOT TESTED: Yocto do_package, do_package_write_ipk, opkg install, firmware or device boot")
     return target
 

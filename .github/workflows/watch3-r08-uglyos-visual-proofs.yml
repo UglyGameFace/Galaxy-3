@@ -1,6 +1,6 @@
 name: UgLy|OS R08 host Qt visual proofs (NO DEVICE)
 
-# Render real three watch-face QML files using host Qt Quick software.
+# Render real five watch-face QML files using host Qt Quick software.
 # Clock/battery/AOD are MOCKS. Not proof of target Qt, hardware or boot.
 on:
   pull_request:
@@ -45,26 +45,27 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tools/render_uglyos_faces.py
           python3 -m unittest discover -s tests -p test_uglyos_render_contract.py -v
-      - name: Render all three actual QML faces in five display modes
+          python3 -m unittest discover -s tests -p test_watch3_r08_solo.py -v
+      - name: Render five actual QML faces in five display modes
         shell: bash
         run: |
           set -euo pipefail
           python3 tools/render_uglyos_faces.py --output uglyos-qt-previews |
             tee uglyos-host-render.log
-          test "$(find uglyos-qt-previews -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 30
+          test "$(find uglyos-qt-previews -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 50
           test -s uglyos-qt-previews/render-report.json
           python3 - <<'PY'
           import json
           from pathlib import Path
           report = json.loads(Path('uglyos-qt-previews/render-report.json').read_text())
-          assert len(report['images']) == 30
-          assert len({x['file'].split('--')[0] for x in report['images']}) == 3
+          assert len(report['images']) == 50
+          assert len({x['file'].split('--')[0] for x in report['images']}) == 5
           assert all(x['highlight_samples'] >= 40 for x in report['images'])
-          print("PASS: 30 nonblank previews including five selectable palettes per face")
+          print("PASS: 50 nonblank previews including five selectable palettes per face")
           PY
           {
             echo '## UgLy|OS host Qt software-rendering proof'
-            echo '- Three real R08 QML sources rendered, 30 round-screen previews'
+            echo '- Five real R08 QML sources rendered, 50 round-screen previews'
             echo '- Active 12h/24h, ambient, nightstand, 240px and 5 custom palette gates'
             echo '- Mock Nemo.Mce battery, Nemo.Configuration accent and clock inputs; no device connection'
             echo '- NOT TESTED: target Qt 6.11, framebuffer, AOD, boot, install or recovery'
