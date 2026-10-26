@@ -17,3 +17,6 @@ IMAGE_INSTALL:append:noblesse-r08 = " watch3-faces"
 
 # Two optional R08-only low-overhead app-launcher layouts. Stock stays default.
 IMAGE_INSTALL:append:noblesse-r08 = " uglyos-launchers"
+
+# Offline UgLy|OS App Hub Qt6 catalog, no opkg installer, R08 only.
+IMAGE_INSTALL:append:noblesse-r08 = " uglyos-app-hub"

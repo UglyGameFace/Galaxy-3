@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Categories=Applications;
+Exec=uglyos-app-hub
+Icon=ios-apps-outline
+X-Asteroid-Center-Color=#1D5033
+X-Asteroid-Outer-Color=#06110A

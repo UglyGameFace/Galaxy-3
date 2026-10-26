@@ -73,6 +73,34 @@ Official source:
 - https://developer.android.com/health-and-fitness/health-connect/get-started
 - https://developer.samsung.com/health/data/guide/app-verification.html
 
+## Native watch App Hub implementation (next safe milestone)
+
+The App Hub watch UI now has an R08-only `uglyos-app-hub_0.1.bb`
+recipe, following the pinned upstream AsteroidApp6 CMake, invoker, .desktop
+and Qt6 app-module pattern. It uses the existing local compatibility
+catalog, reproduced deterministically as `HubCatalog.js`. It does
+**not** turn Android APKs into native apps.
+
+The actual `HubPage.qml` offers four browse modes: **All**, **Watch**,
+**Phone**, and **Limits**, with category labels, small round-screen rows,
+and a readable detail panel. It does not request any permission, open
+untrusted URLs, attempt package downloads, launch `opkg`, or enable
+the install policy. Source files are machine-scoped, while the
+`asteroid-image.bbappend` adds the package only for `noblesse-r08`.
+The stock AsteroidOS launcher remains the only app launch model.
+
+The new fast CI verifies byte-for-byte catalog reproduction, safety
+contracts, and runs **the actual HubPage.qml** in a software Qt6 host
+with 360/240 pixel screens and eight filter previews. A click-through
+detail/back control is exercised rather than merely screenshotting text.
+Host Qt rendering is **not** an on-device execution test.
+
+**Proof boundary:** the source package is prepared, but a successful
+BitBake native app .ipk build, final image inclusion, physical display
+scanout and Watch3 bootloader compatibility are **separate and still
+required**. Until these are demonstrated, no installation or flashing
+is authorized. The UI has no install button by design.
+
 ## Development sequence and strict gates
 
 1. **This PR: catalog and platform contracts.** Typed JSON records
