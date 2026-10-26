@@ -11,7 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "meta-noblesse/recipes-asteroid/watch3-faces/watch3-faces"
 RECIPE = ROOT / "meta-noblesse/recipes-asteroid/watch3-faces/watch3-faces_1.0.bb"
 IMAGE = ROOT / "meta-noblesse/recipes-core/images/asteroid-image.bbappend"
-FILES = ("900-watch3-orbit.qml", "901-watch3-focus.qml", "902-watch3-signal.qml")
+LEGACY_FILES = ("900-watch3-orbit.qml", "901-watch3-focus.qml", "902-watch3-signal.qml")
+SOLO_FILES = ("903-watch3-solo-arcade.qml", "904-watch3-solo-lounge.qml")
+FILES = (*LEGACY_FILES, *SOLO_FILES)
 
 
 class StyleTests(unittest.TestCase):
@@ -70,9 +72,17 @@ class StyleTests(unittest.TestCase):
                                  "face.diameter * 0.80", "Qt.binding("):
                     self.assertIn(required, source)
                 for value in banned:
+                    if value == "MouseArea" and name in SOLO_FILES:
+                        continue
                     self.assertNotIn(value, source)
+                if name in SOLO_FILES:
+                    self.assertIn("MouseArea", source)
+                    self.assertIn("onClicked:", source)
+                    self.assertIn("enabled: !face.dimmed", source)
+                    self.assertLess(len(source), 6000)
+                else:
+                    self.assertLess(len(source), 5000)
                 self.assertEqual(source.count("{"), source.count("}"))
-                self.assertLess(len(source), 5000)
                 palette |= set(re.findall(r"#[0-9a-fA-F]{6}", source))
         self.assertGreaterEqual(len(palette), 10)
 
