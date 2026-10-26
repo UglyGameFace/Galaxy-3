@@ -3,7 +3,7 @@ Subject: [PATCH] R08 event-driven reversible battery saver without background po
 
 --- a/src/qml/MainScreen.qml
 +++ b/src/qml/MainScreen.qml
-@@ -141,8 +141,151 @@
+@@ -141,8 +141,155 @@
          key: "/org/asteroidos/settings/always-on-display"
          defaultValue: true
      }
@@ -88,8 +88,12 @@ Subject: [PATCH] R08 event-driven reversible battery saver without background po
 +                // remembers its exact threshold, independent of later edits.
 +                var restoreAt = previous.version === 1 ? 30 : previous.restoreAt
 +                if ([25, 30, 35].indexOf(restoreAt) < 0) return
-+                if (adaptiveEnabled.value === true && validBattery &&
-+                    validCharger && !charging && amount < restoreAt) return
++                if (adaptiveEnabled.value === true) {
++                    // Unknown input must not silently interrupt an active
++                    // power-saving session; manual Stop remains available.
++                    if (!validBattery || !validCharger) return
++                    if (!charging && amount < restoreAt) return
++                }
 +                changing = true
 +                // Never re-disable a control manually turned back on.
 +                if (previous.changedAod && alwaysOnDisplay.value === false) {
