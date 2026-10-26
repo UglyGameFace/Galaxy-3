@@ -1,0 +1,45 @@
+name: UgLy|OS R08 smoke-only boot preview converter (NO DEVICE)
+
+# Validates chroma key and GIF Psplash constraints with SYNTHETIC TEST INPUTS.
+# The user-provided YouTube clip is NOT downloaded and no boot image is altered.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-smoke-boot-preview.yml'
+      - 'tools/build_uglyos_smoke_splash.py'
+      - 'tests/test_uglyos_smoke_splash.py'
+      - 'docs/uglyos-smoke-boot-plan.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offdevice-green-screen-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install local video-keying test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ffmpeg
+          python3 -m pip install --disable-pip-version-check --no-cache-dir "Pillow==11.3.0"
+      - name: Check and test smoke-only converter using local synthetic media
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/build_uglyos_smoke_splash.py
+          python3 -m unittest discover -s tests -p 'test_uglyos_smoke_splash.py' -v
+          {
+            echo '## R08 smoke-only Psplash conversion PREPARATION'
+            echo '- Green-screen key, despill, pure-black output, frame count and memory budget tested'
+            echo '- 280x280 at 10fps for 3s; <=1.5MiB GIF, <=8MiB decoded RGB budget'
+            echo '- Inputs generated locally by tests: NOT the linked YouTube smoke video'
+            echo '- NO boot image, initramfs, psplash bbappend, watch installation or flashing'
+            echo '- Next step requires actual source video and verified permission to reuse it'
+          } >> "$GITHUB_STEP_SUMMARY"
