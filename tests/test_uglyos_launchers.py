@@ -27,15 +27,25 @@ class LauncherContracts(unittest.TestCase):
         self.assertIn('IMAGE_INSTALL:append:noblesse-r08 = " uglyos-launchers"', IMAGE.read_text())
         self.assertIn('IMAGE_INSTALL:append:noblesse-r08 = " watch3-faces"', IMAGE.read_text())
         self.assertNotIn("000-default-horizontal.qml", recipe)
+        self.assertIn("file://uglyos-favorites.js", recipe)
+        self.assertIn('applauncher/uglyos-favorites.js', recipe)
+        self.assertEqual(tuple(sorted(p.name for p in ASSETS.iterdir() if p.is_file())),
+                         tuple(sorted((*LAYOUTS, "uglyos-favorites.js"))))
 
     def test_lightweight_bounded_virtualized_rendering(self):
         for name in LAYOUTS:
             with self.subTest(name=name):
                 source = (ASSETS / name).read_text()
                 self.assertTrue(source.startswith("// SPDX-License-Identifier: MIT"))
-                self.assertLess(len(source), 6000)
+                self.assertLess(len(source), 14500)
                 self.assertIn("model: launcherModel", source)
                 self.assertIn("model.object.launchApplication()", source)
+                self.assertIn('import "uglyos-favorites.js" as Pins', source)
+                self.assertIn('key: "/desktop/uglyos/launcher/favorites"', source)
+                self.assertIn('objectName: "uglyos-favorites-dock"', source)
+                self.assertIn("onPressAndHold:", source)
+                self.assertIn("heldToPin", source)
+                self.assertIn("togglePin(model.object)", source)
                 self.assertIn('objectName: "uglyos-app-item-" + index', source)
                 self.assertTrue("cacheBuffer: height * 0.55" in source or
                                 "cacheBuffer: height * 0.5" in source)

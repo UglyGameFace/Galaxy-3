@@ -31,11 +31,11 @@ class LauncherNativeTests(unittest.TestCase):
         with self.assertRaises(PackageError):
             check_metadata(recipe, bad)
 
-    def test_exact_four_sources_and_no_extra_staged_files(self):
+    def test_exact_five_sources_and_no_extra_staged_files(self):
         assets = ROOT / "meta-noblesse/recipes-asteroid/uglyos-launchers/uglyos-launchers"
         data = expected_assets(assets)
-        self.assertEqual(len(data), 4)
-        self.assertEqual(tuple(sorted(ASSETS)), tuple(sorted(p.name for p in assets.glob("*.qml"))))
+        self.assertEqual(len(data), 5)
+        self.assertEqual(tuple(sorted(ASSETS)), tuple(sorted(p.name for p in assets.iterdir() if p.is_file())))
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             for rel, content in data.items():

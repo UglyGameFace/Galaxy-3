@@ -38,6 +38,8 @@ class AppItem(QObject):
     def __init__(self, title: str, icon: str):
         super().__init__()
         self._title, self._icon = title, icon
+        # Matches pinned upstream LauncherItem.fileID, never the display name.
+        self._file_id = "org.asteroid." + title.lower().replace(" ", "-") + ".desktop"
         self.activations = 0
 
     @Property(str, constant=True)
@@ -47,6 +49,10 @@ class AppItem(QObject):
     @Property(str, constant=True)
     def iconId(self) -> str:
         return self._icon
+
+    @Property(str, constant=True)
+    def fileID(self) -> str:
+        return self._file_id
 
     @Slot()
     def launchApplication(self):
@@ -70,6 +76,14 @@ class AppModel(QAbstractListModel):
             ("Notes", "ios-document-text-outline"),
             ("Utilities", "ios-apps-outline"),
         )]
+
+    @Property(int, constant=True)
+    def itemCount(self) -> int:
+        return len(self.items)
+
+    @Slot(int, result=QObject)
+    def get(self, index):
+        return self.items[index] if 0 <= index < len(self.items) else None
 
     def rowCount(self, parent=QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self.items)
@@ -225,6 +239,31 @@ def render(app: QGuiApplication, qml: Path, size: int, palette: str, effects: st
         raise RuntimeError(
             f"Tapping actual Agenda label failed to launch first app in {qml.name}; "
             f"hits={model.items[0].activations}, point={point}, labels={labels[:10]}")
+
+    # Exercise actual Qt MouseArea long-press event in one representative
+    # size per layout, not only the JavaScript data helper.
+    if (size == 360 and palette == "original" and effects == "subtle"):
+        QTest.mousePress(view, Qt.LeftButton, Qt.NoModifier, point)
+        QTest.qWait(1150)
+        QTest.mouseRelease(view, Qt.LeftButton, Qt.NoModifier, point)
+        app.processEvents()
+        pinned = view.rootObject().property("pinnedCount")
+        if pinned != 1:
+            raise RuntimeError(
+                f"Actual long press failed to pin: {qml.name}; pinnedCount={pinned}")
+        if model.items[0].activations != 1:
+            raise RuntimeError(
+                f"Long-press wrongly launched the app: {qml.name}; hits={model.items[0].activations}")
+        dock = view.rootObject().findChild(QObject, "uglyos-launch-favorite")
+        if dock is None:
+            raise RuntimeError(f"No clickable pinned dock exists: {qml.name}")
+        dock_point = dock.mapToScene(QPointF(dock.width() / 2, dock.height() / 2))
+        QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier,
+                         QPoint(round(dock_point.x()), round(dock_point.y())))
+        app.processEvents()
+        if model.items[0].activations != 2:
+            raise RuntimeError(
+                f"Dock click failed to launch pinned app: {qml.name}, hits={model.items[0].activations}")
     view.close()
     view.deleteLater()
     app.processEvents()

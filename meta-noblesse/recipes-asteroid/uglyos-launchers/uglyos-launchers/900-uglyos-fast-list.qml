@@ -2,6 +2,7 @@
 // UgLy|OS Fast List: one-tap native app navigation without costly effects.
 import QtQuick
 import Nemo.Configuration
+import "uglyos-favorites.js" as Pins
 import org.asteroid.controls
 
 Item {
@@ -10,6 +11,39 @@ Item {
     property alias currentIndex: appsView.currentIndex
     property alias count: appsView.count
     property bool fakePressed: false
+    // Pinned list contains only real installed LauncherItem QObject instances.
+    // Stable freedesktop file IDs, never translated titles or raw Exec strings.
+    property var pinnedApps: []
+    property int pinnedCount: pinnedApps.length
+    property int pinnedIndex: 0
+    function refreshPins() {
+        pinnedApps = Pins.resolve(launcherModel, favoriteSetting.value)
+        if (pinnedIndex >= pinnedApps.length)
+            pinnedIndex = 0
+    }
+    function togglePin(item) {
+        var id = Pins.appID(item)
+        if (!id)
+            return
+        favoriteSetting.value = Pins.toggle(favoriteSetting.value, item)
+        refreshPins()
+    }
+    function cyclePin(delta) {
+        if (pinnedApps.length)
+            pinnedIndex = (pinnedIndex + delta + pinnedApps.length) % pinnedApps.length
+    }
+    function launchPin() {
+        if (pinnedIndex < pinnedApps.length && pinnedApps[pinnedIndex])
+            pinnedApps[pinnedIndex].launchApplication()
+    }
+    onCountChanged: Qt.callLater(refreshPins)
+
+    ConfigurationValue {
+        id: favoriteSetting
+        key: "/desktop/uglyos/launcher/favorites"
+        defaultValue: "[]"
+        onValueChanged: Qt.callLater(uglyLauncherRoot.refreshPins)
+    }
     property bool firstAppPositioned: false
     function positionFirstApp() {
         if (firstAppPositioned || appsView.count < 1 || appsView.height < 1)
@@ -17,6 +51,80 @@ Item {
         appsView.currentIndex = 0
         appsView.positionViewAtIndex(0, ListView.Beginning)
         firstAppPositioned = true
+    }
+
+    // One compact quick-launch dock, always above the virtualized app list.
+    // Unset favorites yield guidance instead of blank / broken app buttons.
+    Item {
+        id: favoriteDock
+        objectName: "uglyos-favorites-dock"
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: parent.height * 0.115
+        width: parent.width * 0.78
+        height: Math.max(24, parent.height * 0.075)
+        z: 3
+        Rectangle {
+            anchors.fill: parent
+            color: "#16251D"
+            border.color: "#476A53"
+            border.width: 1
+            radius: height / 2
+        }
+        Text {
+            anchors.centerIn: parent
+            width: parent.width * 0.60
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            text: uglyLauncherRoot.pinnedApps.length
+                  ? "\u2605 " + uglyLauncherRoot.pinnedApps[uglyLauncherRoot.pinnedIndex].title
+                  : "Hold app to pin"
+            elide: Text.ElideRight
+            color: "#D8F6E3"
+            font.pixelSize: Math.max(10, parent.height * 0.43)
+            renderType: Text.NativeRendering
+        }
+        Text {
+            text: "\u2039"
+            visible: uglyLauncherRoot.pinnedApps.length > 1
+            anchors.left: parent.left
+            anchors.leftMargin: parent.width * 0.09
+            anchors.verticalCenter: parent.verticalCenter
+            color: "#A5ECC0"
+            font.pixelSize: parent.height * 0.75
+        }
+        Text {
+            text: "\u203a"
+            visible: uglyLauncherRoot.pinnedApps.length > 1
+            anchors.right: parent.right
+            anchors.rightMargin: parent.width * 0.09
+            anchors.verticalCenter: parent.verticalCenter
+            color: "#A5ECC0"
+            font.pixelSize: parent.height * 0.75
+        }
+        MouseArea {
+            width: parent.width * 0.20
+            height: parent.height
+            anchors.left: parent.left
+            enabled: uglyLauncherRoot.pinnedApps.length > 1
+            onClicked: uglyLauncherRoot.cyclePin(-1)
+        }
+        MouseArea {
+            width: parent.width * 0.20
+            height: parent.height
+            anchors.right: parent.right
+            enabled: uglyLauncherRoot.pinnedApps.length > 1
+            onClicked: uglyLauncherRoot.cyclePin(1)
+        }
+        MouseArea {
+            id: launchPinned
+            objectName: "uglyos-launch-favorite"
+            width: parent.width * 0.60
+            height: parent.height
+            anchors.centerIn: parent
+            enabled: uglyLauncherRoot.pinnedApps.length > 0
+            onClicked: uglyLauncherRoot.launchPin()
+        }
     }
 
     Rectangle {
@@ -41,7 +149,7 @@ Item {
         id: appsView
         objectName: "uglyos-apps-view"
         anchors.fill: parent
-        anchors.topMargin: uglyLauncherRoot.height * 0.18
+        anchors.topMargin: uglyLauncherRoot.height * 0.225
         anchors.bottomMargin: uglyLauncherRoot.height * 0.08
         anchors.leftMargin: uglyLauncherRoot.width * 0.03
         anchors.rightMargin: uglyLauncherRoot.width * 0.03
@@ -74,7 +182,18 @@ Item {
             x: (appsView.width - width) / 2
             height: appsView.cellHeight
             enabled: !appsView.dragging
-            onClicked: model.object.launchApplication()
+            property bool heldToPin: false
+            onPressed: heldToPin = false
+            onPressAndHold: {
+                if (!appsView.dragging) {
+                    heldToPin = true
+                    uglyLauncherRoot.togglePin(model.object)
+                }
+            }
+            onClicked: {
+                if (!heldToPin)
+                    model.object.launchApplication()
+            }
 
             Rectangle {
                 anchors.fill: parent
@@ -139,6 +258,7 @@ Item {
             // Initial selector/grid positioning must show header and full first tile.
             // Runs ONCE after component layout, never as an animation or timer.
             Qt.callLater(uglyLauncherRoot.positionFirstApp)
+            Qt.callLater(uglyLauncherRoot.refreshPins)
         }
     }
 

@@ -10,6 +10,7 @@ on:
       - 'tools/render_uglyos_launchers.py'
       - 'tools/uglyos-launcher-fixtures/**'
       - 'tests/test_uglyos_launchers.py'
+      - 'tests/test_uglyos_favorites.mjs'
       - '.github/workflows/watch3-r08-uglyos-launchers.yml'
   workflow_dispatch:
 
@@ -31,6 +32,7 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tools/render_uglyos_launchers.py
           python3 -m unittest discover -s tests -p test_uglyos_launchers.py -v
+          node tests/test_uglyos_favorites.mjs
       - name: Verify effects selector patch on exact pinned AsteroidOS Settings
         shell: bash
         run: |
@@ -73,6 +75,7 @@ jobs:
           {
             echo '## UgLy|OS R08 Fast Launcher host-Qt proof'
             echo '- Fast List, Compact Grid, Stoner Lounge and Gamer Arcade rendered with mock apps'
+            echo '- Stable-fileID pinned favorites helper tested using Node and virtualized Qt model'
             echo '- 360px and 240px round screens, Rose accent and touch effects On/Off'
             echo '- Fake application click dispatch verified'
             echo '- No shaders, looping effects, timers, background network polling or images'
