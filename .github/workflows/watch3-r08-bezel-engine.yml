@@ -67,6 +67,7 @@ jobs:
           proof=json.loads(Path('bezel-evidence/proof.json').read_text())
           assert proof["physical_wheel_verified"] is False
           assert proof["phone_transport_verified"] is False
+          assert proof["synthetic_qt_wheel_verified"] is True
           assert len(proof["screenshots"]) == 4
           assert all(s["bytes"] > 1000 and s["lit"] >= 25 for s in proof["screenshots"])
           print("PASS: live Qt off-device QML screenshots, button interactions, safe proof labels")
