@@ -11,3 +11,6 @@ RDEPENDS:${PN}:append:noblesse-r08 = " qtbase-plugins "
 
 # R08-only notification privacy, adjustable preview time and correct Dismiss.
 SRC_URI:append:noblesse-r08 = " file://0003-uglyos-notification-previews.patch"
+
+# Resident event-driven adaptive saver; reuses Mce gauge, no timer or radio changes.
+SRC_URI:append:noblesse-r08 = " file://0004-uglyos-adaptive-battery.patch"
