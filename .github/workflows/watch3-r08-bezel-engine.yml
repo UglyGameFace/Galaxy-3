@@ -1,0 +1,47 @@
+name: UgLy|OS R08 Bezel Engine and native source contracts (NO DEVICE)
+
+# Local engine + Qt6 source contract checks. No watch, root, SDB, flash or phone.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'bezel/**'
+      - 'meta-noblesse/recipes-asteroid/uglyos-bezel-lab/**'
+      - 'tests/test_watch3_r08_bezel_engine.py'
+      - 'docs/uglyos-r08-bezel-engine.md'
+      - '.github/workflows/watch3-r08-bezel-engine.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bezel-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test real QML JS source, feature safety matrix and R08 package metadata
+        run: |
+          set -euo pipefail
+          node --version
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_bezel_engine.py' -v
+      - name: Verify pinned Samsung 4.9 vendor bezel report against reference (read-only)
+        run: |
+          set -euo pipefail
+          vendor="$RUNNER_TEMP/tizen_bezel.c"
+          curl -fL --retry 2 --max-time 30 -o "$vendor" \
+            https://raw.githubusercontent.com/UsrBinLuna/kernel_samsung_galileo/ec258e12887d37362b59e3291c1d3e5363c24bff/drivers/input/misc/tizen_bezel.c
+          grep -Fq 'input_report_rel(ddata->input_dev, REL_WHEEL, direction);' "$vendor"
+          grep -Fq 'input_report_rel(ddata->input_dev, REL_X,' "$vendor"
+          grep -Fq 'BZ_CC' "$vendor"
+          grep -Fq 'BZ_CW' "$vendor"
+          grep -Fq 'ddata->input_dev->name = BEZEL_NAME;' "$vendor"
+          printf 'PASS: pinned vendor REL_WHEEL and REL_X coexist; decoder ignores REL_X\n'
+          printf 'NOT TESTED: physical R08 Qt wheel delivery or custom OS boot\n'
+      - name: Validate no custom-OS installation path
+        run: |
+          set -euo pipefail
+          ! grep -R -E '^[[:space:]]*IMAGE_INSTALL:append.*uglyos-bezel-lab' meta-noblesse/recipes-core/images
+          git diff --check
+          echo 'OFFDEVICE-NOT-FLASHABLE: Bezel Lab source only'
