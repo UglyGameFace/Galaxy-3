@@ -1,0 +1,103 @@
+name: UgLy|OS R08 pinned Notification Center controls (NO DEVICE)
+
+# Pure source verification against exact AsteroidOS commits. No firmware,
+# BLE, phone, watch, rootfs, or flashing. Keep cold Yocto builds elsewhere.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'meta-noblesse/recipes-asteroid/asteroid-launcher/**'
+      - 'meta-noblesse/recipes-asteroid/asteroid-settings/**'
+      - '.github/workflows/watch3-r08-uglyos-notifications.yml'
+      - 'tests/test_uglyos_notification_previews.py'
+      - 'docs/uglyos-notification-roadmap.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notification-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify scoped control source and no-install contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_uglyos_notification_previews.py -v
+      - name: Fetch exact pinned AsteroidOS launcher and Settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          launcher="$RUNNER_TEMP/uglyos-notifications-launcher"
+          settings="$RUNNER_TEMP/uglyos-notifications-settings"
+          mkdir -p "$launcher" "$settings"
+          git -C "$launcher" init -q
+          git -C "$launcher" remote add origin https://github.com/AsteroidOS/asteroid-launcher.git
+          git -C "$launcher" fetch --depth=1 origin 0ba0eb50a68fc6f1019312d511ec3e2fd1b48f31
+          git -C "$launcher" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$launcher" rev-parse HEAD)" = 0ba0eb50a68fc6f1019312d511ec3e2fd1b48f31
+          git -C "$settings" init -q
+          git -C "$settings" remote add origin https://github.com/AsteroidOS/asteroid-settings.git
+          git -C "$settings" fetch --depth=1 origin 60340bd1c27a7b9e4884bd61c0563d091bc8b240
+          git -C "$settings" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$settings" rev-parse HEAD)" = 60340bd1c27a7b9e4884bd61c0563d091bc8b240
+      - name: Apply R08-only launcher overlay to exact source and verify edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          launcher="$RUNNER_TEMP/uglyos-notifications-launcher"
+          patch="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-launcher/asteroid-launcher/0003-uglyos-notification-previews.patch"
+          git -C "$launcher" apply --check "$patch"
+          git -C "$launcher" apply "$patch"
+          git -C "$launcher" diff --check
+          python3 - "$launcher" <<'PY'
+          import sys
+          from pathlib import Path
+          root=Path(sys.argv[1])
+          view=(root/"src/qml/notifications/NotificationView.qml").read_text()
+          preview=(root/"src/qml/notifications/NotificationPreview.qml").read_text()
+          assert 'notification.removeRequested()' in view
+          assert 'notification.actionInvoked("default")' not in view
+          assert 'interval: notificationWindow.previewMilliseconds' in preview
+          assert 'notificationWindow.privacy === "hidden"' in preview
+          assert 'notificationWindow.privacy === "full"' in preview
+          print("PASS[watch notification]: genuine pinned UI keeps defaults and fixes Dismiss")
+          PY
+      - name: Apply Settings preferences after existing R08 overlays
+        shell: bash
+        run: |
+          set -euo pipefail
+          settings="$RUNNER_TEMP/uglyos-notifications-settings"
+          source="$GITHUB_WORKSPACE/meta-noblesse/recipes-asteroid/asteroid-settings/files"
+          for patch in 0001-uglyos-watchface-accent.patch \
+                       0002-uglyos-launcher-effects.patch \
+                       0003-uglyos-notification-preferences.patch; do
+            git -C "$settings" apply --check "$source/$patch"
+            git -C "$settings" apply "$source/$patch"
+          done
+          git -C "$settings" diff --check
+          python3 - "$settings" <<'PY'
+          import sys
+          from pathlib import Path
+          root=Path(sys.argv[1])
+          main=(root/"src/qml/main.qml").read_text()
+          assert "notificationPrefsLayer" in main
+          assert "layerStack.push(notificationPrefsLayer)" in main
+          assert "/desktop/uglyos/notifications/privacy" in main
+          assert "/desktop/uglyos/notifications/previewSeconds" in main
+          assert "Preview content" in main and "Preview duration" in main
+          assert "Hide content" in main and "10 seconds" in main
+          assert "Preview privacy does not hide" in main
+          print("PASS[Settings]: pinned preferences work with existing R08 overlays")
+          PY
+          {
+            echo '## UgLy|OS Notification Center stage 1'
+            echo '- Fixed miswired Dismiss in pinned upstream NotificationView'
+            echo '- Popup privacy settings: full, title-only, hidden'
+            echo '- Adjustable preview visibility: 3, 5, 10 seconds; unchanged 5-second default'
+            echo '- Single R08 Settings menu entry and existing Nemo.Configuration persistence'
+            echo '- No BLE / Android companion changes, physical watch tests or firmware writes'
+          } >> "$GITHUB_STEP_SUMMARY"

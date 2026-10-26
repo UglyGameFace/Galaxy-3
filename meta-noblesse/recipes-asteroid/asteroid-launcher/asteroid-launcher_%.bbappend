@@ -8,3 +8,6 @@ SRC_URI:append:noblesse-r08 = " file://0001-noblesse-r08-remove-gpu-only-round-m
 # platform plugins are not pulled in automatically by the linker.
 # Keep this scoped to R08; upstream already supplies qtwayland-plugins.
 RDEPENDS:${PN}:append:noblesse-r08 = " qtbase-plugins "
+
+# R08-only notification privacy, adjustable preview time and correct Dismiss.
+SRC_URI:append:noblesse-r08 = " file://0003-uglyos-notification-previews.patch"
