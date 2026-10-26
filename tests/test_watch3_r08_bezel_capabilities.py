@@ -100,7 +100,7 @@ class BezelCapabilityTests(unittest.TestCase):
             "",
             "cat: /proc/bus/input/devices: permission denied",
             REGISTRY + DEVICE_BLOCK + "\n",
-            REGISTRY.replace("N: Name=\\"tizen_detent\\"", "N: Name=\\"other\\""),
+            REGISTRY.replace('N: Name="tizen_detent"', 'N: Name="other"'),
             REGISTRY.replace("H: Handlers=event18", "H: Handlers=event18 event19"),
             REGISTRY.replace("H: Handlers=event18", "H: Handlers=mouse0"),
             REGISTRY.replace("B: REL=103", "B: REL=xyz"),
