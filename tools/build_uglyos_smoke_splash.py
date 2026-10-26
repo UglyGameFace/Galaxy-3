@@ -100,8 +100,8 @@ def convert(source: Path, destination: Path, start: float = 0.0,
         f"format=yuv420p,chromakey=0x00FF00:{similarity:.3f}:{blend:.3f},"
         f"despill=type=green:mix=0.16[smoke];"
         "[bg][smoke]overlay=shortest=1:format=auto:repeatlast=0,"
-        "format=rgb24,split[a][b];"
-        "[a]palettegen=max_colors=64:stats_mode=diff[p];"
+        "hue=s=0,format=rgb24,split[a][b];"
+        "[a]palettegen=max_colors=24:stats_mode=diff[p];"
         "[b][p]paletteuse=dither=bayer:bayer_scale=5[out]"
     )
     args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
@@ -124,9 +124,15 @@ def main() -> int:
     parser.add_argument("--start", type=float, default=0.0)
     parser.add_argument("--similarity", type=float, default=0.18)
     parser.add_argument("--blend", type=float, default=0.07)
+    parser.add_argument("--expected-source-sha256", default="", help="Optional expected SHA256 of authorized original")
     args = parser.parse_args()
     try:
+        source_sha256 = hashlib.sha256(args.input.read_bytes()).hexdigest() if args.input.is_file() else ""
+        if args.expected_source_sha256 and source_sha256 != args.expected_source_sha256:
+            raise ValueError("Local smoke source checksum differs from supplied original")
         report = convert(args.input, args.output, args.start, args.similarity, args.blend)
+        report["source_sha256"] = source_sha256
+        report["source_verified"] = bool(args.expected_source_sha256)
         report_path = args.output.with_suffix(".report.json")
         report_path.write_text(json.dumps(report, indent=2) + "\n")
         print(f"PASS[smoke-key]: {report['frames']} frames, {report['bytes']} bytes, "
