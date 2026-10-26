@@ -63,7 +63,7 @@ Official upstream references:
    package version changes, reproducible artifacts and signed/rollback-aware
    upgrades only when a safe Watch3 boot+recovery path has been proven.
 
-## Feature queue (scoped by feasibility, not wishful marketing)
+## Battery-first integration acceptance\n\nThe user requires real battery optimization, not merely power-saving marketing.\n[The R08 battery baseline protocol](uglyos-r08-battery-baseline.md) uses the\nexisting authenticated read-only SDB client on stock Tizen; it does not\nprove any UgLy|OS improvement. Review native Watch-Only Solo Saver behavior,\nBluetooth reconnects, screen wakeups, notification arrival and all background\nphone/store services against repeatable, same-device measurements before\nclaiming they improve endurance. Prefer phone-side computation, idle-first\noperation and zero always-on animation. Never advertise longer battery life\nuntil compatible physical Watch3 boot/recovery and measured A/B data exist.\n\n## Feature queue (scoped by feasibility, not wishful marketing)
 
 | Order | Area | Target experience | Dependency / truth gate |
 |---|---|---|---|
