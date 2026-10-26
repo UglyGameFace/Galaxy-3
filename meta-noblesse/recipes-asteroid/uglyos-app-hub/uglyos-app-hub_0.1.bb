@@ -23,4 +23,4 @@ SRC_URI = " \
 S = "${UNPACKDIR}"
 FILES:${PN} += "${libdir}/uglyos-app-hub.so"
 # Native invoker/Qt Asteroid app runtime remains the upstream dependency model.
-# No postinstall scripts, opkg code, services, root access or update feeds.
+# No lifecycle scripts, opkg code, services, root access or update feeds.
