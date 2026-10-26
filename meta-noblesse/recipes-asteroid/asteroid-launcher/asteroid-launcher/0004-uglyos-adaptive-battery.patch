@@ -3,7 +3,7 @@ Subject: [PATCH] R08 event-driven reversible battery saver without background po
 
 --- a/src/qml/MainScreen.qml
 +++ b/src/qml/MainScreen.qml
-@@ -141,8 +141,102 @@
+@@ -141,8 +141,116 @@
          key: "/org/asteroidos/settings/always-on-display"
          defaultValue: true
      }
@@ -21,6 +21,14 @@ Subject: [PATCH] R08 event-driven reversible battery saver without background po
 +            id: adaptiveEnabled
 +            key: "/desktop/uglyos/power/adaptive-enabled"
 +            defaultValue: false
++            onValueChanged: adaptiveBattery.reconcile()
++        }
++        // Extend the single existing controller; preserve the legacy
++        // 'extended' behavior for existing users already opting in.
++        ConfigurationValue {
++            id: adaptiveProfile
++            key: "/desktop/uglyos/power/adaptive-profile"
++            defaultValue: "extended"
 +            onValueChanged: adaptiveBattery.reconcile()
 +        }
 +        ConfigurationValue {
@@ -71,8 +79,14 @@ Subject: [PATCH] R08 event-driven reversible battery saver without background po
 +                return
 +            }
 +            if (adaptiveEnabled.value !== true || charging || amount > 20) return
++            // Invalid preference must not silently choose the more disruptive mode.
++            if (adaptiveProfile.value !== "connected" &&
++                adaptiveProfile.value !== "extended") return
 +            var changeAod = alwaysOnDisplay.value === true
-+            var changeTilt = adaptiveTilt.available && adaptiveTilt.enabled === true
++            // Connected: Pixel-like AOD saving, keep wrist wake. Extended:
++            // preserve original PR #40 behavior, quiet both display controls.
++            var changeTilt = adaptiveProfile.value === "extended" &&
++                adaptiveTilt.available && adaptiveTilt.enabled === true
 +            if (!changeAod && !changeTilt) return
 +            changing = true
 +            // Persist before modifying the live display/wake configuration.
