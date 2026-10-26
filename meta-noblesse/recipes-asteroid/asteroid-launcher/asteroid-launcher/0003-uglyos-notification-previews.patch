@@ -1,0 +1,71 @@
+From: UgLy|OS
+Subject: [PATCH] Improve R08 notifications with private previews, timed display and real dismiss
+
+--- a/src/qml/notifications/NotificationView.qml
++++ b/src/qml/notifications/NotificationView.qml
+@@ -162,7 +162,7 @@
+             anchors.horizontalCenter: parent.horizontalCenter
+             width: Dims.w(55)
+             height: Dims.h(20)
+-            onClicked: if (notification !== undefined && notification.userRemovable) notification.actionInvoked("default")
++            onClicked: if (notification !== undefined && notification !== null && notification.userRemovable) notification.removeRequested()
+         }
+ 
+         Item {
+--- a/src/qml/notifications/NotificationPreview.qml
++++ b/src/qml/notifications/NotificationPreview.qml
+@@ -32,12 +32,27 @@
+ import QtQuick
+ import org.asteroid.controls
+ import org.nemomobile.lipstick
++import Nemo.Configuration
+ 
+ Item {
+     id: notificationWindow
+     width: initialSize.width
+     height: initialSize.height
+ 
++    // R08-only preferences. Defaults match unmodified upstream behavior.
++    ConfigurationValue {
++        id: uglyPrivacy
++        key: "/desktop/uglyos/notifications/privacy"
++        defaultValue: "full"
++    }
++    ConfigurationValue {
++        id: uglyDuration
++        key: "/desktop/uglyos/notifications/previewSeconds"
++        defaultValue: "5"
++    }
++    readonly property string privacy: ["full", "title", "hidden"].indexOf(uglyPrivacy.value) >= 0 ? uglyPrivacy.value : "full"
++    readonly property int previewMilliseconds: uglyDuration.value === "3" ? 3000 : uglyDuration.value === "10" ? 10000 : 5000
++
+     MouseArea {
+         id: notificationArea
+         anchors.fill: parent
+@@ -95,7 +110,7 @@
+                 font.bold: true
+                 clip: true
+                 elide: Text.ElideRight
+-                text: notificationPreviewPresenter.notification != null ? notificationPreviewPresenter.notification.previewSummary : ""
++                text: notificationPreviewPresenter.notification != null ? (notificationWindow.privacy === "hidden" ? qsTr("New notification") : notificationPreviewPresenter.notification.previewSummary) : ""
+             }
+ 
+             Label {
+@@ -112,7 +127,7 @@
+                 maximumLineCount: 4
+                 elide: Text.ElideRight
+                 wrapMode: Text.Wrap
+-                text: notificationPreviewPresenter.notification != null ? notificationPreviewPresenter.notification.previewBody : ""
++                text: notificationPreviewPresenter.notification != null && notificationWindow.privacy === "full" ? notificationPreviewPresenter.notification.previewBody : ""
+             }
+         }
+ 
+@@ -166,7 +181,7 @@
+ 
+         Timer {
+             id: notificationTimer
+-            interval: 5000
++            interval: notificationWindow.previewMilliseconds
+             repeat: false
+             onTriggered: notificationArea.state = "hide"
+         }

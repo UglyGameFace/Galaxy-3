@@ -1,0 +1,95 @@
+From: UgLy|OS
+Subject: [PATCH] Add R08 notification preview controls to pinned AsteroidOS Settings
+
+--- a/src/qml/main.qml
++++ b/src/qml/main.qml
+@@ -48,6 +48,77 @@
+     Component { id: wifiLayer;                  WiFiPage       { } }
+     Component { id: displayLayer;               DisplayPage    { } }
+     Component { id: soundLayer;                 SoundPage      { } }
++
++    // R08-only UgLy|OS notification controls. Shared Nemo settings keys are
++    // read by the pinned upstream NotificationPreview QML patch.
++    Component {
++        id: notificationPrefsLayer
++        Item {
++            id: notificationPreferences
++            property int depth
++            property var pop
++            readonly property var privacyOptions: [qsTr("Full text"), qsTr("Title only"), qsTr("Hide content")]
++            readonly property var privacyValues: ["full", "title", "hidden"]
++            readonly property var timeOptions: [qsTr("3 seconds"), qsTr("5 seconds"), qsTr("10 seconds")]
++            readonly property var timeValues: ["3", "5", "10"]
++            ConfigurationValue {
++                id: uglyNotifPrivacy
++                key: "/desktop/uglyos/notifications/privacy"
++                defaultValue: "full"
++            }
++            ConfigurationValue {
++                id: uglyNotifDuration
++                key: "/desktop/uglyos/notifications/previewSeconds"
++                defaultValue: "5"
++            }
++            Column {
++                anchors.centerIn: parent
++                width: parent.width * 0.80
++                spacing: Dims.h(6)
++                Label {
++                    text: qsTr("Notifications")
++                    width: parent.width
++                    horizontalAlignment: Text.AlignHCenter
++                    font.bold: true
++                    font.pixelSize: Dims.l(7)
++                }
++                OptionCycler {
++                    width: parent.width
++                    height: Dims.h(23)
++                    text: qsTr("Preview content")
++                    valueArray: notificationPreferences.privacyOptions
++                    currentValue: notificationPreferences.privacyOptions[
++                        Math.max(0, notificationPreferences.privacyValues.indexOf(uglyNotifPrivacy.value))]
++                    onValueChanged: (value) => {
++                        const i = notificationPreferences.privacyOptions.indexOf(value)
++                        if (i >= 0 && uglyNotifPrivacy.value !== notificationPreferences.privacyValues[i])
++                            uglyNotifPrivacy.value = notificationPreferences.privacyValues[i]
++                    }
++                }
++                OptionCycler {
++                    width: parent.width
++                    height: Dims.h(23)
++                    text: qsTr("Preview duration")
++                    valueArray: notificationPreferences.timeOptions
++                    currentValue: notificationPreferences.timeOptions[
++                        Math.max(0, notificationPreferences.timeValues.indexOf(uglyNotifDuration.value))]
++                    onValueChanged: (value) => {
++                        const i = notificationPreferences.timeOptions.indexOf(value)
++                        if (i >= 0 && uglyNotifDuration.value !== notificationPreferences.timeValues[i])
++                            uglyNotifDuration.value = notificationPreferences.timeValues[i]
++                    }
++                }
++                Label {
++                    width: parent.width
++                    font.pixelSize: Dims.l(4)
++                    color: "#C0C0C0"
++                    wrapMode: Text.WordWrap
++                    horizontalAlignment: Text.AlignHCenter
++                    text: qsTr("Preview privacy does not hide a message after you open it.")
++                }
++            }
++        }
++    }
+     Component { id: nightstandLayer;            NightstandPage { } }
+     Component { id: nightstandWatchfaceLayer;   NightstandWatchfacePage { } }
+     Component { id: unitsLayer;                 UnitsPage      { } }
+@@ -107,6 +178,11 @@
+                     visible: DeviceSpecs.hasSpeaker
+                 }
+                 ListItem {
++                    title: qsTr("Notifications")
++                    iconName: "ios-mail-outline"
++                    onClicked: layerStack.push(notificationPrefsLayer)
++                }
++                ListItem {
+                     //% "Wallpaper"
+                     title: qsTrId("id-wallpaper-page")
+                     iconName: "ios-wallpaper-outline"

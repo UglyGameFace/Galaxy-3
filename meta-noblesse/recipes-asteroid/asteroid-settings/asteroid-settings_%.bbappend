@@ -3,3 +3,5 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 SRC_URI:append:noblesse-r08 = " file://0001-uglyos-watchface-accent.patch"
 SRC_URI:append:noblesse-r08 = " file://0002-uglyos-launcher-effects.patch"
+# Pair watch-side previews with a usable Settings page on the R08 machine.
+SRC_URI:append:noblesse-r08 = " file://0003-uglyos-notification-preferences.patch"
