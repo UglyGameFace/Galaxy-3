@@ -12,7 +12,7 @@ Subject: [PATCH] R08 live Battery & Power diagnostics and opt-in adaptive saver
  
  Application {
      id: app
-@@ -164,8 +165,146 @@
+@@ -164,8 +165,211 @@
                  }
              }
          }
@@ -39,6 +39,21 @@ Subject: [PATCH] R08 live Battery & Power diagnostics and opt-in adaptive saver
 +                defaultValue: "extended"
 +            }
 +            ConfigurationValue {
++                id: powerThreshold
++                key: "/desktop/uglyos/power/low-threshold"
++                defaultValue: "20"
++            }
++            ConfigurationValue {
++                id: powerCustomAod
++                key: "/desktop/uglyos/power/custom-aod"
++                defaultValue: true
++            }
++            ConfigurationValue {
++                id: powerCustomTilt
++                key: "/desktop/uglyos/power/custom-tilt"
++                defaultValue: false
++            }
++            ConfigurationValue {
 +                id: powerSaved
 +                key: "/desktop/uglyos/power/adaptive-original"
 +                defaultValue: ""
@@ -49,11 +64,17 @@ Subject: [PATCH] R08 live Battery & Power diagnostics and opt-in adaptive saver
 +                defaultValue: true
 +            }
 +            TiltToWake { id: powerTilt }
-+            readonly property var choices: [qsTr("Off"), qsTr("Auto at 20%")]
++            readonly property var choices: [qsTr("Off"), qsTr("Auto")]
 +            readonly property var profileLabels: [
-+                qsTr("Keep wrist wake"), qsTr("Quiet display")
++                qsTr("Keep wrist wake"), qsTr("Quiet display"),
++                qsTr("Custom")
 +            ]
-+            readonly property var profileValues: ["connected", "extended"]
++            readonly property var profileValues: ["connected", "extended", "custom"]
++            readonly property var thresholdLabels: [
++                qsTr("15%"), qsTr("20%"), qsTr("25%")
++            ]
++            readonly property var thresholdValues: ["15", "20", "25"]
++            readonly property var controlLabels: [qsTr("Keep on"), qsTr("Turn off")]
 +            // More controls must scroll on a 360px round screen.
 +            Flickable {
 +                anchors.fill: parent
@@ -118,7 +139,49 @@ Subject: [PATCH] R08 live Battery & Power diagnostics and opt-in adaptive saver
 +                        if (index >= 0) powerProfile.value = powerDiagnostics.profileValues[index]
 +                    }
 +                }
-+                Label {
++                OptionCycler {
++                    width: parent.width
++                    height: Dims.h(21)
++                    text: qsTr("Start saving at")
++                    enabled: powerSaved.value === ""
++                    valueArray: powerDiagnostics.thresholdLabels
++                    currentValue: powerDiagnostics.thresholdLabels[
++                        Math.max(0, powerDiagnostics.thresholdValues.indexOf(powerThreshold.value))]
++                    onValueChanged: (selected) => {
++                        if (powerSaved.value !== "") return
++                        const index = powerDiagnostics.thresholdLabels.indexOf(selected)
++                        if (index >= 0) powerThreshold.value = powerDiagnostics.thresholdValues[index]
++                    }
++                }
++                OptionCycler {
++                    width: parent.width
++                    height: Dims.h(21)
++                    visible: powerProfile.value === "custom"
++                    enabled: powerSaved.value === ""
++                    text: qsTr("Always-on display")
++                    valueArray: powerDiagnostics.controlLabels
++                    currentValue: powerCustomAod.value === true
++                        ? powerDiagnostics.controlLabels[1] : powerDiagnostics.controlLabels[0]
++                    onValueChanged: (selected) => {
++                        if (powerSaved.value !== "") return
++                        powerCustomAod.value = selected === powerDiagnostics.controlLabels[1]
++                    }
++                }
++                OptionCycler {
++                    width: parent.width
++                    height: Dims.h(21)
++                    visible: powerProfile.value === "custom" && powerTilt.available
++                    enabled: powerSaved.value === ""
++                    text: qsTr("Wrist wake")
++                    valueArray: powerDiagnostics.controlLabels
++                    currentValue: powerCustomTilt.value === true
++                        ? powerDiagnostics.controlLabels[1] : powerDiagnostics.controlLabels[0]
++                    onValueChanged: (selected) => {
++                        if (powerSaved.value !== "") return
++                        powerCustomTilt.value = selected === powerDiagnostics.controlLabels[1]
++                    }
++                }
+++                Label {
 +                    width: parent.width
 +                    wrapMode: Text.WordWrap
 +                    horizontalAlignment: Text.AlignHCenter
@@ -126,7 +189,7 @@ Subject: [PATCH] R08 live Battery & Power diagnostics and opt-in adaptive saver
 +                    text: powerSaved.value !== ""
 +                          ? qsTr("Adaptive saver requested. Original settings recorded.")
 +                          : powerEnabled.value === true
-+                            ? qsTr("Watching battery changes. No changes above 20%.")
++                            ? qsTr("Watching battery. Starts at %1%.").arg(powerThreshold.value)
 +                            : qsTr("Automatic adjustments off.")
 +                }
 +                ListItem {
@@ -140,16 +203,18 @@ Subject: [PATCH] R08 live Battery & Power diagnostics and opt-in adaptive saver
 +                    wrapMode: Text.WordWrap
 +                    horizontalAlignment: Text.AlignHCenter
 +                    font.pixelSize: Dims.l(3.7)
-+                    text: powerProfile.value === "connected"
-+                          ? qsTr("At 20%: always-on off, wrist wake stays on.")
-+                          : qsTr("At 20%: always-on and wrist wake off.")
++                    text: powerProfile.value === "custom"
++                          ? qsTr("Custom choices apply at %1%.").arg(powerThreshold.value)
++                          : powerProfile.value === "connected"
++                            ? qsTr("At %1%: always-on off; wrist wake stays on.").arg(powerThreshold.value)
++                            : qsTr("At %1%: always-on and wrist wake off.").arg(powerThreshold.value)
 +                }
 +                Label {
 +                    width: parent.width
 +                    wrapMode: Text.WordWrap
 +                    horizontalAlignment: Text.AlignHCenter
 +                    font.pixelSize: Dims.l(3.7)
-+                    text: qsTr("Both restore at 30% or after stopping. Bluetooth and Wi-Fi stay on. No battery-life estimate yet.")
++                    text: qsTr("Restores 10 points above the chosen threshold, while charging, or when stopped. Bluetooth and Wi-Fi stay on. No battery-life estimate yet.")
 +                }
 +                }
 +            }
@@ -159,7 +224,7 @@ Subject: [PATCH] R08 live Battery & Power diagnostics and opt-in adaptive saver
  
      // R08-only UgLy|OS notification controls. Shared Nemo settings keys are
      // read by the pinned upstream NotificationPreview QML patch.
-@@ -358,8 +497,13 @@
+@@ -358,8 +562,13 @@
                      title: qsTr("Watch-only Solo")
                      iconName: "ios-moon-outline"
                      onClicked: layerStack.push(soloSaverLayer)

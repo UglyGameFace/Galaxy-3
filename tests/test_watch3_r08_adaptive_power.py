@@ -71,6 +71,17 @@ class AdaptiveBatteryContracts(unittest.TestCase):
         self.assertIn('Flickable {', ss)
         self.assertIn("Keep wrist wake", ss)
         self.assertIn("Quiet display", ss)
+        self.assertIn('key: "/desktop/uglyos/power/low-threshold"', ss)
+        self.assertIn('key: "/desktop/uglyos/power/low-threshold"', ls)
+        self.assertIn('defaultValue: "20"', ss)
+        self.assertIn('defaultValue: "20"', ls)
+        self.assertIn('key: "/desktop/uglyos/power/custom-aod"', ss)
+        self.assertIn('key: "/desktop/uglyos/power/custom-tilt"', ls)
+        self.assertIn('qsTr("Custom")', ss)
+        self.assertIn('qsTr("Start saving at")', ss)
+        self.assertIn('qsTr("Always-on display")', ss)
+        self.assertIn('qsTr("Wrist wake")', ss)
+        self.assertIn('enabled: powerSaved.value === ""', ss)
 
     def test_no_unattended_network_or_fake_benchmark(self):
         ls = added_source(LP)
@@ -104,6 +115,9 @@ function test(name, opts, checks) {
        changing: false,
        adaptiveEnabled: {value: opts.enabled === true},
        adaptiveProfile: {value: opts.profile ?? "extended"},
+       adaptiveThreshold: {value: opts.threshold ?? "20"},
+       adaptiveCustomAod: {value: opts.customAod !== false},
+       adaptiveCustomTilt: {value: opts.customTilt === true},
        adaptiveOriginal: {value: ''},
        adaptiveSolo: {value: opts.solo ? '{"version":1}' : ''},
        adaptiveGauge: {percent: opts.level ?? 18},
@@ -128,7 +142,7 @@ test('20% turns off only screen wake controls', {enabled:true,level:20},
 (s, run) => {
     if(s.alwaysOnDisplay.value || s.adaptiveTilt.enabled) throw Error('did not conserve');
     const previous=JSON.parse(s.adaptiveOriginal.value);
-    if(previous.version!==1||!previous.changedAod||!previous.changedTilt)
+    if(previous.version!==2||previous.restoreAt!==30||!previous.changedAod||!previous.changedTilt)
         throw Error('missing reversible snapshot');
     s.adaptiveGauge.percent=25;
     run();
@@ -192,6 +206,75 @@ test('profile change during snapshot is deferred until restore', {enabled:true, 
     s.adaptiveEnabled.value=true;run();
     if(s.alwaysOnDisplay.value || !s.adaptiveTilt.enabled) throw Error('new profile');
 });
+test('threshold 15 does not trigger at 16; triggers at 15 and restores at 25',
+{enabled:true, threshold:"15", level:16}, (s,run) => {
+    if(s.adaptiveOriginal.value!=='' || !s.alwaysOnDisplay.value) throw Error('early');
+    s.adaptiveGauge.percent=15;run();
+    if(s.alwaysOnDisplay.value || JSON.parse(s.adaptiveOriginal.value).restoreAt!==25)
+        throw Error('threshold start');
+    s.adaptiveGauge.percent=24;run();
+    if(s.alwaysOnDisplay.value) throw Error('hysteresis');
+    s.adaptiveGauge.percent=25;run();
+    if(!s.alwaysOnDisplay.value || s.adaptiveOriginal.value!=='') throw Error('restore');
+});
+test('threshold 25 only restores at 35', {enabled:true,threshold:"25",level:25},
+(s,run) => {
+    if(s.alwaysOnDisplay.value) throw Error('not triggered');
+    s.adaptiveGauge.percent=34;run();
+    if(s.alwaysOnDisplay.value) throw Error('early restore');
+    s.adaptiveGauge.percent=35;run();
+    if(!s.alwaysOnDisplay.value) throw Error('not restored');
+});
+test('custom AOD only preserves wrist wake', {enabled:true,profile:"custom",customTilt:false},
+(s,run) => {
+    if(s.alwaysOnDisplay.value || !s.adaptiveTilt.enabled) throw Error('wrist disrupted');
+    s.adaptiveEnabled.value=false;run();
+    if(!s.alwaysOnDisplay.value || !s.adaptiveTilt.enabled) throw Error('restore');
+});
+test('custom wrist-wake only preserves AOD', {enabled:true,profile:"custom",customAod:false,customTilt:true},
+(s,run) => {
+    if(!s.alwaysOnDisplay.value || s.adaptiveTilt.enabled) throw Error('wrong controls');
+    s.adaptiveEnabled.value=false;run();
+    if(!s.alwaysOnDisplay.value || !s.adaptiveTilt.enabled) throw Error('restore');
+});
+test('custom neither is inert', {enabled:true,profile:"custom",customAod:false,customTilt:false},
+s => {if(s.adaptiveOriginal.value!=='' || !s.alwaysOnDisplay.value ||
+       !s.adaptiveTilt.enabled) throw Error('modified with no controls');});
+test('invalid threshold fails closed', {enabled:true,threshold:"0"}, s => {
+    if(s.adaptiveOriginal.value!=='' || !s.alwaysOnDisplay.value) throw Error('invalid trigger');
+});
+test('threshold edit cannot overwrite saved restoreAt', {enabled:true,threshold:"15",level:15},
+(s,run) => {
+    const previous=JSON.parse(s.adaptiveOriginal.value);
+    if(previous.restoreAt!==25) throw Error('missing threshold snapshot');
+    s.adaptiveThreshold.value="25";s.adaptiveGauge.percent=25;run();
+    if(!s.alwaysOnDisplay.value || s.adaptiveOriginal.value!=='') throw Error('snapshot changed');
+});
+test('legacy version one snapshot restores at 30', {enabled:true},
+(s,run) => {
+    const original=JSON.parse(s.adaptiveOriginal.value);
+    s.adaptiveOriginal.value=JSON.stringify({...original,version:1,restoreAt:undefined});
+    s.adaptiveGauge.percent=29;run();
+    if(!s.adaptiveOriginal.value) throw Error('premature v1 restore');
+    s.adaptiveGauge.percent=30;run();
+    if(s.adaptiveOriginal.value!=='' || !s.alwaysOnDisplay.value ||
+       !s.adaptiveTilt.enabled) throw Error('v1 not restored');
+});
+test('unknown gauge pauses auto control but manual stop restores', {enabled:true},
+(s,run) => {
+    if(!s.adaptiveOriginal.value) throw Error('missing active snapshot');
+    s.adaptiveGauge.percent=-1;run();
+    if(s.adaptiveOriginal.value==='') throw Error('lost snapshot');
+    s.adaptiveEnabled.value=false;run();
+    if(s.adaptiveOriginal.value!=='' || !s.alwaysOnDisplay.value ||
+       !s.adaptiveTilt.enabled) throw Error('manual restore blocked');
+});
+test('charging stops saver even below threshold', {enabled:true},(s,run) => {
+    if(!s.adaptiveOriginal.value) throw Error('missing active snapshot');
+    s.mceChargerType.type=1;run();
+    if(s.adaptiveOriginal.value!=='' || !s.alwaysOnDisplay.value ||
+       !s.adaptiveTilt.enabled) throw Error('plugging in did not restore');
+});
 """
         r = subprocess.run(
             ["node", "-e", js],
@@ -199,7 +282,7 @@ test('profile change during snapshot is deferred until restore', {enabled:true, 
             text=True, capture_output=True, check=False, timeout=20,
         )
         self.assertEqual(r.returncode, 0, r.stdout + "\n" + r.stderr)
-        self.assertEqual(r.stdout.count("PASS:"), 12, r.stdout)
+        self.assertEqual(r.stdout.count("PASS:"), 22, r.stdout)
 
 
 if __name__ == "__main__":
