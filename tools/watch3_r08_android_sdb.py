@@ -21,9 +21,10 @@ from watch3_r08_live_boot_probe import PROBES, STORAGE_PROBES, summarize
 from watch3_r08_storage_mapping import summarize_storage
 from watch3_r08_power_baseline import summarize_power
 
-# Read the kernel's read-only power_supply uevents; never inspect arbitrary
-# sysfs paths, battery serial fields, or enable writes/reconfiguration.
-POWER_PROBES = {"battery_uevent": "cat /sys/class/power_supply/*/uevent"}
+# Read ONLY the pinned Samsung battery device's read-only sysfs uevent.
+# No wildcard, arbitrary paths, raw blocks or writes; its exact identity
+# is validated before reporting a battery percentage.
+POWER_PROBES = {"battery_uevent": "cat /sys/class/power_supply/battery/uevent"}
 
 # Explicit, fixed, read-only operations; storage and battery probe sets run
 # only when expressly requested. Normal boot collection stays unchanged.
