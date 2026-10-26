@@ -20,14 +20,36 @@ PAGE = (Path(__file__).resolve().parents[1] /
 TARGETS = ("ALL", "WATCH", "PHONE", "LIMITS")
 
 
+def visual_item(root, name: str):
+    """QML ListView delegates can be visual children without QObject parentage.
+
+    Search the scene's real QQuickItem childItems, as the existing UgLy
+    launcher host renderer already does, not QObject.findChild alone.
+    """
+    stack=[root]
+    inspected=0
+    while stack:
+        node=stack.pop()
+        inspected+=1
+        if inspected>1000:
+            raise RuntimeError("Unexpectedly deep QQuickItem scene")
+        if node.objectName()==name:
+            return node
+        if hasattr(node, "childItems"):
+            stack.extend(node.childItems())
+    return None
+
+
 def click(view: QQuickView, name: str):
-    root = view.rootObject()
-    node = root.findChild(QObject, name)
+    root=view.rootObject()
+    node=visual_item(root,name)
     if node is None:
-        raise RuntimeError("Missing real Qt interaction control: " + name)
-    center = node.mapToScene(QPointF(node.width()/2, node.height()/2))
-    QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier,
-                     QPoint(round(center.x()), round(center.y())))
+        listview=visual_item(root,"uglyos-hub-list")
+        count=listview.property("count") if listview is not None else "no list"
+        raise RuntimeError("Missing visual Qt control "+name+"; visible list count="+str(count))
+    center=node.mapToScene(QPointF(node.width()/2,node.height()/2))
+    QTest.mouseClick(view,Qt.LeftButton,Qt.NoModifier,
+                     QPoint(round(center.x()),round(center.y())))
     QTest.qWait(80)
     QGuiApplication.processEvents()
 
@@ -80,7 +102,7 @@ def main():
                 click(view, "uglyos-hub-card-0")
                 if not view.rootObject().property("detailsOpen"):
                     raise RuntimeError("Tapping app card failed to open detail sheet")
-                back=view.rootObject().findChild(QObject,"uglyos-hub-close")
+                back=visual_item(view.rootObject(),"uglyos-hub-close")
                 if back is None:
                     raise RuntimeError("Missing back control")
                 pos=back.mapToScene(QPointF(back.width()/2,back.height()/2))
