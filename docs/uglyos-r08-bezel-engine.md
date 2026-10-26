@@ -52,6 +52,12 @@ The native QML page imports the same module.
   A positive user confirmation is required; ordinary scrolling never fires
   hidden macros. `Nemo.Configuration` stores only these small local patterns,
   with rigorous parsing of restored values.
+- In Bezel Lab, **MODE** explicitly selects local everyday/gaming/work/
+  accessibility contexts, while **INVERT** calibrates rotation direction
+  as a saved preference. The gestures screen has **RECORD**, **RUN** and
+  **TARGET** controls for manual recording, replay and local target selection.
+  This is not a hardware power-button hold integration. A future verified
+  logical button modifier can move between those same local contexts.
 - The app's `WheelHandler` listens only while Bezel Lab owns the page.
   App-local Qt Enter/Select/Back bindings and visible touch controls are
   debug/accessibility alternatives, not claims that the R08 buttons work.
