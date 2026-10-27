@@ -16,7 +16,8 @@ from watch3_r08_android_sdb import VERSION, frame, receive
 from watch3_r08_fota_consumer_inventory import (
     SYNC_HDR, SYNC_DENT, LOCAL_STREAM, DIRECTORIES, DBUS_DIRECTORIES,
     DBUS_ACTIVATION_FILENAME, PACKAGE_ROOT_SCOPE, PACKAGE_ROOT_DIRECTORY,
-    PACKAGE_MANIFEST_FILENAME, InventoryError,
+    PACKAGE_MANIFEST_FILENAME, SYSTEMD_DIRECTORIES, SYSTEMD_FOTA_UNIT,
+    MAX_SYSTEMD_DENTS, InventoryError,
     DirectoryDecoder, list_one, inventory, main,
 )
 
@@ -203,6 +204,87 @@ class FixedFotaDirectoryInventoryTests(unittest.TestCase):
                                             "--report", str(target)]):
                 self.assertEqual(main(), 1)
             self.assertEqual(target.read_bytes(), old)
+
+    def test_fixed_tizen_systemd_paths_and_fota_unit_names_only(self):
+        self.assertEqual(SYSTEMD_DIRECTORIES, {
+            "systemd_system_vendor": b"/usr/lib/systemd/system",
+            "systemd_user_vendor": b"/usr/lib/systemd/user",
+            "systemd_system_override": b"/etc/systemd/system",
+        })
+        self.assertTrue(SYSTEMD_FOTA_UNIT.fullmatch("fota-consumer.service"))
+        self.assertTrue(SYSTEMD_FOTA_UNIT.fullmatch("com.samsung.fota.service"))
+        self.assertTrue(SYSTEMD_FOTA_UNIT.fullmatch("firmware-update.timer"))
+        self.assertFalse(SYSTEMD_FOTA_UNIT.fullmatch("owner-private-data.service"))
+        self.assertFalse(SYSTEMD_FOTA_UNIT.fullmatch("secret.update.log"))
+        for path in SYSTEMD_DIRECTORIES.values():
+            self.assertTrue(path.startswith(b"/"))
+            self.assertNotIn(b"..", path)
+
+    def test_systemd_list_is_bounded_filtered_and_has_exact_request(self):
+        # More than 256 ordinary systemd units need to be accepted without
+        # widening the limits of the earlier package and D-Bus probes.
+        self.assertGreaterEqual(MAX_SYSTEMD_DENTS, 300)
+        entries = b"".join(dent("ordinary-%03d.service" % n)
+                           for n in range(300))
+        entries += (dent("fota-consumer.service", stat.S_IFREG | 0o644, 423)
+                    + dent("com.samsung.fota-update.socket", stat.S_IFREG | 0o644, 70)
+                    + dent("owner-private-identity.service") + done())
+        sock = peer([entries[:3], entries[3:29], entries[29:]])
+        report = list_one(sock, Path("/unused"), "systemd_system_vendor")
+        self.assertEqual(report["status"], "LIST_COMPLETE")
+        self.assertEqual(set(report["matching_systemd_fota_units"]),
+                         {"fota-consumer.service", "com.samsung.fota-update.socket"})
+        self.assertEqual(report["matching_systemd_fota_units"]["fota-consumer.service"],
+                         {"kind": "REGULAR_FILE", "bytes": 423})
+        self.assertEqual(report["other_or_unreported_entries"], 301)
+        self.assertNotIn("owner-private-identity", json.dumps(report))
+        frames = outgoing(sock)
+        path = SYSTEMD_DIRECTORIES["systemd_system_vendor"]
+        self.assertEqual(frames[2][3], SYNC_HDR.pack(b"LIST", len(path)) + path)
+        self.assertEqual(sum(x[0] == b"WRTE" for x in frames), 1)
+        self.assertNotIn(b"RECV", bytes(sock.sent))
+        self.assertNotIn(b"SEND", bytes(sock.sent))
+        self.assertNotIn(b"shell:", bytes(sock.sent))
+
+    def test_systemd_no_match_is_not_absent_daemon_and_scopes_are_independent(self):
+        peers = [
+            peer([dent("ordinary.service") + done()]),
+            peer([dent("firmware-update.service") + done()]),
+            peer([done()]),
+        ]
+        with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                   side_effect=peers) as conn:
+            report = inventory("10.0.0.65", Path("/unused"), fota_systemd_only=True)
+        self.assertEqual(conn.call_count, len(SYSTEMD_DIRECTORIES))
+        self.assertEqual(set(report["directory_results"]), set(SYSTEMD_DIRECTORIES))
+        self.assertEqual(report["schema"], "uglyos-r840x-fota-systemd-unit-index-v1")
+        self.assertFalse(report["watch_write_performed"])
+        self.assertNotIn("10.0.0.65", json.dumps(report))
+        self.assertIn("dynamic", report["directory_results"]["systemd_system_vendor"]["meaning"])
+        with self.assertRaisesRegex(InventoryError, "SCOPES_MUTUALLY_EXCLUSIVE"):
+            inventory("10.0.0.65", Path("/unused"), dbus_services_only=True,
+                      fota_systemd_only=True)
+
+    def test_fota_systemd_json_is_private_exclusive_and_cli_is_opt_in(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "systemd-report.json"
+            peers = [
+                peer([dent("fota-consumer.service") + done()]),
+                peer([done()]),
+                peer([done()]),
+            ]
+            with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                       side_effect=peers), patch.object(
+                    sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+                                  "--fota-systemd-only", "--report", str(dest)]):
+                self.assertEqual(main(), 0)
+            before = dest.read_bytes()
+            self.assertEqual(dest.stat().st_mode & 0o077, 0)
+            self.assertNotIn(b"10.0.0.65", before)
+            with patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+                                            "--fota-systemd-only", "--report", str(dest)]):
+                self.assertEqual(main(), 1)
+            self.assertEqual(before, dest.read_bytes())
 
     def test_fragmented_dent_headers_and_names(self):
         data = dent("fota-service") + dent("fota-consumer") + (
