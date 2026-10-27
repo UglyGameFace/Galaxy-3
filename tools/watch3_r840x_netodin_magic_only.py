@@ -48,7 +48,7 @@ def perform_magic_once(listener: socket.socket, seconds: int = DEFAULT_WAIT,
         raise ValueError("listen timeout must be 5–180 seconds")
     listener.settimeout(float(seconds))
     try:
-        peer, _ = listener.accept()
+        peer, peer_address = listener.accept()
     except socket.timeout:
         return result
     except OSError:
@@ -60,7 +60,7 @@ def perform_magic_once(listener: socket.socket, seconds: int = DEFAULT_WAIT,
             # The watch AP's *local* assigned subnet is necessary, not
             # sufficient, evidence for the incoming connection identity.
             try:
-                source = ipaddress.IPv4Address(_[0])
+                source = ipaddress.IPv4Address(peer_address[0])
             except (ValueError, TypeError, IndexError):
                 result["state"] = "PEER_ADDRESS_NOT_IPV4"
                 return result
