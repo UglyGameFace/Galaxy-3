@@ -156,6 +156,62 @@ remains the source of the exact-build match. This follow-up
 is an additional metadata-shape observation, not a rerun of
 CSC detection and never interacts with the owner's only watch.
 
+### Completed October 27: PAP XML shape physically fetched by GitHub Actions
+
+This follow-up is **already finished**. No repeat phone or watch test is
+necessary. Actual [GitHub Actions run #40574278976](
+https://github.com/UglyGameFace/Galaxy-3/actions/runs/40574278976)
+completed all three jobs successfully, including both offline parser
+regression jobs (Ubuntu 22.04 / 24.04) and one public Samsung
+`SM-R840X/PAP/version.xml` GET from an Ubuntu 24.04 runner.
+
+The **actual redacted live server result**, not a synthetic fixture:
+
+| Observation | Verified response |
+| --- | --- |
+| Requested model / region | `SM-R840X / PAP`, separately observed as active CSC from the owner's real Tizen SDB file |
+| Manufacturer version token | **`R840XXXU1AUA2`** (matches physical watch) |
+| Returned XML size | **623 bytes** |
+| XML structure | Valid `versioninfo`, **19 unique element paths** |
+| Fields present | `firmware/version/latest`, `firmware/version/upgrade/value`, `url`, `ActiveDeviceInfo/ServiceURL`, and device polling fields |
+| Values that look like HTTP URLs | **1**, classified structurally only, value **never exposed** |
+| HTTP values ending in common firmware-archive suffixes | **0** |
+| Image, signed stock rescue, PIT, rollback or custom boot | **Not obtained or proven** |
+| Odin / SDB / physical watch interaction during this test | **None** |
+
+The genuine response therefore contains a *version history and update
+service metadata*, **not an identifiable full firmware ZIP/TAR/IMG
+download link** under the bounded suffix scanner. Presence of
+`versioninfo/url` and `ServiceURL` element *names* is not proof
+that they link to flashable archives. Conversely, zero recognized
+archive-style URLs **in this one XML response** does not prove the
+existence or absence of a separate, access-controlled authorized
+Samsung repair image.
+
+The report deliberately publishes **no raw XML or URL values**.
+Sanitized [artifact from this successful run](
+https://github.com/UglyGameFace/Galaxy-3/actions/runs/40574278976)
+is available through the workflow while retained.
+The `result=NO_GO`, `firmware_downloaded=false`,
+`exact_stock_recovery_archive_obtained=false`, and
+`flash_allowed=false` evidence flags remain true to the observation.
+
+**CSC scope:** Public aggregators commonly label `PAP` as
+**Europe**, and other X-suffixed Samsung Watch4 demo models also
+use `PAP`. Neither proves the R840X was manufactured or
+sold in a particular country, nor that `PAP` is an accepted
+retail firmware CSC. Do not change the watch's CSC to test that
+theory. <https://technastic.com/samsung-csc-codes-list/>
+and <https://samfrew.com/devices/galaxy-watch4/sm-r860x>
+are contextual listings only, not Samsung's signed variant
+restoration policy.
+
+**Next genuinely different evidence required:** a trusted full
+`SM-R840X` stock restoration archive with its signed bootloader,
+partition layout/PIT, compatible version/rollback and independent
+actual-model recovery evidence. Do not requery `version.xml` for
+a nonexistent directly advertised ZIP or spend money on HalabTech.
+
 ### New one-request manufacturer metadata check
 
 Rather than repeat the unrelated, historically guessed XAR/KOO
