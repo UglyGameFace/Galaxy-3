@@ -16,6 +16,8 @@ from watch3_r08_android_sdb import VERSION, frame, receive
 from watch3_r08_fota_consumer_inventory import (
     SYNC_HDR, SYNC_DENT, LOCAL_STREAM, DIRECTORIES, DBUS_DIRECTORIES,
     DBUS_ACTIVATION_FILENAME, PACKAGE_INDEX_DIRECTORIES, PACKAGE_INDEX_FILENAME,
+    SAP_RESOURCE_SCOPE, SAP_RESOURCE_DIRECTORY, SAP_RESOURCE_FILENAME,
+    SYSTEMD_DIRECTORIES, SYSTEMD_FOTA_UNIT, MAX_SYSTEMD_DENTS,
     PACKAGE_ROOT_SCOPE, PACKAGE_ROOT_DIRECTORY,
     PACKAGE_MANIFEST_FILENAME, InventoryError,
     DirectoryDecoder, list_one, inventory, main,
@@ -283,6 +285,93 @@ class FixedFotaDirectoryInventoryTests(unittest.TestCase):
                                             "--report", str(out)]):
                 self.assertEqual(main(), 1)
             self.assertEqual(out.read_bytes(), old)
+
+    def test_handoff_registry_paths_match_real_xml_and_tizen_docs(self):
+        self.assertEqual(SAP_RESOURCE_SCOPE, "fota_sap_profile_directory")
+        self.assertEqual(SAP_RESOURCE_FILENAME, "appcessoryservices.xml")
+        self.assertEqual(SAP_RESOURCE_DIRECTORY,
+                         b"/usr/apps/com.samsung.fota-consumer/res/xml")
+        self.assertEqual(SYSTEMD_DIRECTORIES, {
+            "fota_systemd_vendor_system": b"/usr/lib/systemd/system",
+            "fota_systemd_vendor_user": b"/usr/lib/systemd/user",
+            "fota_systemd_override": b"/etc/systemd/system",
+        })
+        for name in ("fota-consumer.service", "firmware-update.timer",
+                     "com.samsung.fota.socket"):
+            self.assertTrue(SYSTEMD_FOTA_UNIT.fullmatch(name))
+        self.assertFalse(SYSTEMD_FOTA_UNIT.fullmatch("private-wifi-keys.service"))
+        self.assertFalse(SYSTEMD_FOTA_UNIT.fullmatch("secret.update.txt"))
+
+    def test_handoff_systemd_large_dir_still_filtered_and_read_only(self):
+        self.assertGreaterEqual(MAX_SYSTEMD_DENTS, 300)
+        entries = b"".join(dent("unrelated-%03d.service" % i) for i in range(300))
+        entries += (dent("fota-consumer.service", stat.S_IFREG | 0o644, 227)
+                    + dent("private_serial_secret") + done())
+        sock = peer([entries[:2], entries[2:35], entries[35:]])
+        result = list_one(sock, Path("/unused"), "fota_systemd_vendor_system")
+        self.assertEqual(result["status"], "LIST_COMPLETE")
+        self.assertEqual(result["matching_fota_unit_files"],
+                         {"fota-consumer.service": {"kind": "REGULAR_FILE", "bytes": 227}})
+        self.assertEqual(result["other_or_unreported_entries"], 301)
+        self.assertNotIn("private_serial", json.dumps(result))
+        outgoing_frames = outgoing(sock)
+        path = SYSTEMD_DIRECTORIES["fota_systemd_vendor_system"]
+        self.assertEqual(outgoing_frames[2][3], SYNC_HDR.pack(b"LIST", len(path)) + path)
+        self.assertEqual(sum(x[0] == b"WRTE" for x in outgoing_frames), 1)
+        self.assertNotIn(b"SEND", bytes(sock.sent))
+        self.assertNotIn(b"RECV", bytes(sock.sent))
+        self.assertNotIn(b"shell:", bytes(sock.sent))
+
+    def test_handoff_sap_profile_exact_vendor_spelling_and_privacy(self):
+        sock = peer([dent("accessoryservices.xml") +
+                     dent("appcessoryservices.xml", stat.S_IFREG | 0o644, 512) +
+                     dent(".private") + done()])
+        result = list_one(sock, Path("/unused"), SAP_RESOURCE_SCOPE)
+        self.assertEqual(result["declared_sap_profile_xml"],
+                         {"kind": "REGULAR_FILE", "bytes": 512})
+        self.assertEqual(result["other_or_unreported_entries"], 2)
+        self.assertNotIn("accessoryservices.xml", json.dumps(result))
+        wire = outgoing(sock)
+        self.assertEqual(wire[2][3],
+                         SYNC_HDR.pack(b"LIST", len(SAP_RESOURCE_DIRECTORY)) +
+                         SAP_RESOURCE_DIRECTORY)
+        self.assertNotIn(b"SEND", bytes(sock.sent))
+
+    def test_handoff_mode_only_four_fixed_lists_and_private_json(self):
+        scopes = list(SYSTEMD_DIRECTORIES) + [SAP_RESOURCE_SCOPE]
+        peers = [peer([dent("fota-daemon.service") + done()]),
+                 peer([done()]),
+                 peer([dent("other.service") + done()]),
+                 peer([dent("appcessoryservices.xml") + done()])]
+        with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                   side_effect=peers) as create:
+            report = inventory("10.0.0.65", Path("/unused"),
+                               fota_handoff_index_only=True)
+        self.assertEqual(create.call_count, 4)
+        self.assertEqual(list(report["directory_results"]), scopes)
+        self.assertEqual(report["status"], "READ_ONLY_FOTA_HANDOFF_INDEX")
+        self.assertEqual(report["schema"], "uglyos-r840x-fota-handoff-index-v1")
+        self.assertFalse(report["watch_write_performed"])
+        self.assertNotIn("10.0.0.65", json.dumps(report))
+        with self.assertRaisesRegex(InventoryError, "SCOPES_MUTUALLY_EXCLUSIVE"):
+            inventory("10.0.0.65", Path("/unused"),
+                      fota_handoff_index_only=True,
+                      fota_package_index_only=True)
+
+        with tempfile.TemporaryDirectory() as td:
+            output = Path(td) / "handoff.json"
+            with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                       side_effect=[peer([done()]) for _ in scopes]), patch.object(
+                sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+                              "--fota-handoff-index-only", "--report", str(output)]):
+                self.assertEqual(main(), 0)
+            before = output.read_bytes()
+            self.assertEqual(output.stat().st_mode & 0o077, 0)
+            with patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+                                            "--fota-handoff-index-only",
+                                            "--report", str(output)]):
+                self.assertEqual(main(), 1)
+            self.assertEqual(output.read_bytes(), before)
 
     def test_fragmented_dent_headers_and_names(self):
         data = dent("fota-service") + dent("fota-consumer") + (
