@@ -1,0 +1,32 @@
+name: UgLy|OS R08 live RAM hypothesis check (NO WATCH)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/watch3_r08_boot_memory.py'
+      - 'tools/watch3_r08_android_sdb.py'
+      - 'tests/test_watch3_r08_boot_memory.py'
+      - 'docs/watch3-r08-live-boot-memory.md'
+      - '.github/workflows/watch3-r08-boot-memory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-parser-and-allowlist:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove fixed read-only operations, fail-closed parse, and no private addresses
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_boot_memory.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_bezel_capabilities.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_power_baseline.py' -v
+          python3 -m py_compile tools/watch3_r08_boot_memory.py tools/watch3_r08_android_sdb.py
+          git diff --check
+          echo 'PASS: host parser fixtures only. Physical watch RAM layout NOT yet observed by this PR.'
+          echo 'NO-GO: custom-boot acceptance and stock firmware recovery remain unproven.'

@@ -35,8 +35,11 @@ jobs:
           source = Path('tools/watch3_r08_android_sdb.py').read_text()
           assert 'POWER_PROBES = {"battery_uevent": "cat /sys/class/power_supply/battery/uevent"}' in source
           assert 'BEZEL_PROBES = {"input_devices": "cat /proc/bus/input/devices"}' in source
-          assert 'ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES}' in source
-          assert 'Only predefined boot, storage, battery or bezel probe sets are allowed' in source
+          assert 'BOOT_MEMORY_PROBES = {' in source
+          assert '"meminfo": "cat /proc/meminfo"' in source
+          assert '"iomem": "cat /proc/iomem"' in source
+          assert 'ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES}' in source
+          assert 'Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed' in source
           flow = Path('.github/workflows/watch3-r08-battery-baseline.yml').read_text()
           assert 'NO WATCH' in flow
           assert '--watch-ip' not in '\n'.join(line for line in flow.splitlines()
