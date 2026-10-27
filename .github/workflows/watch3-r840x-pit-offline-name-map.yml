@@ -31,7 +31,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p = Path('tools/audit_watch3_r840x_pit_offline.py').read_text()
-          assert 'HEIMDALL_PIN' in p and 'PIT_ENTRY' not in p or 'HEIMDALL_PIN' in p
+          assert 'HEIMDALL_PIN' in p
           assert 'ENTRY_BYTES = 132' in p
           assert 'HEADER_BYTES = 28' in p
           assert 'NO_STOCK_RECOVERY_OR_FLASH_AUTHORIZATION' in p
