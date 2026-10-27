@@ -9,6 +9,8 @@ on:
       - 'tools/watch3_r08_android_sdb.py'
       - 'tools/watch3_r08_root_prereq.py'
       - 'tools/watch3_r08_fota_artifact_pull.py'
+      - 'tools/watch3_r08_fota_consumer_inventory.py'
+      - 'tests/test_watch3_r08_fota_consumer_inventory.py'
       - 'tools/analyze_watch3_r08_fota_elf.py'
       - 'tests/test_watch3_r08_fota_elf_offline.py'
       - 'tests/test_watch3_r08_fota_artifact_pull.py'
@@ -46,10 +48,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile tools/watch3_r08_android_sdb.py tools/watch3_r08_root_prereq.py tools/watch3_r08_fota_artifact_pull.py tools/watch3_r08_fota_services.py tools/analyze_watch3_r08_fota_elf.py
+          python3 -m py_compile tools/watch3_r08_android_sdb.py tools/watch3_r08_root_prereq.py tools/watch3_r08_fota_artifact_pull.py tools/watch3_r08_fota_consumer_inventory.py tools/watch3_r08_fota_services.py tools/analyze_watch3_r08_fota_elf.py
           python3 -m unittest discover -s tests -p test_watch3_r08_android_sdb.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_root_prereq.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_fota_artifact_pull.py -v
+          python3 -m unittest discover -s tests -p test_watch3_r08_fota_consumer_inventory.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_fota_elf_offline.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_fota_services.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_live_boot_probe.py -v
