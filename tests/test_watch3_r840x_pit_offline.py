@@ -86,7 +86,7 @@ class OfflinePitTests(unittest.TestCase):
             (build([entry("BOOT"), entry("boot")]), "DUPLICATE_PARTITION_NAME"),
             (build([entry("A/B")]), "UNSAFE_PARTITION_METADATA"),
             (build([entry("BOOT", "bad/path.img")]), "UNSAFE_PARTITION_METADATA"),
-            (build([entry("BOOT")[:-1] + b"X"]), "UNTERMINATED_PIT_STRING"),
+            (build([entry("BOOT")[:36] + b"A" * 32 + entry("BOOT")[68:]]), "UNTERMINATED_PIT_STRING"),
             (b"x" * (pit.MAX_PIT_BYTES + 1), "PIT_FILE_TOO_LARGE"),
         ]
         for body, expected in samples:
