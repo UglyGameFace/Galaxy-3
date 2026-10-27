@@ -27,6 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s tests -p 'test_watch3_r840x_csc_readonly.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_fota_manifest_probe.py' -v
           python3 -m py_compile tools/watch3_r840x_csc_readonly.py
           python3 - <<'PY'
           from pathlib import Path
