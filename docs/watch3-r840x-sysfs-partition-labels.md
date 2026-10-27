@@ -232,6 +232,90 @@ first. The absence of labels remains **unresolved**, not negative.
 All statuses preserve `NO_GO` for flashing, stock recovery,
 custom kernel acceptance, or partition modification.
 
+## Physical connection-only result: TCP failed before SDB (October 27)
+
+The owner ran `--connection-only` from Android/Termux with a previously
+used private hotspot IP and provided the complete sanitized report:
+
+- `state=TCP_NETWORK_UNREACHABLE_OR_BLOCKED`
+- `tcp_connected=false`
+- `sdb_handshake_completed=false`
+- `remote_device_identity_verified=false`
+- `owner_watch_sysfs_observed=false`
+- `source_path_expression=[]`, and `report=null`
+- `pit_requested=false`, `watch_write_performed=false`,
+  `firmware_written=false`, `flash_allowed=false`
+
+**Meaning:** the code reached the phone's TCP connect attempt and received
+a general OS-level `OSError` before a socket connected. Neither
+SDB authorization, sysfs files, partition names nor the watch's
+actual presence at that IP was tested. **Do not confuse this with a
+locked CSC, absent partition label or a bootloader issue.** The
+earlier genuinely observed active CSC `PAP` from a different
+working SDB session remains valid historical evidence.
+
+### Non-invasive network recovery checklist, in order
+
+1. On the **watch** in normal Tizen, look at current Wi-Fi network,
+   connection state and its **currently displayed device IP**.
+   A previously working hotspot IP is *not* permanent. Check
+   Tizen Debugging remains enabled; do not enter Wireless Download,
+   reset or flash.
+2. On the **phone**, confirm the **same trusted local network**
+   and that the watch currently appears as a client under
+   Mobile Hotspot's connected-device view, if using your phone
+   as the hotspot. If connected to a normal router, both
+   devices must use the same LAN with client-to-client routing
+   permitted. Hotspot client association alone does not prove
+   phone-to-client socket reachability.
+3. If using a phone **VPN**, allow local-network traffic or
+   temporarily disable that VPN only for this ordinary
+   local diagnostic, then restore it afterwards. Avoid guessing
+   a new `10.0.0.x` IP or scanning other clients.
+4. **Only after the current watch IP is confirmed**, run
+   **one** normal SDB handshake check with a **new local report**
+   filename, preserving the original failure report:
+
+   ```sh
+   cd ~/Galaxy-3 && git switch main && git pull --ff-only
+   python tools/watch3_r840x_partition_sysfs_readonly.py \\
+     --watch-ip WATCH_CURRENT_WIFI_IP --connection-only \\
+     --report ~/watch3-r840x-sdb-connect-after-network-check.json
+   cat ~/watch3-r840x-sdb-connect-after-network-check.json
+   ```
+
+5. If you cannot route to the watch from a **phone hotspot**,
+   use a shared trusted Wi-Fi router for phone and watch when
+   convenient. Do not replace Tizen or experiment with NetOdin
+   to fix an ordinary routing problem.
+
+### Improved categorization for a follow-up connection check
+
+The new script preserves the original `state` field and adds a
+fixed non-sensitive `tcp_error_category` to distinguish
+local errors. The **original** failure JSON cannot retroactively
+tell us its OS errno; no raw exception, watch IP, port scan,
+serial, private keys or networking identifiers are saved.
+
+| `tcp_error_category` | What the phone OS reported, not what happened inside the watch |
+| --- | --- |
+| `PHONE_HAS_NO_ROUTE_TO_TARGET` | No phone route for the selected target; check local Wi-Fi/hotspot routing and VPN |
+| `TARGET_HOST_UNREACHABLE_ON_CURRENT_NETWORK` | Current network could not reach target; check watch connection and **current IP** |
+| `PHONE_NETWORK_INTERFACE_DOWN` | Local network interface unavailable |
+| `ANDROID_OS_OR_VPN_SOCKET_POLICY_BLOCKED` | OS refused creating/using the socket; local network policy may be involved |
+| `LOCAL_SOURCE_ADDRESS_NOT_AVAILABLE` | Local source address unavailable |
+| `TARGET_OR_INTERMEDIARY_REFUSED_PORT` | A peer actively refused SDB port 26101; debugging or IP still needs verification |
+| `TCP_CONNECT_TIMEOUT_NO_REPLY` | TCP connection never completed before application timeout |
+| `OTHER_PHONE_SIDE_CONNECT_ERROR` | No reliable subtype; do not infer a specific root cause |
+| `NOT_APPLICABLE` | No additional phone-level connect error was present |
+
+**No automatic retry, scanning, other port access or watch writes** are
+added. The report remains private and exclusive. If a TCP/SDB
+handshake eventually succeeds, consider only the previously
+documented *separate* text-only `--fixed-paths` sysfs probe,
+with a new output path. Stock recovery and bootloader GO
+remain **UNPROVEN** regardless of network outcome.
+
 ## Interpreting results without inventing recovery
 
 - `SYSFS_PARTITION_LABELS_OBSERVED`: a consistent subset of

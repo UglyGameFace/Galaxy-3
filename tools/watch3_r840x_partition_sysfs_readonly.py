@@ -11,6 +11,7 @@ available to the owner's unprivileged SM-R840X Tizen shell.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 from pathlib import Path
@@ -223,6 +224,28 @@ def inspect_fixed_sample(ip: str, key_path: Path) -> dict:
     return result
 
 
+def _local_tcp_error_category(error: OSError) -> str:
+    """Fixed category from OS errno, never include watch IP/error message.
+
+    An IP may be stale or local network routing unavailable; these codes
+    describe the phone-side socket failure, NOT the watch's current state.
+    """
+    code = error.errno
+    if code == errno.ENETUNREACH:
+        return "PHONE_HAS_NO_ROUTE_TO_TARGET"
+    if code == errno.EHOSTUNREACH:
+        return "TARGET_HOST_UNREACHABLE_ON_CURRENT_NETWORK"
+    if code == errno.ENETDOWN:
+        return "PHONE_NETWORK_INTERFACE_DOWN"
+    if code in (errno.EACCES, errno.EPERM):
+        return "ANDROID_OS_OR_VPN_SOCKET_POLICY_BLOCKED"
+    if code == errno.EADDRNOTAVAIL:
+        return "LOCAL_SOURCE_ADDRESS_NOT_AVAILABLE"
+    # Never leak user IP, routing, credentials, errno descriptions or
+    # untrusted OS exception text.
+    return "OTHER_PHONE_SIDE_CONNECT_ERROR"
+
+
 def inspect_sdb_connection_only(ip: str, key_path: Path) -> dict:
     """One port-26101 connect and authenticated SDB hello; NO shell or sysfs.
 
@@ -235,6 +258,7 @@ def inspect_sdb_connection_only(ip: str, key_path: Path) -> dict:
     result["source_path_expression"] = []
     result["transport_diagnosis_only"] = True
     result["tcp_connected"] = False
+    result["tcp_error_category"] = "NOT_APPLICABLE"
     result["sdb_handshake_completed"] = False
     result["remote_device_identity_verified"] = False
     result["state"] = "CONNECT_NOT_ATTEMPTED"
@@ -264,10 +288,13 @@ def inspect_sdb_connection_only(ip: str, key_path: Path) -> dict:
                 result["state"] = "SDB_HANDSHAKE_IO_FAILURE"
     except ConnectionRefusedError:
         result["state"] = "TCP_PORT_REFUSED"
+        result["tcp_error_category"] = "TARGET_OR_INTERMEDIARY_REFUSED_PORT"
     except (TimeoutError, socket.timeout):
         result["state"] = "TCP_CONNECT_TIMED_OUT"
-    except OSError:
+        result["tcp_error_category"] = "TCP_CONNECT_TIMEOUT_NO_REPLY"
+    except OSError as exc:
         result["state"] = "TCP_NETWORK_UNREACHABLE_OR_BLOCKED"
+        result["tcp_error_category"] = _local_tcp_error_category(exc)
     return result
 
 

@@ -1,6 +1,7 @@
 """Synthetic-only transport-stage regression. No Watch3 contact or files read."""
 from __future__ import annotations
 
+import errno
 import json
 from pathlib import Path
 import socket
@@ -54,6 +55,7 @@ class SdbConnectionOnlyTests(unittest.TestCase):
         connected.assert_called_once_with(("10.0.0.65", 26101), timeout=4)
         self.assertTrue(fake.closed)
         self.assertTrue(result["tcp_connected"])
+        self.assertEqual(result["tcp_error_category"], "NOT_APPLICABLE")
         self.assertTrue(result["sdb_handshake_completed"])
         self.assertEqual(result["state"], "SDB_HANDSHAKE_COMPLETE_NO_SYSFS_READ")
         self.assertIs(result["remote_device_identity_verified"], False)
@@ -91,6 +93,38 @@ class SdbConnectionOnlyTests(unittest.TestCase):
             self.assertFalse(result["sdb_handshake_completed"])
             self.assertEqual(result["state"], state)
             self.assertNotIn("PRIVATE_TEXT", json.dumps(result))
+
+    def test_errno_classifies_phone_route_vs_android_policy_without_leaking(self):
+        # Only synthetic phone-side exceptions; do not probe a real target.
+        examples = [
+            (errno.ENETUNREACH, "PHONE_HAS_NO_ROUTE_TO_TARGET"),
+            (errno.EHOSTUNREACH, "TARGET_HOST_UNREACHABLE_ON_CURRENT_NETWORK"),
+            (errno.ENETDOWN, "PHONE_NETWORK_INTERFACE_DOWN"),
+            (errno.EPERM, "ANDROID_OS_OR_VPN_SOCKET_POLICY_BLOCKED"),
+            (errno.EACCES, "ANDROID_OS_OR_VPN_SOCKET_POLICY_BLOCKED"),
+            (errno.EADDRNOTAVAIL, "LOCAL_SOURCE_ADDRESS_NOT_AVAILABLE"),
+            (errno.EINVAL, "OTHER_PHONE_SIDE_CONNECT_ERROR"),
+        ]
+        for errorno, category in examples:
+            error = OSError(errorno, "private phone/watch address TOKEN")
+            with self.subTest(errno=errorno), patch(
+                "watch3_r840x_partition_sysfs_readonly.socket.create_connection",
+                side_effect=error
+            ) as attempted, patch(
+                "watch3_r840x_partition_sysfs_readonly.collect",
+                side_effect=AssertionError("NEVER OPEN SYSFS WHEN TCP FAILS")
+            ):
+                result = probe.inspect_sdb_connection_only("10.0.0.65", Path("/unused"))
+            attempted.assert_called_once_with(("10.0.0.65", 26101), timeout=4)
+            self.assertEqual(result["state"], "TCP_NETWORK_UNREACHABLE_OR_BLOCKED")
+            self.assertEqual(result["tcp_error_category"], category)
+            self.assertFalse(result["tcp_connected"])
+            self.assertFalse(result["sdb_handshake_completed"])
+            self.assertFalse(result["owner_watch_sysfs_observed"])
+            self.assertFalse(result["flash_allowed"])
+            redacted = json.dumps(result)
+            self.assertNotIn("TOKEN", redacted)
+            self.assertNotIn("10.0.0.65", redacted)
 
     def test_after_tcp_failures_not_mislabelled_network_port(self):
         states = [
