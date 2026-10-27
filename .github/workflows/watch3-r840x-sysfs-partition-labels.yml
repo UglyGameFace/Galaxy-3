@@ -44,7 +44,9 @@ jobs:
           assert 'PARTITION_SYSFS_PROBES' in script
           assert 'os.system(' not in script
           assert 'subprocess.' not in script
-          assert 'Odin' not in script.split('def inspect_live')[1]
+          assert 'b"ODIN"' not in script
+          assert 'b"SEND"' not in script
+          assert '"result": "NO_GO"' in script
           print('PASS: one opt-in fixed sysfs-only command, no raw block access')
           PY
           git diff --check
