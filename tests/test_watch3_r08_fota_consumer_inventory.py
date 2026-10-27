@@ -14,7 +14,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from watch3_r08_android_sdb import VERSION, frame, receive
 from watch3_r08_fota_consumer_inventory import (
-    SYNC_HDR, SYNC_DENT, LOCAL_STREAM, DIRECTORIES, InventoryError,
+    SYNC_HDR, SYNC_DENT, LOCAL_STREAM, DIRECTORIES, DBUS_DIRECTORIES,
+    DBUS_ACTIVATION_FILENAME, InventoryError,
     DirectoryDecoder, list_one, inventory, main,
 )
 
@@ -77,6 +78,66 @@ class FixedFotaDirectoryInventoryTests(unittest.TestCase):
             self.assertNotIn(b"..", path)
             self.assertNotIn(b"/dev/", path)
             self.assertNotIn(b"\x00", path)
+
+    def test_dbus_directories_are_fixed_from_standard_locations(self):
+        self.assertEqual(DBUS_DIRECTORIES, {
+            "dbus_system_vendor": b"/usr/share/dbus-1/system-services",
+            "dbus_system_override": b"/etc/dbus-1/system-services",
+            "dbus_session_vendor": b"/usr/share/dbus-1/services",
+        })
+        self.assertEqual(DBUS_ACTIVATION_FILENAME, "fota.consumer.service")
+        for path in DBUS_DIRECTORIES.values():
+            self.assertTrue(path.startswith(b"/"))
+            self.assertNotIn(b"..", path)
+            self.assertNotIn(b"/dev/", path)
+
+    def test_dbus_list_reports_only_exact_fota_consumer_activation_name(self):
+        packet = (dent(".private_watch_identity") +
+                  dent("com.example.personal.service") +
+                  dent("fota.consumer.service", stat.S_IFREG | 0o644, size=978) +
+                  done())
+        sock = peer([packet[:3], packet[3:18], packet[18:37], packet[37:]])
+        result = list_one(sock, Path("/unused"), "dbus_system_vendor")
+        self.assertEqual(result["status"], "LIST_COMPLETE")
+        self.assertEqual(result["fota_consumer_activation_file"],
+                         {"kind": "REGULAR_FILE", "bytes": 978})
+        self.assertEqual(result["other_or_unreported_entries"], 2)
+        serialized = json.dumps(result)
+        self.assertNotIn("private_watch_identity", serialized)
+        self.assertNotIn("com.example.personal", serialized)
+        emitted = outgoing(sock)
+        path = DBUS_DIRECTORIES["dbus_system_vendor"]
+        self.assertEqual(emitted[2][3], SYNC_HDR.pack(b"LIST", len(path)) + path)
+        self.assertEqual(sum(f[0] == b"WRTE" for f in emitted), 1)
+        self.assertNotIn(b"RECV", bytes(sock.sent))
+        self.assertNotIn(b"SEND", bytes(sock.sent))
+        self.assertNotIn(b"shell:", bytes(sock.sent))
+
+    def test_dbus_empty_and_no_named_activation_is_inconclusive(self):
+        result = list_one(peer([done()]), Path("/unused"), "dbus_system_override")
+        self.assertEqual(result["status"], "EMPTY_OR_INACCESSIBLE")
+        self.assertEqual(result["fota_consumer_activation_file"], "NOT_SEEN_IN_LIST")
+        self.assertIn("dynamic", result["meaning"])
+        result = list_one(peer([dent("org.other.service") + done()]),
+                          Path("/unused"), "dbus_session_vendor")
+        self.assertEqual(result["status"], "LIST_COMPLETE")
+        self.assertEqual(result["fota_consumer_activation_file"], "NOT_SEEN_IN_LIST")
+
+    def test_dbus_only_query_uses_only_three_fixed_read_only_lists(self):
+        samples = [
+            peer([dent("fota.consumer.service") + done()]),
+            peer([done()]),
+            peer([dent("other.service") + done()]),
+        ]
+        with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                   side_effect=samples) as connect:
+            report = inventory("10.0.0.65", Path("/unused"),
+                               dbus_services_only=True)
+        self.assertEqual(connect.call_count, len(DBUS_DIRECTORIES))
+        self.assertEqual(set(report["directory_results"]), set(DBUS_DIRECTORIES))
+        self.assertEqual(report["status"], "READ_ONLY_FIXED_DBUS_DIRECTORY_INVENTORY")
+        self.assertFalse(report["watch_write_performed"])
+        self.assertNotIn("10.0.0.65", json.dumps(report))
 
     def test_fragmented_dent_headers_and_names(self):
         data = dent("fota-service") + dent("fota-consumer") + (
