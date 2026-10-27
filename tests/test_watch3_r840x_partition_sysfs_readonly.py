@@ -138,7 +138,7 @@ class FixedSysfsLabelsTests(unittest.TestCase):
 
     def test_partition_name_may_be_absent_even_when_uevent_readable(self):
         # Linux part_uevent adds PARTNAME only when volume label exists.
-        without = (record(1, "BOOT").replace("PARTNAME=BOOT\\n", ""))
+        without = (record(1, "BOOT").replace("PARTNAME=BOOT\n", ""))
         parsed = probe.parse_sysfs(without)
         self.assertEqual(parsed["state"], "SYSFS_PARTITION_METADATA_ONLY_NO_PARTNAME")
         self.assertEqual(parsed["partname_field_count"], 0)
@@ -164,7 +164,7 @@ class FixedSysfsLabelsTests(unittest.TestCase):
             "partition_p1_uevent": record(1, "BOOT", "DO_NOT_LEAK_UUID"),
             "partition_p20_uevent": record(20, "rootfs"),
             "partition_p21_uevent": record(21, "userdata").replace(
-                "PARTNAME=userdata\\n", ""),
+                "PARTNAME=userdata\n", ""),
         }
         with patch("watch3_r840x_partition_sysfs_readonly.collect",
                    return_value=(outputs, {})) as call:
@@ -212,7 +212,7 @@ class FixedSysfsLabelsTests(unittest.TestCase):
                        "partition_p20_uevent": record(20, "ROOTFS") +
                                                   record(21, "userdata"),
                        "partition_p21_uevent": record(21, "userdata") +
-                                                  "PARTN=22\\n",
+                                                  "PARTN=22\n",
                    }, {})):
             report = probe.inspect_fixed_sample("10.0.0.65", Path("/unused"))
         self.assertEqual(report["probe_summary"]["readable_uevent_files"], 0)
