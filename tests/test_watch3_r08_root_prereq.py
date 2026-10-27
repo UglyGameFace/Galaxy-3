@@ -58,6 +58,9 @@ class RootPrerequisiteTests(unittest.TestCase):
             "dotnet_caps": "/usr/bin/dotnet cap_sys_admin,cap_setgid=ep\n",
             "launcher_caps": "/usr/sbin/sdbd-tarlauncher cap_setuid,cap_setgid=ep\n",
             "dotnet_runtime": "Microsoft.NETCore.App 3.1.32 [/usr/share/dotnet/shared/Microsoft.NETCore.App]\n",
+            "dotnet_file": "-rwxr-xr-x 1 root root 3000 Jan 1 00:00 /usr/bin/dotnet\n",
+            "launcher_file": "-rwxr-xr-x 1 root root 3000 Jan 1 00:00 /usr/sbin/sdbd-tarlauncher\n",
+            "dotnet_runtime_link": "/usr/share/dotnet.tizen/netcoreapp/3.1.32\n",
             "tar_features": "Usage: tar\n --to-command=COMMAND\n",
         }
 
@@ -145,7 +148,7 @@ class RootPrerequisiteTests(unittest.TestCase):
         self.assertNotIn("SECRET_BUILDER", report)
 
     def test_fixed_allowlist_has_no_install_flash_or_injection(self):
-        self.assertEqual(len(ROOT_PATH_PROBES), 5)
+        self.assertEqual(len(ROOT_PATH_PROBES), 8)
         for query in ROOT_PATH_PROBES.values():
             for forbidden in (";", "`", "$(", "dd ", "flash", "install",
                               "rm ", "reboot", "|", ">"):
@@ -153,7 +156,7 @@ class RootPrerequisiteTests(unittest.TestCase):
 
     def test_sdb_closed_shell_exposes_category_not_device_exception(self):
         peers = [FakeSocket(frame(b"CNXN", VERSION, 262144, b"device::\x00")
-                            + frame(b"CLSE", 0, 2)) for _ in range(10)]
+                            + frame(b"CLSE", 0, 2)) for _ in range(2 * len(ROOT_PATH_PROBES))]
         with patch("watch3_r08_android_sdb.socket.create_connection",
                    side_effect=peers):
             observed, missing = collect("10.54.86.131", Path("/unused"),
@@ -165,7 +168,7 @@ class RootPrerequisiteTests(unittest.TestCase):
         self.assertNotIn("10.54.86.131", serialized)
 
     def test_short_missing_tool_reply_preserves_exact_reason_category(self):
-        outputs = ["Linux version 4.9.59 test-kernel\n"] + ["sh: getcap: not found\n"] * 4
+        outputs = ["Linux version 4.9.59 test-kernel\n"] + ["sh: getcap: not found\n"] * (len(ROOT_PATH_PROBES) - 1)
         peers = [FakeSocket(peer(output)) for output in outputs]
         with patch("watch3_r08_android_sdb.socket.create_connection",
                    side_effect=peers):
@@ -186,12 +189,57 @@ class RootPrerequisiteTests(unittest.TestCase):
             observed, missing = collect("10.54.86.131", Path("/unused"),
                                         probes=ROOT_PATH_PROBES)
         self.assertFalse(missing)
-        self.assertEqual(connected.call_count, 5)
+        self.assertEqual(connected.call_count, len(ROOT_PATH_PROBES))
         self.assertEqual(summarize_root_path(observed, {})["status"],
                          "STATIC_PREREQUISITES_OBSERVED")
         for index, key in enumerate(ROOT_PATH_PROBES):
             self.assertEqual(sent_commands(peers[index]),
                              [b"shell:" + ROOT_PATH_PROBES[key].encode() + b"\x00"])
+
+    def test_getcap_absence_no_longer_hides_binary_presence(self):
+        values = self.sample()
+        values.pop("dotnet_caps")
+        values.pop("launcher_caps")
+        values["dotnet_runtime"] = "Unknown option --list-runtimes\n"
+        report = summarize_root_path(values, {
+            "dotnet_caps": "WATCH_REPORTED_COMMAND_OR_PATH_MISSING",
+            "launcher_caps": "WATCH_REPORTED_COMMAND_OR_PATH_MISSING",
+        })
+        self.assertEqual(report["status"], "INCONCLUSIVE")
+        self.assertEqual(report["checks"]["dotnet_binary"], "FILE_PRESENT")
+        self.assertEqual(report["checks"]["archive_launcher_binary"], "FILE_PRESENT")
+        self.assertEqual(report["checks"]["dotnet_runtime"], "SUPPORTED_RUNTIME_PRESENT")
+
+    def test_exact_launcher_absence_blocks_only_this_specific_root_path(self):
+        values = self.sample()
+        values.pop("launcher_file")
+        report = summarize_root_path(values, {"launcher_file": "TARGET_PATH_NOT_FOUND"})
+        self.assertEqual(report["checks"]["archive_launcher_binary"], "FILE_ABSENT")
+        self.assertEqual(report["status"], "STATIC_PATH_NOT_SUPPORTED")
+        self.assertFalse(report["root_obtained"])
+
+    def test_missing_ls_utility_is_not_false_missing_executable(self):
+        values = self.sample()
+        values.pop("dotnet_file")
+        report = summarize_root_path(values, {
+            "dotnet_file": "WATCH_REPORTED_COMMAND_OR_PATH_MISSING"})
+        self.assertEqual(report["checks"]["dotnet_binary"], "UNAVAILABLE")
+        self.assertEqual(report["status"], "INCONCLUSIVE")
+
+    def test_watch_ls_missing_target_has_distinct_error_code(self):
+        outputs = self.sample()
+        outputs["launcher_file"] = (
+            "ls: cannot access '/usr/sbin/sdbd-tarlauncher': "
+            "No such file or directory\n")
+        peers = [FakeSocket(peer(outputs[key])) for key in ROOT_PATH_PROBES]
+        with patch("watch3_r08_android_sdb.socket.create_connection",
+                   side_effect=peers):
+            observed, missing = collect("10.0.0.65", Path("/unused"),
+                                        probes=ROOT_PATH_PROBES)
+        self.assertEqual(missing.get("launcher_file"), "TARGET_PATH_NOT_FOUND")
+        self.assertEqual(summarize_root_path(observed, missing)["status"],
+                         "STATIC_PATH_NOT_SUPPORTED")
+        self.assertNotIn("10.0.0.65", json.dumps(summarize_root_path(observed, missing)))
 
 
 if __name__ == "__main__":

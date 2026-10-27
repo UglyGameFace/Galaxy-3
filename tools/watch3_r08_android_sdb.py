@@ -420,13 +420,23 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
                         alt.handshake()
                         value = alt.shell(name, style="tizen-command")
             if probes is ROOT_PATH_PROBES:
-                # Keep only fixed categorical evidence. Generic substring
-                # filtering masks why a real watch reports UNAVAILABLE.
-                reason = _root_path_output_error(value)
-                if reason is not None:
-                    problems[name] = reason
+                # A missing `getcap` binary and a missing TARGET are different.
+                # Trust a negative ls result only when it names the exact path.
+                path_probe = {
+                    "dotnet_file": "/usr/bin/dotnet",
+                    "launcher_file": "/usr/sbin/sdbd-tarlauncher",
+                }
+                target = path_probe.get(name)
+                if (target and target in value and
+                        "no such file or directory" in value.lower()):
+                    problems[name] = "TARGET_PATH_NOT_FOUND"
                 else:
-                    observations[name] = value
+                    # Never write full watch output to the JSON report.
+                    reason = _root_path_output_error(value)
+                    if reason is not None:
+                        problems[name] = reason
+                    else:
+                        observations[name] = value
             elif (not value.strip() or any(
                 warning in value.lower() for warning in (
                     "permission denied", "no such file", "not found", "access denied"

@@ -146,3 +146,34 @@ is a **parser mismatch**, not a proven negative prerequisite. A shell
 refusal suggests the restricted Tizen SDB dispatcher blocked the command;
 a missing path requires differentiating absent tool and absent target in
 later analysis. No exploit, archive launch or firmware write occurs.
+
+## R840X real SDB root-path observation: 2026-10-27 (working IP 10.0.0.65)
+
+Owner's authenticated read-only SDB observation on the live R840X:
+`sdb_shell_baseline=KERNEL_VERSION_READ`; `tar --to-command` advertised;
+both capability probes reported `WATCH_REPORTED_COMMAND_OR_PATH_MISSING`;
+the .NET list-runtimes request returned bytes, but the original narrow parser
+did not recognize them. This **does not** prove the capability-bearing
+binaries are missing because the watch may lack `getcap` itself.
+
+A follow-up, still read-only, checks `ls -ld` on each exact required
+binary and tries `readlink -f /usr/share/dotnet.tizen/netcoreapp` as a
+Tizen-specific fallback if the desktop-style runtime listing is unknown.
+All values are categorized without saving raw paths, firmware secrets or
+watch IPs. A target-absent result is reported only if `ls` names the
+exact missing path; a missing `ls` command is not misclassified as an
+absent target. This is not the TV SDB injection payload or a root attempt.
+
+Run after the branch is merged:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_android_sdb.py --watch-ip 10.0.0.65 --root-path-only
+cat ~/watch3-r08-root-path-redacted.json
+```
+
+If a required file is **proven absent**, this *specific TV archive-launcher
+chain* is unavailable in its published form. If files are present but
+capability tools are unavailable, the result correctly remains inconclusive.
+Do not install tools onto Tizen, attempt firmware writes or assume another
+model's kernel exploit applies.
