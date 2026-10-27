@@ -77,7 +77,7 @@ python tools/watch3_r840x_csc_readonly.py \
 An offline-only parser fixture mode is also available for tests:
 
 ```sh
-printf 'XAR\\n' > ~/synthetic-csc.txt
+printf '%s\\n' XAR > ~/synthetic-csc.txt
 python tools/watch3_r840x_csc_readonly.py \
   --offline-sample ~/synthetic-csc.txt \
   --output ~/synthetic-csc-offline-report.json
