@@ -21,6 +21,7 @@ from watch3_r08_live_boot_probe import PROBES, STORAGE_PROBES, summarize
 from watch3_r08_storage_mapping import summarize_storage
 from watch3_r08_power_baseline import summarize_power
 from watch3_r08_bezel_capabilities import summarize_bezel
+from watch3_r08_boot_memory import summarize_memory
 
 # Read ONLY the pinned Samsung battery device's read-only sysfs uevent.
 # No wildcard, arbitrary paths, raw blocks or writes; its exact identity
@@ -29,10 +30,16 @@ POWER_PROBES = {"battery_uevent": "cat /sys/class/power_supply/battery/uevent"}
 # One fixed read-only text registry. It reports names, capability bitmaps
 # and kernel handler tokens, NOT any actual bezel rotation or keypresses.
 BEZEL_PROBES = {"input_devices": "cat /proc/bus/input/devices"}
+# Safe kernel pseudo-text; no partition reads or binary device-tree nodes.
+# /proc/iomem is optional: Linux may mask System RAM ranges for non-root users.
+BOOT_MEMORY_PROBES = {
+    "meminfo": "cat /proc/meminfo",
+    "iomem": "cat /proc/iomem",
+}
 
 # Explicit, fixed, read-only operations; storage and battery probe sets run
 # only when expressly requested. Normal boot collection stays unchanged.
-ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES}
+ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES}
 
 PORT = 26101
 VERSION = 0x00100000
@@ -371,8 +378,9 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
     ip = private_watch_ip(ip)
     observations, problems = {}, {}
     if (probes is not PROBES and probes is not STORAGE_PROBES and
-            probes is not POWER_PROBES and probes is not BEZEL_PROBES):
-        raise SdbError("Only predefined boot, storage, battery or bezel probe sets are allowed")
+            probes is not POWER_PROBES and probes is not BEZEL_PROBES and
+            probes is not BOOT_MEMORY_PROBES):
+        raise SdbError("Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed")
     for name in probes:
         try:
             with socket.create_connection((ip, PORT), timeout=timeout) as sock:
@@ -427,15 +435,18 @@ def main():
                         help="Read Tizen input capability names and bitmaps, "
                              "save only a privacy-filtered bezel report; "
                              "never capture live rotation or button events")
+    parser.add_argument("--boot-memory-only", action="store_true",
+                        help="Read only Tizen /proc/meminfo and /proc/iomem; "
+                             "save privacy-filtered RAM ranges; no bootloader commands")
     parser.add_argument("--report", type=Path,
                         help="Optional local privacy-filtered JSON destination")
     parser.add_argument("--key-path", type=Path,
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     args = parser.parse_args()
     if sum((args.diagnose_only, args.storage_only,
-            args.power_only, args.bezel_only)) > 1:
+            args.power_only, args.bezel_only, args.boot_memory_only)) > 1:
         parser.error("Choose at most one of --diagnose-only, --storage-only, "
-                     "--power-only or --bezel-only")
+                     "--power-only, --bezel-only or --boot-memory-only")
     if args.diagnose_only:
         try:
             diagnose(args.watch_ip, args.key_path)
@@ -456,6 +467,12 @@ def main():
             report = summarize_bezel(values, errors)
             dest = args.report or (Path.home() /
                                    "watch3-r08-bezel-redacted.json")
+        elif args.boot_memory_only:
+            values, errors = collect(args.watch_ip, args.key_path,
+                                     probes=BOOT_MEMORY_PROBES)
+            report = summarize_memory(values, errors)
+            dest = args.report or (Path.home() /
+                                   "watch3-r08-boot-memory-redacted.json")
         elif args.storage_only:
             values, errors = collect(args.watch_ip, args.key_path,
                                      probes=STORAGE_PROBES)
@@ -481,9 +498,13 @@ def main():
     elif args.bezel_only and report["status"] != "BEZEL_REL_WHEEL_ADVERTISED":
         print("UNAVAILABLE: Physical REL_WHEEL capability not confirmed; "
               "no rotation events or Qt navigation inferred. Redacted report saved.")
+    elif args.boot_memory_only and report["status"] == "LIVE_MEMORY_UNAVAILABLE":
+        print("UNAVAILABLE: Watch kernel RAM evidence masked or unavailable; "
+              "no layout or boot addresses inferred.")
     else:
         print("PASS: privacy-filtered Watch3 " +
               ("power" if args.power_only else "bezel capability" if args.bezel_only else
+               "boot memory" if args.boot_memory_only else
                "storage" if args.storage_only else "boot") +
               " report saved locally.")
     print("Report path:", dest)
