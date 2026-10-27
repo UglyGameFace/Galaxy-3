@@ -121,6 +121,63 @@ record of the physical magic-only test separately from the trust of
 an arbitrary ZIP. Neither a correctly named ZIP nor the known
 magic exchange changes its final `NO_GO` decision.
 
+## October 27 primary-researcher and exact bootloader-vulnerability source check
+
+The pre-July-2021 Watch3 wireless-download vulnerability lead can now
+be attributed beyond CVE aggregator snippets:
+
+- [Samsung's own **July 2021 wearable security bulletin**](
+  https://security.samsungmobile.com/serviceWeb.smsb?year=2021&month=7)
+  lists **SVE-2021-19703 / CVE-2021-25434**:
+  pre-JUL-2021 Tizen bootloader improper validation involving the
+  **`param` partition** in Wireless Download, potentially allowing
+  arbitrary code execution. Samsung lists Galaxy Watch3 family among
+  affected devices and credits the **BoB WatchOver** research team.
+- The same primary bulletin lists
+  **SVE-2021-19705 / CVE-2021-25435**:
+  another pre-JUL-2021 bootloader validation vulnerability involving
+  the **`recovery` partition** in Wireless Download, credited to
+  **BoB WatchOver**. Samsung dates disclosure report to **November 21,
+  2020** and says fixed in the JUL-2021 firmware release.
+- Original credited WatchOver team researcher
+  [Soomin Shin (`imssm99`)](https://github.com/imssm99)
+  independently lists both bootloader CVEs along with companion
+  Tizen/FOTA findings in their own public bio. This establishes an
+  actual research attribution, **not** public working exploit code,
+  signed image format, an SM-R840X flash tool or a safe temporary
+  kernel execution procedure.
+- **Installed physical evidence:** owner's SM-R840X stock reports
+  `R840XXXU1AUA2`, apparently chronologically before July 2021,
+  and the unit really supports AP-mode Wireless Download and the
+  four-byte `ODIN`/`LOKE` greeting. However, the model-specific
+  loader's exact patch status, `param`/`recovery` validation
+  behavior, build provenance and authorization to modify either
+  partition are **NOT established** by the build token or CVE list.
+
+**Safety consequence:** These vulnerability descriptions point at
+the *very partitions a malformed payload could damage*, and are
+not recovery mechanisms. Do **not** feed malformed PIT/param/recovery
+data to Odin, use a generic proof-of-concept against the only
+working watch, or equate potential code execution with a safe
+unmodified partition return path. A *sacrificial second matching
+unit*, or a credible vendor-specific independent full stock
+rescue method, would be required before planning such a physical
+test. Source-only research and legally obtained binary comparison
+remain permitted. Even a real exploit would not itself prove that
+UgLy|OS can boot safely or that a device can be restored afterwards.
+
+### No genuine bootloader binary yet in research custody
+
+The source search did not produce an authenticated signed complete
+early **SM-R840X `R840XXXU1AUA2`** `sboot`/bootloader
+image or a usable **SM-R840X R08** `param`/`recovery` baseline.
+Public sites show retail `SM-R840` build labels and old R840X
+download entries, but that is **metadata**. In particular, even
+a freely downloadable retail image would be an **OFF-DEVICE**
+comparison only, not proof of demo-unit rollback or flashability.
+Do not say signature checks can be bypassed on this specific watch,
+or promise a flashable custom kernel, absent actual validated evidence.
+
 ## Android-only offline triage, without extracting anything
 
 If a legitimate R840X recovery ZIP is obtained, inspect its central directory
