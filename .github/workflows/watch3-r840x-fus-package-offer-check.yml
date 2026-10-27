@@ -1,0 +1,126 @@
+name: R840X/PAP Samsung FUS complete-firmware record check (NO WATCH)
+
+# One off-device catalog query after physical SM-R840X/PAP CSC and installed
+# R840XXXU1AUA2 were proven. The separate FOTA version.xml success only
+# enumerated firmware versions, not a complete recoverable stock package.
+# This asks Samsung's FUS BinaryInform for an ACTUAL full-package record.
+# Never downloads image bytes, touches the watch or sends any Odin commands.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r840x-fus-package-offer-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  single-public-manufacturer-catalog-query:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned upstream open-source read-only FUS metadata client
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check \
+            'git+https://github.com/samloader/samloader.git@0e53d8032699a4039ea6f5310ebec05f8f417f07'
+      - name: Query only one exact Samsung model and actual CSC for a full firmware package record
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 65s python3 - <<'PY'
+          import json
+          import re
+          import urllib.request
+          import urllib.error
+          from xml.etree import ElementTree as ET
+
+          MODEL = "SM-R840X"
+          CSC = "PAP"
+          BUILD = "R840XXXU1AUA2"
+          URL = f"https://fota-cloud-dn.ospserver.net/firmware/{CSC}/{MODEL}/version.xml"
+          report = {
+              "schema": "uglyos-r840x-fus-full-stock-archive-offer-v1",
+              "owner_observed_model": MODEL,
+              "owner_observed_active_csc": CSC,
+              "owner_observed_installed_build": BUILD,
+              "mode": "PUBLIC_FOTA_VERSION_THEN_SAMSUNG_FUS_BINARYINFORM_METADATA_ONLY",
+              "fota_version_state": "NOT_ATTEMPTED",
+              "fus_binary_info_state": "NOT_ATTEMPTED",
+              "manufacturer_package_filename": None,
+              "manufacturer_package_declared_size_bytes": None,
+              "manufacturer_signed_recovery_verified": False,
+              "exact_hardware_rollback_compatibility_proven": False,
+              "stock_restoration_tested": False,
+              "watch_contacted": False,
+              "firmware_bytes_downloaded": False,
+              "partition_written": False,
+              "flash_allowed": False,
+              "result": "NO_GO",
+          }
+          try:
+              request = urllib.request.Request(
+                  URL, headers={"User-Agent": "SAMSUNG-Android",
+                                "Accept": "application/xml, text/xml"})
+              with urllib.request.urlopen(request, timeout=12) as response:
+                  raw = response.read(128 * 1024 + 1)
+              if len(raw) > 128 * 1024 or b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+                  raise ValueError("invalid response size or DTD")
+              root = ET.fromstring(raw)
+              if root.tag != "versioninfo":
+                  raise ValueError("not versioninfo XML")
+              version = root.findtext("./firmware/version/latest") or ""
+              parts = version.strip().split("/")
+              if len(parts) not in (3, 4) or not parts[0].startswith(BUILD):
+                  raise ValueError("latest was not the physically verified R840X build")
+              if any(x and not re.fullmatch(r"[A-Z0-9]{6,24}", x) for x in parts):
+                  raise ValueError("unexpected version token")
+              # Legacy official-server client expects exactly 4 version parts.
+              from samloader.versionfetch import normalizevercode
+              latest = normalizevercode(version)
+              if not re.fullmatch(r"[A-Z0-9/]{25,110}", latest):
+                  raise ValueError("normalized version string is not safe")
+              report["fota_version_state"] = "MATCHING_PUBLIC_FIRMWARE_VERSION_CONFIRMED"
+              from samloader.fusclient import FUSClient
+              from samloader.main import getbinaryfile
+              try:
+                  client = FUSClient()
+                  _server_path, filename, file_size = getbinaryfile(client, latest, MODEL, CSC)
+                  if not isinstance(filename, str) or not re.fullmatch(
+                      r"[A-Za-z0-9_.+-]{1,200}", filename):
+                      raise ValueError("untrusted manufacturer filename")
+                  if not isinstance(file_size, int) or not 1_000_000 < file_size < 10_000_000_000:
+                      raise ValueError("invalid claimed manufacturer package size")
+                  report["fus_binary_info_state"] = "MANUFACTURER_FULL_PACKAGE_METADATA_OFFERED"
+                  report["manufacturer_package_filename"] = filename
+                  report["manufacturer_package_declared_size_bytes"] = file_size
+                  # A FUS offer is a lead; it does not verify local archive
+                  # bytes, signing, compatible PIT or recovery from brick.
+              except Exception:
+                  # The old FUS API may fail due to authentication, retired
+                  # model, missing file, traffic filtering, etc. Do NOT
+                  # claim genuine R840X firmware never existed.
+                  report["fus_binary_info_state"] = "NO_VERIFIED_FULL_PACKAGE_OFFER_FROM_THIS_CLIENT"
+          except Exception:
+              report["fota_version_state"] = "ENDPOINT_OR_VERSION_UNVERIFIED_ON_THIS_RUN"
+              report["fus_binary_info_state"] = "SKIPPED_UNVERIFIED_FOTA"
+          print(json.dumps(report, indent=2))
+          with open("r840x-pap-fus-package-offer.json", "x", encoding="utf-8") as out:
+              json.dump(report, out, indent=2)
+              out.write("\n")
+          assert report["watch_contacted"] is False
+          assert report["firmware_bytes_downloaded"] is False
+          assert report["partition_written"] is False
+          assert report["flash_allowed"] is False
+          assert report["result"] == "NO_GO"
+          PY
+      - name: Archive sanitized full-package offer metadata (NOT firmware)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sm-r840x-pap-fus-package-offer-evidence
+          path: r840x-pap-fus-package-offer.json
+          retention-days: 14
+          if-no-files-found: error
