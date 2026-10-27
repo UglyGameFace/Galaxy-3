@@ -1,4 +1,4 @@
-name: R840X public Samsung FOTA metadata lookup (NO WATCH)
+name: R840X owner PAP public Samsung FOTA version metadata (NO WATCH)
 
 on:
   pull_request:
@@ -31,33 +31,36 @@ jobs:
           git diff --check
           echo 'PASS: only mocked network responses; firmware and watch untouched.'
 
-  one-shot-public-version-xml:
+  one-shot-owner-pap-version-xml:
     needs: offline-parser-regressions
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch at most three PUBLIC manufacturer version.xml metadata documents
+      - name: Fetch exactly one PUBLIC SM-R840X PAP version.xml (confirmed active CSC only)
         run: |
           set -euo pipefail
           python3 tools/watch3_r840x_public_fota_version_recon.py \
-            --probe-public-metadata --output r840x-public-fota-redacted.json
-          cat r840x-public-fota-redacted.json
+            --probe-owner-active-csc --output r840x-pap-fota-redacted.json
+          cat r840x-pap-fota-redacted.json
           python3 - <<'PY'
           import json
           from pathlib import Path
-          r = json.loads(Path('r840x-public-fota-redacted.json').read_text())
+          r = json.loads(Path('r840x-pap-fota-redacted.json').read_text())
           assert r['result'] == 'NO_GO'
           assert r['device_contacted'] is False
           assert r['firmware_downloaded'] is False
           assert r['firmware_written'] is False
           assert r['odin_session_started'] is False
-          assert len(r['observations']) == 3
+          assert len(r['observations']) == 1
+          assert r['physical_active_csc_observed'] == 'PAP'
+          assert r['observations'][0]['region'] == 'PAP'
+          assert r['observations'][0]['model'] == 'SM-R840X'
           print('PASS: public metadata outcomes recorded WITHOUT a watch or firmware download.')
           PY
       - name: Preserve only sanitized public model-region lookup states
         uses: actions/upload-artifact@v4
         with:
-          name: r840x-public-fota-metadata-no-watch
-          path: r840x-public-fota-redacted.json
+          name: r840x-pap-public-fota-metadata-no-watch
+          path: r840x-pap-fota-redacted.json
           retention-days: 14
