@@ -91,7 +91,7 @@ def _tizen_runtime_link(raw: str | None) -> str:
     if len(lines) != 1:
         return "UNAVAILABLE"
     match = re.fullmatch(
-        r"/usr/share/dotnet\.tizen/netcoreapp/(\\d+)\.(\\d+)\.(\\d+)", lines[0])
+        r"/usr/share/dotnet\.tizen/netcoreapp/(\d+)\.(\d+)\.(\d+)", lines[0])
     if not match:
         return "UNAVAILABLE"
     major, minor = int(match.group(1)), int(match.group(2))
