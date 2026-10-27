@@ -252,6 +252,26 @@ jobs:
           # The real BitBake build evaluates dependencies itself. Do not repeat
           # expensive bitbake -g graph probes already proven in earlier runs.
 
+      - name: Reject unapplied R08 QtBase bezel patch before the ARM64 build
+        if: env.TARGET == 'qtbase'
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          # Check actual BitBake overrides rather than reading our bbappend alone.
+          bitbake -e qtbase > "$GITHUB_WORKSPACE/stage-logs/qtbase-bezel-effective.env"
+          python3 "$GITHUB_WORKSPACE/tools/verify_watch3_qtbase_bezel_stage.py" \
+            "$GITHUB_WORKSPACE/stage-logs/qtbase-bezel-effective.env" --stage metadata
+          # Only fetch/unpack/patch; if ineffective, abort BEFORE the cold build.
+          bitbake -c patch qtbase
+          bitbake -e qtbase > "$GITHUB_WORKSPACE/stage-logs/qtbase-bezel-effective.env"
+          python3 "$GITHUB_WORKSPACE/tools/verify_watch3_qtbase_bezel_stage.py" \
+            "$GITHUB_WORKSPACE/stage-logs/qtbase-bezel-effective.env" --stage patched
+          rm -f "$GITHUB_WORKSPACE/stage-logs/qtbase-bezel-effective.env"
+          echo 'PASS: source-patched R08 bezel QtBase validated before ARM64 compilation'
+
       - name: Run bounded real ARM64 package or offline image stage
         id: qtbuild
         shell: bash
