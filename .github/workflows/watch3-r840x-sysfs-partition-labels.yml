@@ -1,0 +1,51 @@
+name: SM-R840X sysfs numbered partition labels (FAKE WATCH ONLY)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/watch3_r08_android_sdb.py'
+      - 'tools/watch3_r840x_partition_sysfs_readonly.py'
+      - 'tests/test_watch3_r840x_partition_sysfs_readonly.py'
+      - 'docs/watch3-r840x-sysfs-partition-labels.md'
+      - '.github/workflows/watch3-r840x-sysfs-partition-labels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-no-watch-sysfs-parser:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify fake sysfs partition map and legacy storage unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_watch3_r840x_partition_sysfs_readonly.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_storage_mapping.py' -v
+          python3 -m py_compile tools/watch3_r840x_partition_sysfs_readonly.py
+          python3 - <<'PY'
+          from pathlib import Path
+          script = Path('tools/watch3_r840x_partition_sysfs_readonly.py').read_text()
+          sdb = Path('tools/watch3_r08_android_sdb.py').read_text()
+          assert 'cat /sys/class/block/mmcblk0p[0-9]*/uevent' in sdb
+          assert '"partitions_uevent"' in sdb
+          assert 'MAX_TEXT_BYTES = 16 * 1024' in script
+          assert '"flash_allowed": False' in script
+          assert '"stock_recovery_proven": False' in script
+          assert 'raw_partition_bytes_read' in script
+          assert 'PARTITION_SYSFS_PROBES' in script
+          assert 'os.system(' not in script
+          assert 'subprocess.' not in script
+          assert 'Odin' not in script.split('def inspect_live')[1]
+          print('PASS: one opt-in fixed sysfs-only command, no raw block access')
+          PY
+          git diff --check
+          echo 'NO WATCH CONTACT OR FIRMWARE WRITES. All tests synthetic.'
