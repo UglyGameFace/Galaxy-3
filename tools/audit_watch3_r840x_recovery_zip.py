@@ -56,7 +56,7 @@ def _preflight_central_directory(path: Path, size: int) -> str | None:
     with path.open("rb") as file:
         file.seek(max(0, size - (65535 + 22)))
         tail = file.read(65535 + 22)
-    offset = tail.rfind(b"PK\\x05\\x06")
+    offset = tail.rfind(b"PK\x05\x06")
     if offset < 0 or offset + 22 > len(tail):
         return "INVALID_OR_UNREADABLE_ZIP"
     try:
@@ -64,7 +64,7 @@ def _preflight_central_directory(path: Path, size: int) -> str | None:
             struct.unpack_from("<4s4H2IH", tail, offset))
     except struct.error:
         return "INVALID_OR_UNREADABLE_ZIP"
-    if sig != b"PK\\x05\\x06" or offset + 22 + comment != len(tail):
+    if sig != b"PK\x05\x06" or offset + 22 + comment != len(tail):
         return "INVALID_OR_UNREADABLE_ZIP"
     if disk != 0 or start != 0 or on_disk != total:
         return "INVALID_OR_UNREADABLE_ZIP"
