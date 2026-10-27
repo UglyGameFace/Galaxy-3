@@ -40,7 +40,10 @@ BOOT_MEMORY_PROBES = {
 
 # Explicit, fixed, read-only operations; storage and battery probe sets run
 # only when expressly requested. Normal boot collection stays unchanged.
-ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES, **ROOT_PATH_PROBES}
+ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES}
+# Preserve the existing audited boot/power/bezel contract; root-path checks
+# are a separate, opt-in, fixed read-only set.
+ALLOWED_PROBES.update(ROOT_PATH_PROBES)
 
 PORT = 26101
 VERSION = 0x00100000
@@ -381,7 +384,7 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
     if (probes is not PROBES and probes is not STORAGE_PROBES and
             probes is not POWER_PROBES and probes is not BEZEL_PROBES and
             probes is not BOOT_MEMORY_PROBES and probes is not ROOT_PATH_PROBES):
-        raise SdbError("Only predefined boot, storage, battery, bezel, boot-memory or root-path probes are allowed")
+        raise SdbError("Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed (plus the fixed root-path set)")
     for name in probes:
         try:
             with socket.create_connection((ip, PORT), timeout=timeout) as sock:
