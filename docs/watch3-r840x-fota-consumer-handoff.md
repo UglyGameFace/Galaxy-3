@@ -468,3 +468,69 @@ watch/phone protocol but will not by itself establish who owns the
 `fota.consumer` D-Bus name. Never send `Launch` or initiate a FOTA
 update. Unsigned boot, stock rescue and privilege boundaries still
 require independent proof.
+
+
+## October 27: physical FOTA systemd units and SAP resource confirmed
+
+The owner executed merged #70 `--fota-handoff-index-only` against their
+actual SM-R840X and returned four complete read-only SDB LIST results:
+
+- `/usr/lib/systemd/system` listed **11** FOTA/update-like unit names
+  (401 other items). The most relevant *actual regular files*:
+  `fota-consumer.service` (**386 bytes**),
+  `recovery-update.service` (**238 bytes**),
+  `update-service.service` (**245 bytes**),
+  `rw-update.service` (**215 bytes**).
+  Other matches include ordinary systemd bookkeeping units and
+  `system-update.target`; names alone cannot identify a boot mechanism.
+- `/usr/lib/systemd/user` LIST_COMPLETE, 67 other entries and zero
+  matched FOTA-related units.
+- `/etc/systemd/system` LIST_COMPLETE, four unrelated entries and zero
+  matched units.
+- Exact `/usr/apps/com.samsung.fota-consumer/res/xml/appcessoryservices.xml`
+  is a **2,036-byte REGULAR_FILE**, with two other entries in its
+  directory. The vendor spelling `appcessory` was verified in the
+  authentically retrieved 2,215-byte installed package XML.
+
+This is the first positive on-device presence evidence for the named
+`fota-consumer.service` **systemd** unit, distinct from missing D-Bus
+activation service files. It is plausible that systemd starts the FOTA
+receiver, but actual `ExecStart`, `BusName`, signature checks and
+mode of recovery have NOT been read or established.
+
+### Next exact five-file read-only evidence gate
+
+`tools/watch3_r08_fota_handoff_pull.py` uses the proven authenticated SDB
+sync-v1 transport to read exactly these five **owner-observed** files,
+each on its own bounded SDB connection. The remote allowlist is literal,
+not a path supplied by the user. The per-file read is capped at 8 KiB
+and the normal SDB frame count and read timeout limits apply.
+
+The original service-unit files and XML stay **only on the owner's
+phone**, as mode-0600 files inside exclusive mode-0700
+`~/watch3-r840x-fota-handoff-evidence` (never in GitHub). A redacted
+`fota-handoff-report.json` inside that directory records per-file
+`FETCHED` or explicit redacted failure, size, SHA-256, and only bounded
+unit fields: `Type`, `BusName`, safe simple absolute executable
+path from `ExecStart` (no args), `After`, `Wants`, `Requires`. For
+SAP XML only root tag is shown; the full XML is private. Missing or
+denied files are recorded independently and do not prevent other fixed
+reads. No guessed sixth file, shell, `systemctl`, update call, D-Bus
+message, write, device flash or root action exists.
+
+After CI and merge, owner can execute this from Android Termux:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_fota_handoff_pull.py --watch-ip 10.0.0.65
+cat ~/watch3-r840x-fota-handoff-evidence/fota-handoff-report.json
+```
+
+For more thorough offline inspection, copy the private `.service`
+files to Android Downloads for chat attachment (not GitHub). A
+successfully read FOTA `BusName` and `ExecStart` would tie the D-Bus
+name to a specific executable/service startup **configuration**, not
+prove an active owner or that any FOTA payload is accepted. Recovery
+service content may establish a recovery *procedure or helper*, but
+a safe stock restore and custom unsigned kernel boot still require
+independent hardware/firmware verification.
