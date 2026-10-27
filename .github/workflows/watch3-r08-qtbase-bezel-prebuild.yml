@@ -1,0 +1,34 @@
+name: UgLy|OS R08 BitBake bezel prebuild gate (NO TARGET BUILD)
+
+# Fast host fixtures only. The manually dispatched ARM64 workflows are not
+# started here; this test verifies they refuse stale/unpatched Qt input sources.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/verify_watch3_qtbase_bezel_stage.py'
+      - 'tests/test_watch3_r08_qtbase_bezel_stage.py'
+      - '.github/workflows/watch3-r08-qt-staged-runtime.yml'
+      - '.github/workflows/watch3-r08-qt-linuxfb-package.yml'
+      - '.github/workflows/watch3-r08-qtbase-bezel-prebuild.yml'
+      - 'docs/uglyos-r08-bezel-qt-input.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fail-fast:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test effective BitBake selector and post-do_patch source gate
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/verify_watch3_qtbase_bezel_stage.py tests/test_watch3_r08_qtbase_bezel_stage.py
+          python3 -m unittest discover -s tests -p test_watch3_r08_qtbase_bezel_stage.py -v
+          python3 -m unittest discover -s tests -p test_watch3_r08_bezel_qt_filter.py -v
+          git diff --check
+          echo 'PASS: R08 BitBake QtBase must select and apply bezel filter BEFORE cold ARM64 compilation'
+          echo 'NOT TESTED: real BitBake do_patch, AArch64 binary, watch libinput or boot'
