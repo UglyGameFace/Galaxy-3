@@ -128,3 +128,24 @@ missing/denied/unreadable cannot be distinguished. If the exact
 `updateclient` can be recovered, inspect it OFFLINE before pursuing
 any other FOTA surface. Stock restore and bootloader acceptance remain
 independent mandatory proof gates.
+
+## Follow-up: actual updateclient RECV failure and diagnostic correction
+
+Owner's first actual R840X `--component updateclient` run returned
+`NO_ARTIFACT: SDB_UNAVAILABLE_OR_REJECTED`; no evidence JSON was created.
+The extractor's prior `main()` combined `SdbError`, local `OSError`,
+and timeouts into one catch-all string. Thus this output **does not**
+prove file absence, denial, or successful binary access. In particular,
+a normal sync `FAIL` would have reported
+`REMOTE_FILE_MISSING_DENIED_OR_UNREADABLE`, which was **not** observed.
+
+The narrow fix preserves the two literal executable paths, byte cap,
+private no-overwrite semantics, and pure SDB `sync:RECV` behavior. It
+categorizes connect, handshake, sync-open, and sync-transfer failures,
+separating timeouts, protocol/auth failures, and I/O failures without
+printing raw network, token or system error text. Read-only mock-watch
+regressions run in the existing workflow. A stage result is evidence of
+**where** acquisition failed, not necessarily why the watch rejected it.
+
+After merging a green CI result, retry only the same bounded read once.
+No firmware update, mode transition, root attempt or watch write is needed.
