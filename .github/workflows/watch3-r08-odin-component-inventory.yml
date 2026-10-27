@@ -1,0 +1,30 @@
+name: UgLy|OS R840X Odin component inventory (OFF DEVICE)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/audit_watch3_r840x_odin_components.py'
+      - 'tests/test_watch3_r840x_odin_components.py'
+      - '.github/workflows/watch3-r08-odin-component-inventory.yml'
+      - 'docs/watch3-r08-stock-firmware-triage.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata-inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove metadata only on fake BL/AP/CSC firmware
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_watch3_r840x_odin_components.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r840x_recovery_zip.py' -v
+          python3 -m py_compile tools/audit_watch3_r840x_odin_components.py
+          git diff --check
+          echo 'PASS: fake-only Odin TAR listing; no genuine firmware was downloaded'
+          echo 'NO_GO: stock authenticity, PIT mapping, recovery, alternate boot remain unverified'
