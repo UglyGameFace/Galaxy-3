@@ -33,6 +33,13 @@ OBSERVED_FILES = {
     "appcessoryservices.xml": (
         b"/usr/apps/com.samsung.fota-consumer/res/xml/appcessoryservices.xml", 2036),
 }
+# Both literal paths are grounded by ExecStart in the successfully
+# retrieved physical service unit files, NOT by guessing filenames.
+# The owner has not yet confirmed the script files' existence or readability.
+REFERENCED_HELPER_FILES = {
+    "recovery-update.sh": (b"/usr/bin/recovery-update.sh", None),
+    "rw-update-systemd.sh": (b"/usr/bin/rw-update-systemd.sh", None),
+}
 MAX_FILE_BYTES = 8 * 1024
 REPORT_NAME = "fota-handoff-report.json"
 SCHEMA = "uglyos-r840x-exact-fota-handoff-recv-v1"
@@ -54,7 +61,8 @@ class CappedBytes(io.BytesIO):
 
 def receive_one(sock, key_path: Path, remote_path: bytes) -> bytes:
     """Exactly one SDB OPEN sync: plus read-only RECV for a fixed-path caller."""
-    if remote_path not in {item[0] for item in OBSERVED_FILES.values()}:
+    if remote_path not in {item[0] for item in (
+            list(OBSERVED_FILES.values()) + list(REFERENCED_HELPER_FILES.values()))}:
         raise HandoffError("REMOTE_PATH_NOT_ALLOWLISTED")
     conn = Connection(sock, key_path)
     try:
@@ -162,11 +170,13 @@ def private_write(path: Path, payload: bytes) -> None:
         raise
 
 
-def collect(ip: str, key_path: Path, folder: Path, timeout: int = 12) -> dict:
-    """Never transmit an unlisted path, even if an individual RECV fails."""
+def collect(ip: str, key_path: Path, folder: Path, timeout: int = 12,
+            *, observed_helpers_only: bool = False) -> dict:
+    """Read only literal observed unit files or exact ExecStart-referenced scripts."""
     private_ip = private_watch_ip(ip)
     results = {}
-    for filename, (remote_path, expected_size) in OBSERVED_FILES.items():
+    selected = REFERENCED_HELPER_FILES if observed_helpers_only else OBSERVED_FILES
+    for filename, (remote_path, expected_size) in selected.items():
         try:
             with socket.create_connection((private_ip, PORT), timeout=timeout) as sock:
                 sock.settimeout(timeout)
@@ -176,19 +186,27 @@ def collect(ip: str, key_path: Path, folder: Path, timeout: int = 12) -> dict:
                 "status": "FETCHED",
                 "bytes": len(raw),
                 "observed_list_bytes": expected_size,
-                "size_matches_previous_list": len(raw) == expected_size,
+                "size_matches_previous_list": (
+                    len(raw) == expected_size if expected_size is not None else None),
                 "sha256": hashlib.sha256(raw).hexdigest(),
             }
-            report.update(inspect_sap(raw) if filename.endswith(".xml")
-                          else inspect_unit(raw))
+            if observed_helpers_only:
+                # Shell content stays private on owner's phone. NEVER execute it.
+                report["parse_status"] = "SHELL_TEXT_RETAINED_NOT_EXECUTED"
+                report["source"] = "EXACT_EXECSTART_IN_PHYSICAL_SYSTEMD_UNIT"
+            else:
+                report.update(inspect_sap(raw) if filename.endswith(".xml")
+                              else inspect_unit(raw))
             results[filename] = report
         except HandoffError as exc:
             results[filename] = {"status": str(exc)}
         except (OSError, SdbError, TimeoutError):
             results[filename] = {"status": "SDB_OR_LOCAL_IO_ERROR"}
     return {
-        "schema": SCHEMA,
-        "status": "READ_ONLY_FIXED_FOTA_HANDOFF_RECV",
+        "schema": ("uglyos-r840x-referenced-fota-helper-recv-v1"
+                   if observed_helpers_only else SCHEMA),
+        "status": ("READ_ONLY_REFERENCED_FOTA_HELPER_RECV" if observed_helpers_only
+                   else "READ_ONLY_FIXED_FOTA_HANDOFF_RECV"),
         "files": results,
         "meaning": ("Only owner-observed systemd/SAP metadata. No active D-Bus owner, "
                     "firmware signing rights, bootloader acceptance, root or rescue proven."),
@@ -202,18 +220,24 @@ def collect(ip: str, key_path: Path, folder: Path, timeout: int = 12) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--watch-ip", required=True)
+    parser.add_argument("--observed-helpers-only", action="store_true",
+                        help="Read only two exact shell script paths from physical unit ExecStart")
     parser.add_argument("--key-path", type=Path,
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     parser.add_argument("--output-dir", type=Path,
                         default=Path.home() / "watch3-r840x-fota-handoff-evidence")
     args = parser.parse_args()
     folder = args.output_dir.expanduser()
+    if (args.observed_helpers_only and folder ==
+            Path.home() / "watch3-r840x-fota-handoff-evidence"):
+        folder = Path.home() / "watch3-r840x-fota-recovery-helpers"
     try:
         if not folder.parent.is_dir():
             raise HandoffError("LOCAL_PARENT_DIRECTORY_MISSING")
         # Directory creation is local and exclusive. Never overwrite evidence.
         os.mkdir(folder, 0o700)
-        report = collect(args.watch_ip, args.key_path, folder)
+        report = collect(args.watch_ip, args.key_path, folder,
+                         observed_helpers_only=args.observed_helpers_only)
         payload = (json.dumps(report, indent=2) + "\n").encode("utf-8")
         private_write(folder / REPORT_NAME, payload)
     except (HandoffError, OSError, SdbError) as exc:
