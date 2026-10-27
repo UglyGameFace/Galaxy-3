@@ -178,6 +178,23 @@ jobs:
             "$GITHUB_WORKSPACE/qt-logs/launcher-env.tmp"
           rm -f "$GITHUB_WORKSPACE/qt-logs/qtbase-env.tmp" "$GITHUB_WORKSPACE/qt-logs/launcher-env.tmp"
           df -h "$GITHUB_WORKSPACE"
+      - name: Check real R08 bezel source selection and BitBake do_patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source src/oe-core/oe-init-build-env build >/dev/null
+          set -u
+          bitbake -e qtbase > "$GITHUB_WORKSPACE/qt-logs/qtbase-bezel-effective.env"
+          python3 "$GITHUB_WORKSPACE/tools/verify_watch3_qtbase_bezel_stage.py" \
+            "$GITHUB_WORKSPACE/qt-logs/qtbase-bezel-effective.env" --stage metadata
+          bitbake -c patch qtbase
+          bitbake -e qtbase > "$GITHUB_WORKSPACE/qt-logs/qtbase-bezel-effective.env"
+          python3 "$GITHUB_WORKSPACE/tools/verify_watch3_qtbase_bezel_stage.py" \
+            "$GITHUB_WORKSPACE/qt-logs/qtbase-bezel-effective.env" --stage patched
+          rm -f "$GITHUB_WORKSPACE/qt-logs/qtbase-bezel-effective.env"
+          echo 'PASS: actual QtBase input source patched before package compilation'
+
       - name: Build only QtBase through package staging
         id: qtbase_build
         shell: bash
