@@ -169,7 +169,9 @@ def capture(ip: str, key_path: Path, destination: Path, timeout: int = 12) -> di
         # This check protects an existing local file. It does NOT update the watch.
         if destination.exists() or destination.is_symlink():
             raise ArtifactPullError("LOCAL_OUTPUT_ALREADY_EXISTS")
-        os.rename(temporary, destination)
+        # Hard-link creation is exclusive: never replace an existing phone file.
+        os.link(temporary, destination)
+        os.unlink(temporary)
         return result
     finally:
         if os.path.exists(temporary):
