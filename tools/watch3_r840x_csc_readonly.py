@@ -124,9 +124,11 @@ def report_base() -> dict:
         "remote_path": CSC_PATH.decode("ascii"),
         "observed_active_csc_candidate": None,
         "state": "NOT_ATTEMPTED",
-        "note": ("The referenced path is established on an older SM-R805U "
-                 "Tizen watch, NOT yet independently on this R840X LDU. "
-                 "A candidate value is not OEM signed CSC or stock rescue proof."),
+        "note": ("The path was first identified in SM-R805U Tizen research. "
+                 "An actual SM-R840X active PAP CSC observation was reported "
+                 "by the owner on 2026-10-27 using this exact fixed file. "
+                 "A future candidate is only active system configuration, "
+                 "not a signed factory CSC or stock rescue proof."),
         "watch_write_performed": False,
         "odin_session_started": False,
         "pit_requested": False,
