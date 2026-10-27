@@ -28,6 +28,6 @@ python tools/watch3_r08_android_sdb.py --watch-ip 10.0.0.65 --fota-path-only
 cat ~/watch3-r08-fota-path-redacted.json
 ```
 
-Update the watch IP if it changes. The previous real watch observation already confirms unauthenticated? **No**: authenticated SDB `PASS[tcp]`, `PASS[sdb]`, `PASS[shell]` at `10.0.0.65`, and `/usr/sbin/sdbd-tarlauncher` is absent. The TV archive-root route is retired.
+Update the watch IP if it changes. The previous real-watch evidence confirmed authenticated SDB `PASS[tcp]`, `PASS[sdb]`, `PASS[shell]` at `10.0.0.65`, and `/usr/sbin/sdbd-tarlauncher` is absent. The TV archive-root route is retired.
 
 **Next technical decision:** use actual R840X observations to choose which component to inspect offline from authenticated owner-acquired Tizen firmware. Mere presence is not an exploit or bootloader unlock. With no full verified R840X backup/restore, do not write bootloader or firmware partitions on the only working watch.
