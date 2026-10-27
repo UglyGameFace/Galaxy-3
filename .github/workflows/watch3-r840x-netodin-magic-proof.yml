@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'tools/watch3_r840x_netodin_magic_only.py'
+      - 'tools/watch3_r840x_ap_network_preflight.py'
+      - 'tests/test_watch3_r840x_ap_network_preflight.py'
       - 'tests/test_watch3_r840x_netodin_magic_only.py'
       - 'docs/watch3-r840x-wireless-download-magic.md'
       - '.github/workflows/watch3-r840x-netodin-magic-proof.yml'
@@ -15,7 +17,11 @@ permissions:
 
 jobs:
   four-byte-contract:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +29,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s tests -p test_watch3_r840x_netodin_magic_only.py -v
-          python3 -m py_compile tools/watch3_r840x_netodin_magic_only.py
+          python3 -m unittest discover -s tests -p test_watch3_r840x_ap_network_preflight.py -v
+          python3 -m py_compile tools/watch3_r840x_netodin_magic_only.py tools/watch3_r840x_ap_network_preflight.py
           git diff --check
-          echo 'PASS: socket loopback only; sends ODIN magic, receives LOKE, closes'
+          echo 'PASS: local-only Wi-Fi inspection, explicit local subnet binding and loopback peer contract'
           echo 'NO-GO: not tested on the R840X, bootloader exploit, recovery or flash'

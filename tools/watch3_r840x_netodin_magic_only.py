@@ -12,10 +12,13 @@ Manually entering/exiting Download mode can still be disruptive.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 from pathlib import Path
 import socket
 import sys
+
+from watch3_r840x_ap_network_preflight import subnet_for_bind_ip
 import time
 
 PORT = 13579
@@ -25,7 +28,8 @@ DEFAULT_WAIT = 60
 PER_SOCKET_TIMEOUT = 5.0
 
 
-def perform_magic_once(listener: socket.socket, seconds: int = DEFAULT_WAIT) -> dict:
+def perform_magic_once(listener: socket.socket, seconds: int = DEFAULT_WAIT,
+                       allowed_subnet: ipaddress.IPv4Network | None = None) -> dict:
     """Accept one connection and exchange magic only. Do not store client IP."""
     result = {
         "schema": "watch3-r840x-wireless-odin-magic-v1",
@@ -44,7 +48,7 @@ def perform_magic_once(listener: socket.socket, seconds: int = DEFAULT_WAIT) -> 
         raise ValueError("listen timeout must be 5–180 seconds")
     listener.settimeout(float(seconds))
     try:
-        peer, _ = listener.accept()
+        peer, peer_address = listener.accept()
     except socket.timeout:
         return result
     except OSError:
@@ -52,6 +56,17 @@ def perform_magic_once(listener: socket.socket, seconds: int = DEFAULT_WAIT) -> 
         return result
 
     with peer:
+        if allowed_subnet is not None:
+            # The watch AP's *local* assigned subnet is necessary, not
+            # sufficient, evidence for the incoming connection identity.
+            try:
+                source = ipaddress.IPv4Address(peer_address[0])
+            except (ValueError, TypeError, IndexError):
+                result["state"] = "PEER_ADDRESS_NOT_IPV4"
+                return result
+            if source not in allowed_subnet:
+                result["state"] = "PEER_OUTSIDE_CONFIRMED_LOCAL_WLAN_SUBNET"
+                return result
         peer.settimeout(PER_SOCKET_TIMEOUT)
         try:
             # Exactly 4 bytes sent. No command frame or other protocol traffic.
@@ -72,15 +87,16 @@ def perform_magic_once(listener: socket.socket, seconds: int = DEFAULT_WAIT) -> 
     return result
 
 
-def run_live(seconds: int = DEFAULT_WAIT) -> dict:
-    # Bind only when operator explicitly requests live mode.
+def run_live(seconds: int, bind_ip: str) -> dict:
+    # Validate before bind: no 0.0.0.0/public or arbitrary local addresses.
+    local_subnet = subnet_for_bind_ip(bind_ip)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind(("0.0.0.0", PORT))
+        server.bind((bind_ip, PORT))
         server.listen(1)
         print("Armed magic-only listener on port 13579; waiting for a watch-initiated TCP connection.", flush=True)
         print("Never sends Odin session, PIT, flash or reboot commands.", flush=True)
-        return perform_magic_once(server, seconds)
+        return perform_magic_once(server, seconds, allowed_subnet=local_subnet)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -90,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--watch-ap-confirmed", action="store_true",
                     help="I am using the watch's temporary Wireless Download AP, not public Wi-Fi")
     ap.add_argument("--listen-seconds", type=int, default=DEFAULT_WAIT)
+    ap.add_argument("--bind-ip",
+                    help="Required: exact RFC1918 IPv4 currently on the phone's WLAN")
     ap.add_argument("--report", type=Path)
     args = ap.parse_args(argv)
 
@@ -97,9 +115,16 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("No network action by default. Live test requires BOTH --live-magic-only and --watch-ap-confirmed.")
     if not (5 <= args.listen_seconds <= 180):
         ap.error("--listen-seconds must be 5..180")
+    if not args.bind_ip:
+        ap.error("Live mode requires --bind-ip from local phone-only WLAN preflight")
 
+    # This requires operator confirmation in Android Wi-Fi settings, not
+    # an automatically fabricated SSID or inferred watch identity.
     try:
-        result = run_live(args.listen_seconds)
+        result = run_live(args.listen_seconds, args.bind_ip)
+    except ValueError as exc:
+        print("LOCAL_WIFI_PREFLIGHT_FAILED: " + str(exc), file=sys.stderr)
+        return 2
     except OSError as exc:
         print("FAIL: cannot bind or accept port 13579: " + type(exc).__name__, file=sys.stderr)
         return 2
