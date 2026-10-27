@@ -1,9 +1,31 @@
 # Galaxy Watch3 SM-R840X R08 first boot: evidence and recovery gate
 
-Updated 2026-10-24. Target board **NOBLESSE-LARGE-BT R08**; installed
+Updated 2026-10-27 (physical Watch3 AP/ODIN-LOKE transport proof). Target board **NOBLESSE-LARGE-BT R08**; installed
 firmware **R840XXXU1AUA2**, Tizen 5.5, Linux 4.9.59.
 This is an **engineering decision record**, not installation instructions.
 No device writes, unlock attempts, or unverified images are authorized.
+
+## Owner's physical transport evidence: October 27, 2026
+
+The original pre-test language in this file has been superseded by direct
+observations from the **owner's actual SM-R840X R08**, not a simulated
+peer: Watch3 reboot selector with `Download (Wireless)` (approximately
+five-second timeout); WPS mode; AP Mode labeled `SM-R840X`; Android
+host bound to the watch AP at `192.168.49.20:13579`; exact four-byte
+`ODIN`/`LOKE` exchange; after the intentionally incomplete handshake,
+the watch rebooted into normal Tizen. An expected-looking
+`Failed to recv cmd (0 != 1024)` message corresponds with no subsequent
+1,024-byte packet having been sent. The source-level classification is
+recorded in [offline Odin command risk matrix](
+watch3-r840x-odin-offline-risk-classification.md).
+
+This proves **basic wireless download transport** and a normal return
+after *that* non-flashing experiment, not recovery after corrupting
+storage. The actual loader's supported session/PIT commands, Samsung
+signing/anti-rollback checks, authentic OEM restoration archive,
+device-specific full rescue from boot failure and UgLy|OS kernel
+acceptance remain **unproven**. No new 1,024-byte protocol traffic
+is allowed on the only working watch.
 
 ## Automated first-boot safety gate (2026-10-26)
 
@@ -41,8 +63,8 @@ proven boot image. Keep the original successful image unchanged.
 |---|---|---|---|
 | **Tizen SDB over Wi-Fi** | Official Samsung documentation supports wireless SDB on Tizen Galaxy Watches; it has already been used read-only on this R840X. | Root or raw boot/recovery partition access, loading a custom kernel. | **Use now, read-only** for boot and hardware evidence. |
 | **Samsung recovery/reboot menu** | Samsung officially documents the Galaxy Watch3 reboot-mode and stock recovery navigation. | Restoring a damaged bootloader, accepting unsigned images. Factory reset is not recovery of firmware partitions. | **Inspect only**; do not select factory reset. |
-| **NetOdin / Wireless Download** | Community reports describe flashing stock/R840 firmware and Wi-Fi Odin on Watch3-family hardware. | Exact R840X build compatibility, a genuine stock full-recovery package matching this exact device, and unsigned custom image acceptance. | **Research only** until stock rescue and boot chain verified. |
-| **AsteroidOS Ragnarök** | AsteroidOS publishes a research tool for Odin protocol, including attempted wireless download mode. Some other Samsung devices have working flashing. | Reliable R840X handshake, read-only PIT, recovery support or custom boot acceptance. Authors say device support varies and bricking is possible. | **Read-only capability research**, no flash calls. |
+| **NetOdin / Wireless Download** | The owner's actual SM-R840X showed Wireless Download WPS and AP screens and successfully exchanged four-byte `ODIN`/`LOKE` with Android TCP/13579; stock Tizen booted afterward. | No 1,024-byte Odin session command has been tested; PIT, authentic matching stock-restoration image, recovery after damaged firmware and custom boot acceptance remain unknown. | **Transport proved; device writes NO-GO**. |
+| **AsteroidOS Ragnarök** | Direct inspection of the pinned source confirms the four-byte magic stage and a subsequent stateful 1,024-byte command protocol. Galaxy-3's physical four-byte stage succeeded. | `detect` invokes session start/end, `print-pit` also starts a session, and firmware/rollback acceptance are unproven on R840X. The source includes destructive factory reset and PIT/flash operations. | **Offline source audits only**; no new live Odin commands. |
 | **Internal USB/UART test pads** | Internal access is documented for *other* Samsung Galaxy Watch models, including Watch FE. | Exact R840X pad location, voltage, pinout, UART console and service recovery. | **Do not copy another model's pinout**; professional board research only if noninvasive routes fail. |
 | **AsteroidOS web installer / Fastboot / ADB unlock** | Works for particular Android/WearOS devices listed by AsteroidOS. | A fastboot or OEM-unlock interface on Tizen R840X. | **Not an applicable proven R840X method.** |
 | **Tizen .tpk apps via SDB** | Samsung's developer documentation supports installing signed Tizen apps. | Replacing the Linux kernel or running a complete independent OS. | Can test an app or limited UI, **not an AsteroidOS install**. |
