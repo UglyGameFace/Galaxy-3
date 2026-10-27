@@ -25,20 +25,20 @@ not the owner's watch.
 ## October 27: physical SM-R840X active CSC has now been observed
 
 The owner ran the merged, **single fixed-path read-only SDB**
-\`tools/watch3_r840x_csc_readonly.py\` on the *actual* SM-R840X
+`tools/watch3_r840x_csc_readonly.py` on the *actual* SM-R840X
 without any firmware write, Odin session, PIT request or CSC change.
 Their supplied privacy-filtered JSON reported:
 
-- \`remote_path=/opt/system/csc-default/output/csc-active-customer.log\`
-- \`state=ACTIVE_CSC_CANDIDATE_READ_FROM_EXACT_TIZEN_PATH\`
-- \`observed_active_csc_candidate=PAP\`
-- \`model=SM-R840X\`, installed \`R840XXXU1AUA2\`
-- \`watch_write_performed=false\`, \`odin_session_started=false\`,
-  \`pit_requested=false\`, \`firmware_written=false\`
-- \`full_stock_recovery_proven=false\`, \`flash_allowed=false\`.
+- `remote_path=/opt/system/csc-default/output/csc-active-customer.log`
+- `state=ACTIVE_CSC_CANDIDATE_READ_FROM_EXACT_TIZEN_PATH`
+- `observed_active_csc_candidate=PAP`
+- `model=SM-R840X`, installed `R840XXXU1AUA2`
+- `watch_write_performed=false`, `odin_session_started=false`,
+  `pit_requested=false`, `firmware_written=false`
+- `full_stock_recovery_proven=false`, `flash_allowed=false`.
 
 **This is direct, model-specific evidence of the watch's *currently
-active* CSC PAP**, not merely the \`(OXA)\` tag on an old seller
+active* CSC PAP**, not merely the `(OXA)` tag on an old seller
 listing. Whether PAP describes the original factory/sales CSC, LDU
 distribution region, ROM package CSC or a bootloader acceptance policy
 is **not established**. The file is mutable system configuration, not
@@ -56,10 +56,10 @@ firmware bytes or a universal PAP flash compatibility rule**.
 ### New one-request manufacturer metadata check
 
 Rather than repeat the unrelated, historically guessed XAR/KOO
-regions, \`--probe-owner-active-csc\` contacts only this **one
+regions, `--probe-owner-active-csc` contacts only this **one
 public model/region endpoint** from GitHub Actions, no watch:
 
-\`https://fota-cloud-dn.ospserver.net/firmware/PAP/SM-R840X/version.xml\`
+`https://fota-cloud-dn.ospserver.net/firmware/PAP/SM-R840X/version.xml`
 
 As before, this is capped, verified HTTPS **version metadata only**:
 one GET, no redirect following, no IMEI, serial, token, owner IP,
@@ -71,7 +71,7 @@ bytes, trusted vendor signatures or a return-to-stock guarantee.
 
 The old, unrelated public lookups and their real HTTP 403/retail
 control results are retained *below as historical evidence*, but
-the current CI job now requests only \`SM-R840X/PAP\`.
+the current CI job now requests only `SM-R840X/PAP`.
 
 ## Historical October 27 lookups before PAP was known (hypotheses only)
 
@@ -79,8 +79,8 @@ When the original lookup ran, the actual LDU **CSC/region was not yet known**;
 it has subsequently been observed as active **PAP** from the watch's exact
 Tizen CSC file. The earlier guess was not validated by
 the public ATFA catalog's `(OXA)` multi-CSC suffix. OXA is not proof of
-a specific 3-letter sales CSC for the running watch. To keep the test
-small and avoid random-region enumeration, the workflow requests just:
+a specific 3-letter sales CSC for the running watch. To keep that initial test small and avoid random-region enumeration, the
+original workflow requested just:
 
 1. `SM-R840X / XAR` (retail US region used only as a hypothesis);
 2. `SM-R840X / KOO` (retail Korea region used only as a hypothesis);
