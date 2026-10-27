@@ -48,7 +48,10 @@ class LimitedBuffer(io.BytesIO):
 
     def write(self, part: bytes) -> int:
         if self.tell() + len(part) > self.max_bytes:
-            raise ManifestError("XML_BYTE_LIMIT_EXCEEDED")
+            # Preserve the original fixed manifest's public error contract.
+            raise ManifestError("XML_BYTE_LIMIT_EXCEEDED" if
+                                self.max_bytes == MAX_REGISTERED_XML_BYTES
+                                else "MANIFEST_EXCEEDS_64_KIB")
         return super().write(part)
 
 
