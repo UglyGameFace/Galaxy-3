@@ -11,7 +11,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import watch3_r840x_partition_sysfs_readonly as probe
 from watch3_r08_android_sdb import (
-    ALLOWED_PROBES, Connection, PARTITION_SYSFS_PROBES, SdbError,
+    ALLOWED_PROBES, Connection, PARTITION_SYSFS_PROBES,
+    PARTITION_SYSFS_FIXED_PROBES, SdbError, collect, VERSION, frame, receive,
 )
 
 
@@ -133,6 +134,116 @@ class FixedSysfsLabelsTests(unittest.TestCase):
                     "--watch-ip", "10.0.0.65", "--report", str(dest)
                 ]), 1)
             self.assertEqual(dest.read_text(), "original")
+
+
+    def test_partition_name_may_be_absent_even_when_uevent_readable(self):
+        # Linux part_uevent adds PARTNAME only when volume label exists.
+        without = (record(1, "BOOT").replace("PARTNAME=BOOT\n", ""))
+        parsed = probe.parse_sysfs(without)
+        self.assertEqual(parsed["state"], "SYSFS_PARTITION_METADATA_ONLY_NO_PARTNAME")
+        self.assertEqual(parsed["partname_field_count"], 0)
+        self.assertEqual(parsed["partition_name_records"],
+                         [{"index": 1, "kernel_reported_label": "not_exported"}])
+        self.assertEqual(probe.parse_sysfs(record(1, "BOOT"))["partname_field_count"], 1)
+
+    def test_fixed_probes_have_three_exact_no_wildcard_paths_and_cannot_open_devices(self):
+        expected = {
+            "partition_p1_uevent": "cat /sys/class/block/mmcblk0p1/uevent",
+            "partition_p20_uevent": "cat /sys/class/block/mmcblk0p20/uevent",
+            "partition_p21_uevent": "cat /sys/class/block/mmcblk0p21/uevent",
+        }
+        self.assertEqual(PARTITION_SYSFS_FIXED_PROBES, expected)
+        self.assertEqual({k: ALLOWED_PROBES[k] for k in expected}, expected)
+        for cmd in expected.values():
+            for forbidden in ("*", "[", "]", "/dev/", ";", "&&", "|", ">", "<",
+                              "dd ", "reboot", "flash", "odin", "sdb"):
+                self.assertNotIn(forbidden, cmd.lower())
+
+    def test_three_read_only_fixed_files_require_matching_indices_and_do_not_claim_all_21(self):
+        outputs = {
+            "partition_p1_uevent": record(1, "BOOT", "DO_NOT_LEAK_UUID"),
+            "partition_p20_uevent": record(20, "rootfs"),
+            "partition_p21_uevent": record(21, "userdata").replace(
+                "PARTNAME=userdata\n", ""),
+        }
+        with patch("watch3_r840x_partition_sysfs_readonly.collect",
+                   return_value=(outputs, {})) as call:
+            result = probe.inspect_fixed_sample("10.0.0.65", Path("/unused"))
+        self.assertIs(call.call_args.kwargs["probes"], PARTITION_SYSFS_FIXED_PROBES)
+        self.assertEqual(result["state"], "FIXED_SYSFS_PARTNAME_FIELDS_OBSERVED")
+        self.assertTrue(result["owner_watch_sysfs_observed"])
+        summary = result["probe_summary"]
+        self.assertEqual(summary["readable_uevent_files"], 3)
+        self.assertEqual(summary["partname_fields_observed"], 2)
+        self.assertEqual(len(summary["remaining_partition_indices_not_tested"]), 18)
+        self.assertEqual([x["status"] for x in summary["probes"]],
+                         ["PARTNAME_FIELD_OBSERVED", "PARTNAME_FIELD_OBSERVED",
+                          "UEVENT_READABLE_BUT_PARTNAME_ABSENT"])
+        self.assertEqual(summary["probes"][2]["kernel_reported_label"], "not_exported")
+        self.assertFalse(summary["full_partition_layout_proven"])
+        for key in ("raw_partition_bytes_read", "pit_requested", "odin_session_started",
+                    "watch_write_performed", "stock_recovery_proven",
+                    "bootloader_acceptance_proven", "flash_allowed"):
+            self.assertIs(result[key], False, key)
+        self.assertNotIn("DO_NOT_LEAK_UUID", json.dumps(result))
+        self.assertEqual(result["result"], "NO_GO")
+
+    def test_read_only_fixed_path_errors_are_distinguished_without_leaking_watch_text(self):
+        problems = {
+            "partition_p1_uevent": "SDB_SHELL_CLOSED_OR_REFUSED",
+            "partition_p20_uevent": "SYSFS_PATH_OR_COMMAND_NOT_FOUND",
+            "partition_p21_uevent": "SDB_TRANSPORT_UNREACHABLE",
+        }
+        with patch("watch3_r840x_partition_sysfs_readonly.collect",
+                   return_value=({}, problems)):
+            report = probe.inspect_fixed_sample("10.0.0.65", Path("/unused"))
+        self.assertEqual(report["state"], "FIXED_SYSFS_NO_VALID_TEXT_OBSERVATIONS")
+        self.assertFalse(report["owner_watch_sysfs_observed"])
+        self.assertEqual([x["status"] for x in report["probe_summary"]["probes"]],
+                         list(problems.values()))
+        self.assertNotIn("10.0.0.65", json.dumps(report))
+        self.assertIs(report["report"], None)
+        self.assertEqual(report["result"], "NO_GO")
+
+    def test_literal_sysfs_read_refuses_mismatched_partition_records(self):
+        with patch("watch3_r840x_partition_sysfs_readonly.collect",
+                   return_value=({
+                       "partition_p1_uevent": record(20, "ROOTFS"),
+                       "partition_p20_uevent": record(20, "ROOTFS") +
+                                                  record(21, "userdata"),
+                       "partition_p21_uevent": record(21, "userdata") +
+                                                  "PARTN=22\n",
+                   }, {})):
+            report = probe.inspect_fixed_sample("10.0.0.65", Path("/unused"))
+        self.assertEqual(report["probe_summary"]["readable_uevent_files"], 0)
+        self.assertFalse(report["owner_watch_sysfs_observed"])
+
+    def test_fixed_path_mode_refuses_reuse_of_prior_report_before_contact(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "existing.json"
+            dest.write_text("old watch report")
+            with patch("watch3_r840x_partition_sysfs_readonly.collect",
+                       side_effect=AssertionError("NO EXTRA NETWORK")):
+                self.assertEqual(probe.main([
+                    "--watch-ip", "10.0.0.65", "--fixed-paths",
+                    "--report", str(dest)
+                ]), 1)
+            self.assertEqual(dest.read_text(), "old watch report")
+
+    def test_fixed_paths_are_never_inferred_from_arbitrary_operation_or_mapping(self):
+        class EmptySocket:
+            sent = bytearray()
+            def sendall(self, b):
+                self.sent.extend(b)
+        s = EmptySocket()
+        channel = Connection(s, Path("/synthetic"))
+        for key in ("partition_p100_uevent", "reboot", "cat /dev/mmcblk0"):
+            with self.assertRaisesRegex(SdbError, "allowlist"):
+                channel.shell(key)
+        self.assertEqual(bytes(s.sent), b"")
+        with self.assertRaisesRegex(SdbError, "predefined"):
+            collect("10.0.0.65", Path("/unused"),
+                    probes={"partition_p1_uevent": "cat /dev/mmcblk0p1"})
 
     def test_arbitrary_operation_name_is_not_allowed_to_sdb(self):
         # Existing Connection.shell rejects command text not present in allowlist

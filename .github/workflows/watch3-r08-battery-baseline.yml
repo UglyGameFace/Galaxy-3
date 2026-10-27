@@ -38,7 +38,13 @@ jobs:
           assert 'BOOT_MEMORY_PROBES = {' in source
           assert '"meminfo": "cat /proc/meminfo"' in source
           assert '"iomem": "cat /proc/iomem"' in source
-          assert 'ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES, **PARTITION_SYSFS_PROBES}' in source
+          # Check the actual runtime allowlist, not a brittle exact source
+          # line that breaks when unrelated fixed, read-only probes are added.
+          import sys
+          sys.path.insert(0, 'tools')
+          from watch3_r08_android_sdb import ALLOWED_PROBES, POWER_PROBES
+          assert POWER_PROBES == {'battery_uevent': 'cat /sys/class/power_supply/battery/uevent'}
+          assert ALLOWED_PROBES['battery_uevent'] == POWER_PROBES['battery_uevent']
           assert '"partitions_uevent": "cat /sys/class/block/mmcblk0p[0-9]*/uevent"' in source
           assert 'Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed' in source
           flow = Path('.github/workflows/watch3-r08-battery-baseline.yml').read_text()

@@ -79,6 +79,83 @@ The same script has a strictly local synthetic test mode:
 `OFFLINE_SAMPLE_ONLY_NOT_A_REAL_WATCH_OBSERVATION` so fake CI
 bytes can never be misrepresented as an owner-watch partition table.
 
+## Physical result: October 27 wildcard SDB read was inconclusive
+
+On the real working SM-R840X, the owner already ran the original
+wildcard probe and received **`SYSFS_READ_UNAVAILABLE_OR_UNSUPPORTED_GLOB`**;
+`owner_watch_sysfs_observed=false`, `report=null`. The existing
+collector merged shell refusal, timeout, denied path and missing
+glob matches into that same generic result. **The output does not
+prove the shell failed to expand `*`, that sysfs lacks a partition
+label, or that the actual kernel has no partition metadata.**
+
+### Non-wildcard follow-up for Android/Termux
+
+After the corresponding PR passes CI and is merged to `main`,
+use **only** the new opt-in `--fixed-paths` mode. It makes three
+explicit, bounded SDB shell text-only requests:
+
+```text
+cat /sys/class/block/mmcblk0p1/uevent
+cat /sys/class/block/mmcblk0p20/uevent
+cat /sys/class/block/mmcblk0p21/uevent
+```
+
+There are **no wildcards**, no arbitrary paths, and no
+`/dev/mmcblk0p*` file reads. This is deliberately **three
+probes, not an enumeration of all 21 partitions**. Numbers 1, 20
+and 21 are chosen as a minimal test of whether direct sysfs
+access works. Their roles are **not assumed**.
+
+From normal Tizen on your existing trusted LAN/hotspot (not
+Wireless Download), use the **currently displayed watch IP**.
+The address `10.0.0.65` from previous runs must not be assumed
+still correct.
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r840x_partition_sysfs_readonly.py \\
+  --watch-ip WATCH_CURRENT_WIFI_IP --fixed-paths
+cat ~/watch3-r840x-sysfs-fixed-three.json
+```
+
+The original `~/watch3-r840x-sysfs-partition-names.json`
+is retained unchanged for provenance. The new fixed-only
+report is `~/watch3-r840x-sysfs-fixed-three.json` and is
+created in private mode `0600` without overwriting any
+prior report. It never outputs raw sysfs strings or PARTUUIDs.
+
+What the NEW report can discriminate:
+
+- `SDB_SHELL_CLOSED_OR_REFUSED`,
+  `SDB_SHELL_TIMED_OUT` and `SDB_TRANSPORT_UNREACHABLE`
+  mean shell/service/transport limitations, **not**
+  unavailability of physical partition names.
+- `SYSFS_PATH_OR_COMMAND_NOT_FOUND`, `SYSFS_ACCESS_DENIED`
+  and `SYSFS_EMPTY_SHELL_OUTPUT` mean the specific text
+  request was denied, absent or returned no content. Do
+  **not** escalate privileges.
+- `UEVENT_READABLE_BUT_PARTNAME_ABSENT` is a meaningful
+  kernel metadata result: sysfs may expose the partition
+  number without a GPT volume label.
+- `PARTNAME_FIELD_OBSERVED` means **only the specified
+  index** returned a correctly matching, bounded uevent
+  containing a `PARTNAME` key. The field is
+  privacy-filtered against a small set of recognized labels.
+  It does **not** authenticate Samsung PIT or any
+  recovery/flash compatibility.
+
+Linux's partition `uevent` exporter adds `PARTN`, and
+**only adds `PARTNAME` when volume-name metadata exists**.
+See upstream [Linux block/partitions/core.c](
+https://github.com/torvalds/linux/blob/master/block/partitions/core.c).
+Therefore, even a successful `uevent` read without `PARTNAME`
+must not be reported as a confirmed partition role.
+
+The read-only safety result remains **`NO_GO`** for any
+firmware action, root, Odin session, PIT request, stock rescue,
+retail cross-flash or alternate UgLy|OS boot.
+
 ## Interpreting results without inventing recovery
 
 - `SYSFS_PARTITION_LABELS_OBSERVED`: a consistent subset of
@@ -90,8 +167,10 @@ bytes can never be misrepresented as an owner-watch partition table.
   must not be filled in by numbering guesses. The `missing` list
   is diagnostic, not evidence a partition is physically absent.
 - `SYSFS_READ_UNAVAILABLE_OR_UNSUPPORTED_GLOB`:
-  firmware or the SDB shell didn't expose this information.
-  Do not try reading raw devices or live Odin as a workaround.
+  old report was **inconclusive across several shell and path
+  failure types**, not proof that wildcard expansion specifically
+  failed. Prefer the bounded explicit-path read-only diagnostic
+  described above; never fall back to raw devices or Odin.
 - All reports retain `NO_GO`, `stock_recovery_proven=false`,
   `flash_allowed=false`, `bootloader_acceptance_proven=false`.
 

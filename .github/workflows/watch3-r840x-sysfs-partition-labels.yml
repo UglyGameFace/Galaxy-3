@@ -30,6 +30,7 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s tests -p 'test_watch3_r840x_partition_sysfs_readonly.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_storage_mapping.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_android_sdb.py' -v
           python3 -m py_compile tools/watch3_r840x_partition_sysfs_readonly.py
           python3 - <<'PY'
           from pathlib import Path
@@ -37,6 +38,12 @@ jobs:
           sdb = Path('tools/watch3_r08_android_sdb.py').read_text()
           assert 'cat /sys/class/block/mmcblk0p[0-9]*/uevent' in sdb
           assert '"partitions_uevent"' in sdb
+          assert 'cat /sys/class/block/mmcblk0p1/uevent' in sdb
+          assert 'cat /sys/class/block/mmcblk0p20/uevent' in sdb
+          assert 'cat /sys/class/block/mmcblk0p21/uevent' in sdb
+          assert 'PARTITION_SYSFS_FIXED_PROBES' in script
+          assert 'THREE_EXPLICIT_TEXT_PATHS_NO_WILDCARD' in script
+          assert 'SYSFS_PARTITION_METADATA_ONLY_NO_PARTNAME' in script
           assert 'MAX_TEXT_BYTES = 16 * 1024' in script
           assert '"flash_allowed": False' in script
           assert '"stock_recovery_proven": False' in script
@@ -47,7 +54,7 @@ jobs:
           assert 'b"ODIN"' not in script
           assert 'b"SEND"' not in script
           assert '"result": "NO_GO"' in script
-          print('PASS: one opt-in fixed sysfs-only command, no raw block access')
+          print('PASS: original probe preserved plus 3 no-glob sysfs-only diagnostic paths; no raw block access')
           PY
           git diff --check
           echo 'NO WATCH CONTACT OR FIRMWARE WRITES. All tests synthetic.'
