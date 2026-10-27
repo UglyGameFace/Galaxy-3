@@ -1,0 +1,116 @@
+name: Preserve original Watch3 offline AsteroidOS image (NO WATCH)
+
+# One-time preservation of the exact image from build 40095182440.
+# PRs only test tiny fake checksums; the large original is downloaded
+# and re-uploaded ONCE on the workflow's initial merge to main.
+# Manual rerun is available when explicitly needed; no recurring duplication.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-original-image-preservation.yml'
+      - 'tools/verify_watch3_original_artifact_preservation.py'
+      - 'tests/test_watch3_original_artifact_preservation.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-original-image-preservation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: original-watch3-image-preservation
+  cancel-in-progress: false
+
+jobs:
+  test-image-identity-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate offline SHA-only gate with tiny synthetic fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/verify_watch3_original_artifact_preservation.py
+          python3 -m unittest discover -s tests -p test_watch3_original_artifact_preservation.py -v
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('tools/verify_watch3_original_artifact_preservation.py').read_text()
+          assert 'IMAGE_BYTES = 755658752' in source
+          assert 'IMAGE_SHA256 = "8358d60f213c7acf8857a7a9795e7de9a35acbc70d6d3743b72299dfe8a3ed72"' in source
+          assert 'watch_contacted": False' in source
+          print('PASS: pinned original image identity and NO WATCH proof')
+          PY
+
+  preserve-image-and-stage:
+    if: github.event_name != 'pull_request'
+    needs: test-image-identity-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve original already built ext4; no recompilation
+        uses: actions/download-artifact@v4
+        with:
+          name: galaxy3-r08-OFFLINE-NOT-FLASHABLE-image-40095182440
+          run-id: 40095182440
+          repository: UglyGameFace/Galaxy-3
+          github-token: ${{ github.token }}
+          path: retrieved/image
+      - name: Retrieve original build stage metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: galaxy3-r08-build-stage-40095182440
+          run-id: 40095182440
+          repository: UglyGameFace/Galaxy-3
+          github-token: ${{ github.token }}
+          path: retrieved/stage
+      - name: Verify the immutable original filesystem byte-for-byte
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_watch3_original_artifact_preservation.py \
+            --image-dir retrieved/image \
+            --output retrieved/stage/preservation-proof.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          proof = json.loads(Path('retrieved/stage/preservation-proof.json').read_text())
+          assert proof['result'] == 'ORIGINAL_OFFLINE_IMAGE_BYTES_VERIFIED'
+          assert proof['original_unmodified'] is True
+          assert not proof['boot_proven']
+          assert not proof['flashable']
+          assert not proof['stock_restore_proven']
+          print('PASS: original historical ext4 fully matched and is NOT FLASHABLE')
+          PY
+      - name: Preserve original offline ext4 under a new artifact expiration
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-PRESERVED-OFFLINE-NOT-FLASHABLE-image-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          compression-level: 6
+          path: retrieved/image/asteroid-image-noblesse-r08.rootfs-20261024125252.ext4
+      - name: Preserve stage metadata and verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-PRESERVED-build-provenance-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: retrieved/stage
+      - name: Summarize the provenance and expiration policy
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## SM-R840X: original completed image preserved without rebuilding
+          - Source: [build 40095182440](https://github.com/UglyGameFace/Galaxy-3/actions/runs/40095182440).
+          - Original source artifact expires October 31, 2026.
+          - Original 755,658,752-byte ext4 and SHA-256 verified before new upload.
+          - A **new 90-day** GitHub Actions artifact was created; check its actual expiry in GitHub.
+          - This is an offline **NOT FLASHABLE** Linux root filesystem, not a recovery firmware.
+          - No device connected, no boot attempt, no firmware mutation.
+          EOF
