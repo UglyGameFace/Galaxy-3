@@ -149,3 +149,48 @@ regressions run in the existing workflow. A stage result is evidence of
 
 After merging a green CI result, retry only the same bounded read once.
 No firmware update, mode transition, root attempt or watch write is needed.
+
+
+## Real updateclient ELF narrows the next firmware consumer target (October 27)
+
+The owner privately uploaded the 445,524-byte ARM32 `updateclient`
+from physical R840X SDB `sync:RECV`. Verified SHA-256:
+`95ca44a06e3dd95ae78d09443f2a8cb22d34fda1648fa0ba7e1a25472feb8728`.
+Offline disassembly mapped SES updater network/cert and Tizen package-manager
+calls, not the earlier `fota.consumer` D-Bus `Launch` endpoint. This
+does not demonstrate any firmware-signature bypass or root path. Keep the
+private extracted ELF out of GitHub.
+
+### Fixed D-Bus service activation inventory
+
+Standard Linux D-Bus service activation locators (authoritative spec:
+https://dbus.freedesktop.org/doc/dbus-specification.html ) include:
+`/usr/share/dbus-1/system-services`, `/etc/dbus-1/system-services`,
+and session-bus `/usr/share/dbus-1/services`. Neither the exact
+Samsung registry location nor activation mechanism is proven on R840X.
+
+Reuse the previously validated SDB sync `LIST` implementation with
+`--dbus-services-only`. It performs at most three independent fixed,
+bounded read-only directory listings and reveals **only**
+`fota.consumer.service` (type and size), not unrelated filenames,
+user data, D-Bus messages, service activation, arbitrary search paths,
+device writes or file contents. Empty/denied listings and missing
+filename are explicitly inconclusive: the bus name could be acquired
+dynamically or from a nonstandard directory.
+
+After passing fake-watch CI and merging to main:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_fota_consumer_inventory.py \
+  --watch-ip 10.0.0.65 --dbus-services-only
+cat ~/watch3-r840x-fota-dbus-services.json
+```
+
+If the target is listed in one of those locations, the next change
+will be an equally fixed, bounded read-only `sync:RECV` of that
+**observed** text registration, with privacy-filtered reporting of
+`Name` and `Exec` only. Do not call the `Launch` method or
+invoke firmware updates. If it is not listed, do not claim the service
+is absent; pivot to passive package/systemd/daemon registration evidence
+instead. Root, safe stock rescue and custom unsigned boot remain NO-GO.
