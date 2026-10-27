@@ -106,7 +106,7 @@ def summarize_version_xml_shape(data: bytes) -> dict:
 
     # Fixed small allowlist for text-free schema metadata. Do NOT copy
     # arbitrary XML text, attribute values, hostnames or binary links.
-    safe_tag = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}\\Z")
+    safe_tag = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}\Z")
     nodes = 0
     paths: set[str] = set()
     archive_url_like = 0
@@ -130,7 +130,7 @@ def summarize_version_xml_shape(data: bytes) -> dict:
             value = (node.text or "").strip()
             if value.lower().startswith(("https://", "http://")):
                 generic_http_url_like += 1
-                if re.search(r"\\.(?:zip|tar|md5|img|bin|enc4)(?:[?#].*)?\\Z",
+                if re.search(r"\.(?:zip|tar|md5|img|bin|enc4)(?:[?#].*)?\Z",
                              value, flags=re.I):
                     archive_url_like += 1
         for child in reversed(list(node)):
