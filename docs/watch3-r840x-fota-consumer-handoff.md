@@ -194,3 +194,56 @@ will be an equally fixed, bounded read-only `sync:RECV` of that
 invoke firmware updates. If it is not listed, do not claim the service
 is absent; pivot to passive package/systemd/daemon registration evidence
 instead. Root, safe stock rescue and custom unsigned boot remain NO-GO.
+
+
+## Physical D-Bus directory observation (October 27): target not listed
+
+Owner ran PR #64's read-only fixed directory inventory on the physical
+SM-R840X and got:
+- `/usr/share/dbus-1/system-services`: LIST_COMPLETE, 85 other entries;
+  exact `fota.consumer.service` **not listed**.
+- `/etc/dbus-1/system-services`: EMPTY_OR_INACCESSIBLE.
+- `/usr/share/dbus-1/services`: LIST_COMPLETE, 16 other entries;
+  exact target **not listed**.
+No firmware write, root attempt, update RPC, or privileged interaction.
+These observations **do not establish an absent D-Bus owner**. The current
+D-Bus specification requires system-bus .service filenames to match
+the well-known name; session-bus activation files can have a differing
+filename for historical compatibility, and the prior probe did not
+cover every standard system directory. Source:
+https://dbus.freedesktop.org/doc/dbus-specification.html
+
+## Next stronger source: installed FOTA package manifest
+
+Samsung's Tizen package installation layout places
+`tizen-manifest.xml` in the native application's package root. It
+contains `<service-application>` declarations and `exec` paths.
+Source: https://github.com/Samsung/tizen-docs/blob/master/docs/application/native/index.md
+and https://github.com/Samsung/tizen-docs/blob/master/docs/application/native/guides/applications/service-app.md .
+
+Known actual package root from the already extracted
+`/usr/apps/com.samsung.fota-consumer/bin/fota-service` gives the
+**one fixed target**
+`/usr/apps/com.samsung.fota-consumer/tizen-manifest.xml`.
+The small `watch3_r08_fota_manifest_probe.py` performs one
+bounded, authenticated, read-only `sync:RECV` of **that exact path**,
+without execution. It reuses the existing SDB transport and sync decoder,
+validates an XML package root without DTD/entities, and reports only
+application type and within-package executable basename plus safe
+application ID. It does not persist the raw XML, read any other paths,
+start services, invoke `Launch`, write to the watch or access partitions.
+
+After passing synthetic no-watch CI and merging:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_fota_manifest_probe.py --watch-ip 10.0.0.65
+cat ~/watch3-r840x-fota-manifest.json
+```
+
+The JSON is private mode 0600 and no-clobber. If the manifest is not
+readable, that is a precise access result, not evidence of absent
+firmware machinery. If present, compare declared executables with the
+previous FOTA bin inventory. This is still static package metadata,
+**not proof of D-Bus ownership, unsigned custom kernel acceptance or
+stock recovery**. Record findings under Issue #47 only.
