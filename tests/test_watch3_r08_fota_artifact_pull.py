@@ -206,7 +206,7 @@ class FotaArtifactTests(unittest.TestCase):
                          "SDB_HANDSHAKE_PROTOCOL_OR_AUTH_FAILURE")
 
         # CNXN succeeds, but sync OPEN is never acknowledged.
-        cnxn = frame(b"CNXN", VERSION, 256 * 1024, b"device::\\x00")
+        cnxn = frame(b"CNXN", VERSION, 256 * 1024, b"device::\x00")
         with self.assertRaises(ArtifactPullError) as caught:
             pull_fota(FakeSocket(cnxn), Path("/unused"), io.BytesIO(),
                       component="updateclient")
