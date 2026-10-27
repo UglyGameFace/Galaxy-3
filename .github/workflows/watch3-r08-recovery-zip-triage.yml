@@ -15,7 +15,11 @@ permissions:
 
 jobs:
   offline-firmware-triage:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +28,16 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s tests -p test_watch3_r840x_recovery_zip.py -v
           python3 -m py_compile tools/audit_watch3_r840x_recovery_zip.py
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('tools/audit_watch3_r840x_recovery_zip.py').read_text()
+          assert 'EXACT_R840X_STOCK_RESTORATION_AND_LOADER_ACCEPTANCE_UNVERIFIED' in source
+          assert 'R840X_DOWNLOAD_MODE_AND_STOCK_RECOVERY_UNVERIFIED' not in source
+          assert '"four_byte_odin_loke_magic_observed": True' in source
+          assert '"full_odin_session_verified": False' in source
+          assert '"stock_restoration_verified": False' in source
+          print('PASS: witnessed magic proof does not imply full rescue')
+          PY
           git diff --check
           echo 'PASS: synthetic ZIP evidence only; no candidate firmware was acquired or verified.'
-          echo 'NO_GO: no recovery transport, OEM signing or bootloader acceptance proven.'
+          echo 'NO_GO: basic Odin magic transport proven, but no complete stock restoration, OEM signature verification, or accepted custom boot.'
