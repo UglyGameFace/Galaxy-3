@@ -146,9 +146,11 @@ class SafeCscTests(unittest.TestCase):
             self.assertNotIn("10.0.0.65", data)
             self.assertNotIn("secret", data)
             with patch("watch3_r840x_csc_readonly.socket.create_connection",
-                       side_effect=AssertionError("report file must not be overwritten")):
-                # The write fails, even though the fixture watch was simulated.
-                # No report data should be overwritten.
+                       side_effect=AssertionError("existing report must PREVENT watch read")):
+                # Refuse a duplicate output BEFORE creating even a read-only
+                # SDB connection; an existing report remains immutable.
+                self.assertEqual(csc.main(["--watch-ip", "10.0.0.65",
+                                           "--output", str(path)]), 1)
                 self.assertEqual(csc.main(["--offline-sample", str(path),
                                            "--output", str(path)]), 1)
             self.assertEqual(path.read_text(), data)
