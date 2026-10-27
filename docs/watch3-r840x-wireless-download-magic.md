@@ -28,15 +28,28 @@ describes a historical AP topology: watch `192.168.1.1` connects to host
 R840X. The CLI's `192.168.49.1` upload/shell default belongs to a separate
 transport; it is not contradictory evidence for Wireless Download AP.
 
-The tool binds IPv4 `0.0.0.0:13579` and accepts one inbound connection.
-That listens on addresses the phone already owns; it **does not assign
-an IP, change routing, or make the phone reachable at an address the
-watch expects**. The actual AP address/subnet, assigned phone address,
-and watch's connection target must be established before a live trial.
-Android Wi-Fi connection alone does not prove these prerequisites.
-Do not copy historical static IPs or add automatic address workarounds.
-The tool never records the peer IP. Nothing is attempted unless the
-operator supplies **both** explicit live-mode flags.
+**2026-10-27 safety correction:** The original proof-of-concept bound
+`0.0.0.0:13579`, allowing a connection on any phone interface. This is
+not a suitable default for live R840X research. The revised program
+requires `--bind-ip` equal to a private IPv4 address **actually assigned
+to the phone's local Wi-Fi interface**. It binds only that exact IP and
+refuses incoming peers outside its observed local subnet **before sending
+any bytes**. Same-subnet membership is still NOT authentication of a
+Samsung watch or proof of an Odin bootloader. The tool does **not**
+assign an IP, change routing, or make the phone reachable at an
+address the watch expects.
+
+An independent **phone-only** Termux preflight
+`tools/watch3_r840x_ap_network_preflight.py` uses only local WLAN
+interface IOCTLs to report current private IPv4 and subnet. It does
+not connect to the watch, send packets, start a listener, obtain an
+SSID, enter Download mode, or run any phone shell. Some newer Android
+versions may restrict interface IOCTLs; that must be marked
+`WLAN_IPV4_UNAVAILABLE_OR_ANDROID_RESTRICTED`, not guessed or
+worked around by using `0.0.0.0`. The **owner must manually verify**
+the connected SSID is the Watch3's temporary Wireless Download AP,
+not their home/public Wi-Fi. AP/WPS mode and routing remain
+unproven on this R840X.
 
 ## Hardware and operator precautions
 
@@ -58,29 +71,65 @@ then toggling its WPS mode to AP mode with two Home presses. **Screen
 labels and behavior must be checked on the actual SM-R840X**; do not
 guess if its menus differ.
 
-## Android-only Termux procedure (only after merging PR)
+## Android-only Termux procedure (after tests and merge)
 
-1. Enter the watch's Wireless Download menu manually if and only if
-   you are comfortable with the temporary reboot and can use its
-   documented force-restart. In wireless AP mode, connect your phone's
-   Wi-Fi to the watch's temporary network, **not** a public hotspot.
-   Android may warn that there is no internet; remain on that Wi-Fi.
-   Check its IP/subnet and gateway in Android's Wi-Fi details against
-   the watch's observed network information. If the expected host
-   address cannot be established, the routing prerequisite is still
-   unverified; a timeout cannot diagnose bootloader capability.
-2. Run this on your Android S25 Ultra Termux; no root or desktop needed.
-   The tool exits after one connection or a 60-second default timeout:
+### Step A: PHONE-ONLY preflight; no watch reboot or connection
 
 ```sh
 cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r840x_ap_network_preflight.py \
+  --report ~/watch3-r840x-phone-wlan-preflight.json
+cat ~/watch3-r840x-phone-wlan-preflight.json
+```
+
+The result lists the current **phone-local** WLAN IPv4 and subnet,
+if Android makes them readable. It **cannot** identify the connected
+Wi-Fi SSID or verify a Watch3 AP, and is *not* a bootloader
+handshake. It is safe to run against the ordinary connected phone
+without changing anything on the watch. The report contains local
+Wi-Fi addresses; keep it private.
+
+### Step B: separate opt-in manual Watch3 Wireless Download observation
+
+Only if the owner explicitly chooses the temporary Watch3 reboot and
+is comfortable with the risk of a boot-mode transition:
+
+1. Confirm the watch normally boots Tizen and has enough charge. Know
+   how to perform the Watch3's documented force restart.
+2. On the watch, enter `Download (Wireless)` only when the actual
+   physical menu matches the documented labels. If AP mode is
+   available, connect Android Wi-Fi to that watch AP **not to a home,
+   public or ordinary phone hotspot**. Android may report no internet.
+   Do not choose Recovery / factory reset or start any update.
+3. Inspect the Android Wi-Fi screen and confirm the SSID matches the
+   temporary **watch** AP. Termux cannot verify that identity. Run the
+   same **phone-only preflight again with a NEW report filename** and
+   obtain the freshly assigned phone IPv4. If Android cannot reveal
+   that address/subnet, STOP rather than guessing historical
+   `192.168.1.20` or falling back to `0.0.0.0`.
+4. Only after manual AP confirmation, run one four-byte test using the
+   **actual observed** local Wi-Fi address as `PHONE_WLAN_IPV4`
+   (replace that token with the literal preflight result):
+
+```sh
 python tools/watch3_r840x_netodin_magic_only.py \
   --live-magic-only \
   --watch-ap-confirmed \
+  --bind-ip PHONE_WLAN_IPV4 \
   --listen-seconds 60 \
   --report ~/watch3-r840x-odin-magic-redacted.json
 cat ~/watch3-r840x-odin-magic-redacted.json
 ```
+
+The listener binds only `PHONE_WLAN_IPV4:13579` and replies with
+exactly `ODIN` to one inbound same-subnet peer, expecting at most
+four bytes `LOKE`. It never sends Odin session-start, PIT, flashing,
+reboot or exploit commands. It does NOT authenticate the endpoint as
+Samsung hardware; `LOKE` is only magic exchange evidence.
+
+5. Exit Download mode using the model-appropriate documented force
+   restart, return to ordinary Tizen, and restore normal phone Wi-Fi.
+   Do not treat a forced reboot as proof you can repair corrupt flash.
 
 If no connection is seen, **do not infer the bootloader lacks Odin**:
 phone Wi-Fi routing, AP/WPS mode, unexpected listen IP, timeouts or
