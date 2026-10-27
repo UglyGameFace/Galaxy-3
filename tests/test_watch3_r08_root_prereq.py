@@ -8,7 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from watch3_r08_root_prereq import ROOT_PATH_PROBES, summarize_root_path
 from watch3_r08_android_sdb import (
-    Connection, PORT, VERSION, collect, frame, receive,
+    Connection, PORT, VERSION, collect, frame, receive, _root_path_output_error,
 )
 
 
@@ -92,6 +92,22 @@ class RootPrerequisiteTests(unittest.TestCase):
         values["dotnet_caps"] = "/tmp/dotnet cap_setgid,cap_sys_admin=ep\n"
         self.assertEqual(summarize_root_path(values, {})["status"], "INCONCLUSIVE")
 
+    def test_all_unavailable_explains_transport_not_false_missing_capabilities(self):
+        result = summarize_root_path({}, {
+            key: "SDB_SHELL_CLOSED_OR_REFUSED" for key in ROOT_PATH_PROBES
+        })
+        self.assertEqual(result["status"], "INCONCLUSIVE")
+        self.assertEqual(set(result["acquisition"].values()),
+                         {"SDB_SHELL_CLOSED_OR_REFUSED"})
+        self.assertTrue(all(v == "UNAVAILABLE" for v in result["checks"].values()))
+
+    def test_parser_mismatch_is_not_confused_with_transport_failure(self):
+        values = self.sample()
+        values["dotnet_caps"] = "unexpected capability report"
+        result = summarize_root_path(values, {})
+        self.assertEqual(result["acquisition"]["dotnet_caps"], "OUTPUT_RECEIVED")
+        self.assertEqual(result["checks"]["dotnet_capabilities"], "UNAVAILABLE")
+
     def test_no_raw_device_output_or_secrets(self):
         values = self.sample()
         values["dotnet_caps"] += "PRIVATE_SERIAL=SECRET\n"
@@ -100,12 +116,46 @@ class RootPrerequisiteTests(unittest.TestCase):
         self.assertNotIn("/usr/share/dotnet/shared", report)
         self.assertNotIn("cap_sys_admin=", report)
 
+    def test_tiny_shell_errors_are_classified_without_false_tar_help_hits(self):
+        self.assertEqual(_root_path_output_error("sh: getcap: not found\n"),
+                         "WATCH_REPORTED_COMMAND_OR_PATH_MISSING")
+        self.assertEqual(_root_path_output_error("getcap: Permission denied"),
+                         "WATCH_REPORTED_ACCESS_DENIED")
+        self.assertEqual(_root_path_output_error("   "), "EMPTY_SHELL_OUTPUT")
+        self.assertIsNone(_root_path_output_error(
+            "tar options\n --to-command=COMMAND\n"
+            "some archives have files not found\n additional help"))
+
     def test_fixed_allowlist_has_no_install_flash_or_injection(self):
         self.assertEqual(len(ROOT_PATH_PROBES), 4)
         for query in ROOT_PATH_PROBES.values():
             for forbidden in (";", "`", "$(", "dd ", "flash", "install",
                               "rm ", "reboot", "|", ">"):
                 self.assertNotIn(forbidden, query)
+
+    def test_sdb_closed_shell_exposes_category_not_device_exception(self):
+        peers = [FakeSocket(frame(b"CNXN", VERSION, 262144, b"device::\x00")
+                            + frame(b"CLSE", 0, 2)) for _ in range(8)]
+        with patch("watch3_r08_android_sdb.socket.create_connection",
+                   side_effect=peers):
+            observed, missing = collect("10.54.86.131", Path("/unused"),
+                                        probes=ROOT_PATH_PROBES)
+        self.assertFalse(observed)
+        self.assertEqual(set(missing.values()),
+                         {"SDB_SHELL_CLOSED_OR_REFUSED"})
+        serialized = json.dumps(summarize_root_path(observed, missing))
+        self.assertNotIn("10.54.86.131", serialized)
+
+    def test_short_missing_tool_reply_preserves_exact_reason_category(self):
+        outputs = ["sh: getcap: not found\n"] * 4
+        peers = [FakeSocket(peer(output)) for output in outputs]
+        with patch("watch3_r08_android_sdb.socket.create_connection",
+                   side_effect=peers):
+            observed, missing = collect("10.54.86.131", Path("/unused"),
+                                        probes=ROOT_PATH_PROBES)
+        self.assertFalse(observed)
+        self.assertEqual(set(missing.values()),
+                         {"WATCH_REPORTED_COMMAND_OR_PATH_MISSING"})
 
     def test_sdb_collect_only_issues_fixed_read_only_queries(self):
         outputs = self.sample()
