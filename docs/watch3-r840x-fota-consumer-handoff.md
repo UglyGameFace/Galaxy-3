@@ -399,3 +399,72 @@ capture the exact redacted failure and do not infer root or absent
 FOTA. No code execution or image flashing occurs. Root, ownership of
 `fota.consumer`, unsigned kernel boot, and full stock rescue remain
 unproven and separate.
+
+
+## October 27: Authentic 2,215-byte installed XML resolves FOTA package service role
+
+Owner personally attached the complete `/usr/share/packages/com.samsung.fota-consumer.xml`
+previously listed on their physical SM-R840X. Verified locally:
+**2,215 bytes** and SHA-256
+`723eb10e8c090b51b0bc9bcf28f17e4bcb099bdf126e591e77052b8f209b863c`.
+XML namespace: `http://tizen.org/ns/packages`, package
+`com.samsung.fota-consumer`, `version=1.1.3`, `type=rpm`, `readonly=true`,
+`preload=true`, `removable=false`. Do **not** commit the original XML or
+its author information.
+
+Actual two application registrations: `com.samsung.fota-syspopup`
+runs `/usr/apps/com.samsung.fota-consumer/bin/fota-syspopup` and
+`com.samsung.fota-service` runs
+`/usr/apps/com.samsung.fota-consumer/bin/fota-service`. Both appear under
+`ui-application`, but the latter declares `component-type=svcapp`,
+`on-boot=false`, `auto-restart=false`, `nodisplay=true`,
+`launch-on-attach=true`, and download/network/IoT background categories.
+It also declares the exact metadata
+`accessory-services-location=/res/xml/appcessoryservices.xml`. **Preserve
+the vendor spelling `appcessoryservices.xml`, not the conventional
+`accessoryservices.xml`.**
+
+Samsung's official Tizen SAP API documentation confirms
+`accessory-services-location` points to a peer-service profile stored
+under `/res/xml` of the app, not a D-Bus service registration:
+https://developer.samsung.com/galaxy-watch-tizen/creating-your-first-app/native-companion/use-sap.html .
+The Tizen platform white paper states systemd launches platform daemons,
+with vendor unit directories `/usr/lib/systemd/system` and
+`/usr/lib/systemd/user`, while standard systemd override units may
+appear in `/etc/systemd/system`:
+https://www.tizen.org/sites/default/files/page/tizen_for_platform_developers_and_manufacturers.pdf
+https://www.freedesktop.org/software/systemd/man/systemd.unit.html .
+
+### Evidence-guided dual registry check
+
+Existing `watch3_r08_fota_consumer_inventory.py` opt-in
+`--fota-handoff-index-only` performs only FOUR fixed read-only sync-v1
+`LIST` operations: the three systemd directories above and
+`/usr/apps/com.samsung.fota-consumer/res/xml` (derived from the exact
+registered package root and declared metadata). The last scope emits
+only presence/type/bounded size of **`appcessoryservices.xml`**; the
+systemd scopes emit only bounded `fota`, `firmware`, or `update`
+`.service/.socket/.target/.timer` filenames and basic metadata.
+No other filenames; other entries become counts. The systemd-only
+DENT cap is 1,024 per folder, total input 512 KiB per folder; original
+scopes retain old limits. Empty, unlisted, or inaccessible directories
+are explicitly inconclusive. Four individually authenticated normal
+SDB connections, with no process introspection, shell, firmware calls,
+service activation, file contents, root or watch write.
+
+After CI and merge:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_fota_consumer_inventory.py \
+  --watch-ip 10.0.0.65 --fota-handoff-index-only
+cat ~/watch3-r840x-fota-handoff-index.json
+```
+
+If a FOTA-related systemd unit is listed, retrieve **only that confirmed
+unit** on a subsequent separate, reviewed read-only slice and inspect its
+`ExecStart` and optional `BusName`. The SAP resource can clarify the
+watch/phone protocol but will not by itself establish who owns the
+`fota.consumer` D-Bus name. Never send `Launch` or initiate a FOTA
+update. Unsigned boot, stock rescue and privilege boundaries still
+require independent proof.
