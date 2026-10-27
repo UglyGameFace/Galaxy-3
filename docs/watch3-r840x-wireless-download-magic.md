@@ -5,12 +5,12 @@ kernel boot or damaged-partition restoration is proven. This document
 describes the least-privileged *protocol* experiment, not a way to flash
 or repair the watch. Use only on a watch you own and can physically access.
 
-## Why this is the first useful live bootloader measurement
+## Proposed bootloader transport measurement
 
 The existing Termux SDB port 26101 runs against Tizen. It tells us nothing
 about the earlier Samsung wireless-download bootloader. Reading the source
-of [AsteroidOS Ragnarök's TCP listener](https://github.com/AsteroidOS/ragnaroek/blob/master/ragnaroek/src/comms/net_bind.rs)
-and [actual magic handler](https://github.com/AsteroidOS/ragnaroek/blob/master/ragnaroek/src/download_protocol/magic_handshake.rs)
+of [AsteroidOS Ragnarök's TCP listener](https://github.com/AsteroidOS/ragnaroek/blob/f9164d2c227369ba711d89f12eef99186df61387/ragnaroek/src/comms/net_bind.rs)
+and [actual magic handler](https://github.com/AsteroidOS/ragnaroek/blob/f9164d2c227369ba711d89f12eef99186df61387/ragnaroek/src/download_protocol/magic_handshake.rs)
 shows a **different channel**:
 
 - A watch in wireless-download mode connects **to the host** TCP 13579
@@ -22,11 +22,21 @@ shows a **different channel**:
 - A LOKE response is evidence of an **Odin-compatible peer** only, not
   authenticated proof of model/firmware or recovery success.
 
-The source [PROTOCOL.md](https://github.com/AsteroidOS/ragnaroek/blob/master/PROTOCOL.md)
-and Ragnarök CLI contain contradictory/static IP examples. The tool
-avoids all IP assumptions: it binds IPv4 `0.0.0.0:13579`, accepts one
-inbound connection and never records the peer IP. Nothing is attempted
-unless the operator supplies **both** explicit live-mode flags.
+The pinned [PROTOCOL.md](https://github.com/AsteroidOS/ragnaroek/blob/f9164d2c227369ba711d89f12eef99186df61387/PROTOCOL.md)
+describes a historical AP topology: watch `192.168.1.1` connects to host
+`192.168.1.20:13579`. Those addresses have **not** been observed on this
+R840X. The CLI's `192.168.49.1` upload/shell default belongs to a separate
+transport; it is not contradictory evidence for Wireless Download AP.
+
+The tool binds IPv4 `0.0.0.0:13579` and accepts one inbound connection.
+That listens on addresses the phone already owns; it **does not assign
+an IP, change routing, or make the phone reachable at an address the
+watch expects**. The actual AP address/subnet, assigned phone address,
+and watch's connection target must be established before a live trial.
+Android Wi-Fi connection alone does not prove these prerequisites.
+Do not copy historical static IPs or add automatic address workarounds.
+The tool never records the peer IP. Nothing is attempted unless the
+operator supplies **both** explicit live-mode flags.
 
 ## Hardware and operator precautions
 
@@ -55,6 +65,10 @@ guess if its menus differ.
    documented force-restart. In wireless AP mode, connect your phone's
    Wi-Fi to the watch's temporary network, **not** a public hotspot.
    Android may warn that there is no internet; remain on that Wi-Fi.
+   Check its IP/subnet and gateway in Android's Wi-Fi details against
+   the watch's observed network information. If the expected host
+   address cannot be established, the routing prerequisite is still
+   unverified; a timeout cannot diagnose bootloader capability.
 2. Run this on your Android S25 Ultra Termux; no root or desktop needed.
    The tool exits after one connection or a 60-second default timeout:
 
@@ -76,7 +90,7 @@ Android restrictions can prevent the TCP connection. Report
 If `ODIN_LOKE_MAGIC_VERIFIED_UNAUTHENTICATED_PEER`, the phone and
 wireless download loader completed the **four-byte exchange**, but
 *device identity, PIT, signatures, partition rescue and custom boot
-remain UNPROVEN*. In all outcomes, the watch firmware is untouched.
+remain UNPROVEN*. The tool sends no firmware or partition-write commands.
 
 3. Restart the watch using **both physical Watch3 buttons**, wait for
    ordinary Tizen to return, reconnect the phone's usual Wi-Fi.
