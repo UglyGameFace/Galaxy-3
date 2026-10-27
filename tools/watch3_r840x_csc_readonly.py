@@ -182,6 +182,12 @@ def main(argv: list[str] | None = None) -> int:
                    default=Path.home() / "watch3-r840x-csc-redacted.json")
     args = p.parse_args(argv)
     try:
+        # A stale report must not cause even an unnecessary extra watch read.
+        destination = args.output.expanduser()
+        if destination.exists() or destination.is_symlink():
+            raise CscError("LOCAL_REPORT_ALREADY_EXISTS")
+        if not destination.parent.is_dir():
+            raise CscError("LOCAL_REPORT_PARENT_MISSING")
         if args.offline_sample:
             sample = args.offline_sample.expanduser()
             if sample.is_symlink() or not sample.is_file() or sample.stat().st_size > MAX_CSC_BYTES:
