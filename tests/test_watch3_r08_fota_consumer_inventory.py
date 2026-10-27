@@ -15,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from watch3_r08_android_sdb import VERSION, frame, receive
 from watch3_r08_fota_consumer_inventory import (
     SYNC_HDR, SYNC_DENT, LOCAL_STREAM, DIRECTORIES, DBUS_DIRECTORIES,
-    DBUS_ACTIVATION_FILENAME, InventoryError,
+    DBUS_ACTIVATION_FILENAME, PACKAGE_ROOT_SCOPE, PACKAGE_ROOT_DIRECTORY,
+    PACKAGE_MANIFEST_FILENAME, InventoryError,
     DirectoryDecoder, list_one, inventory, main,
 )
 
@@ -138,6 +139,70 @@ class FixedFotaDirectoryInventoryTests(unittest.TestCase):
         self.assertEqual(report["status"], "READ_ONLY_FIXED_DBUS_DIRECTORY_INVENTORY")
         self.assertFalse(report["watch_write_performed"])
         self.assertNotIn("10.0.0.65", json.dumps(report))
+
+    def test_fota_root_exact_filename_privacy_and_read_only_list(self):
+        self.assertEqual(PACKAGE_ROOT_DIRECTORY,
+                         b"/usr/apps/com.samsung.fota-consumer")
+        self.assertEqual(PACKAGE_MANIFEST_FILENAME, "tizen-manifest.xml")
+        packet = (dent("bin", stat.S_IFDIR | 0o755) +
+                  dent("tizen-manifest.xml", stat.S_IFREG | 0o644, 987) +
+                  dent("private-device-name-secret.txt") +
+                  dent(".private") + done())
+        sock = peer([packet[:3], packet[3:14], packet[14:31], packet[31:]])
+        result = list_one(sock, Path("/unused"), PACKAGE_ROOT_SCOPE)
+        self.assertEqual(result["status"], "LIST_COMPLETE")
+        self.assertEqual(result["tizen_manifest"], {
+            "kind": "REGULAR_FILE", "bytes": 987, "readable_by_someone_dac": True,
+        })
+        self.assertEqual(result["other_or_unreported_entries"], 3)
+        self.assertNotIn("secret", json.dumps(result))
+        self.assertNotIn("private", json.dumps(result))
+        frames = outgoing(sock)
+        self.assertEqual(frames[2][3], SYNC_HDR.pack(
+            b"LIST", len(PACKAGE_ROOT_DIRECTORY)) + PACKAGE_ROOT_DIRECTORY)
+        self.assertEqual(sum(f[0] == b"WRTE" for f in frames), 1)
+        self.assertNotIn(b"RECV", bytes(sock.sent))
+        self.assertNotIn(b"SEND", bytes(sock.sent))
+        self.assertNotIn(b"shell:", bytes(sock.sent))
+
+    def test_fota_root_missing_manifest_is_precise_but_not_global_absence(self):
+        sock = peer([dent("bin", stat.S_IFDIR | 0o755) + done()])
+        result = list_one(sock, Path("/unused"), PACKAGE_ROOT_SCOPE)
+        self.assertEqual(result["status"], "LIST_COMPLETE")
+        self.assertEqual(result["tizen_manifest"], "NOT_SEEN_IN_LIST")
+        self.assertIn("SMACK", result["meaning"])
+        sock = peer([done()])
+        result = list_one(sock, Path("/unused"), PACKAGE_ROOT_SCOPE)
+        self.assertEqual(result["status"], "EMPTY_OR_INACCESSIBLE")
+
+    def test_root_only_scope_and_private_output_preserve_old_defaults(self):
+        root_sock = peer([dent("tizen-manifest.xml") + done()])
+        with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                   return_value=root_sock) as connect:
+            report = inventory("10.0.0.65", Path("/unused"),
+                               fota_package_root_only=True)
+        self.assertEqual(connect.call_count, 1)
+        self.assertEqual(set(report["directory_results"]), {PACKAGE_ROOT_SCOPE})
+        self.assertEqual(report["schema"], "uglyos-r840x-fota-root-manifest-list-v1")
+        self.assertFalse(report["watch_write_performed"])
+        with self.assertRaisesRegex(InventoryError, "SCOPES_MUTUALLY_EXCLUSIVE"):
+            inventory("10.0.0.65", Path("/unused"),
+                      dbus_services_only=True, fota_package_root_only=True)
+
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "root.json"
+            with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                       return_value=peer([dent("tizen-manifest.xml") + done()])), patch.object(
+                sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+                              "--fota-package-root-only", "--report", str(target)]):
+                self.assertEqual(main(), 0)
+            old = target.read_bytes()
+            self.assertEqual(target.stat().st_mode & 0o077, 0)
+            with patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+                                            "--fota-package-root-only",
+                                            "--report", str(target)]):
+                self.assertEqual(main(), 1)
+            self.assertEqual(target.read_bytes(), old)
 
     def test_fragmented_dent_headers_and_names(self):
         data = dent("fota-service") + dent("fota-consumer") + (
