@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Read five physically LIST-confirmed Watch3 FOTA handoff files.
+"""Read five LIST-confirmed FOTA configs or two unit-referenced helper scripts.
 
+The helper-script paths come from actual physical service unit ExecStart lines.
 Host-side read-only, exact allowlist only. SDB sync RECV only: no shell,
 SEND, D-Bus invocation, service launch, package update, exploit, or flashing.
 Raw vendor service configurations stay in a private Termux directory.
@@ -208,8 +209,14 @@ def collect(ip: str, key_path: Path, folder: Path, timeout: int = 12,
         "status": ("READ_ONLY_REFERENCED_FOTA_HELPER_RECV" if observed_helpers_only
                    else "READ_ONLY_FIXED_FOTA_HANDOFF_RECV"),
         "files": results,
-        "meaning": ("Only owner-observed systemd/SAP metadata. No active D-Bus owner, "
-                    "firmware signing rights, bootloader acceptance, root or rescue proven."),
+        "meaning": (
+            "Two literal shell script paths are referenced by actual retrieved "
+            "systemd unit ExecStart declarations. Their contents are retained "
+            "only on owner's phone and never executed. Script availability "
+            "does not establish boot/recovery permissions."
+            if observed_helpers_only else
+            "Only owner-observed systemd/SAP metadata. No active D-Bus owner, "
+            "firmware signing rights, bootloader acceptance, root or rescue proven."),
         "watch_write_performed": False,
         "fota_launch_performed": False,
         "unsigned_boot_proven": False,
