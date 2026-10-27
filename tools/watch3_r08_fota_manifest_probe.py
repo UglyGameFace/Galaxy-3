@@ -25,6 +25,10 @@ from watch3_r08_fota_artifact_pull import (
 )
 
 MANIFEST_PATH = b"/usr/apps/com.samsung.fota-consumer/tizen-manifest.xml"
+# The owner's physical LIST positively observed this exact regular XML file
+# in /usr/share/packages (2215 bytes); never accept a caller-supplied path.
+REGISTERED_PACKAGE_PATH = b"/usr/share/packages/com.samsung.fota-consumer.xml"
+MAX_REGISTERED_XML_BYTES = 16 * 1024
 PACKAGE_NAME = "com.samsung.fota-consumer"
 BIN_PREFIX = "/usr/apps/com.samsung.fota-consumer/bin/"
 MAX_MANIFEST_BYTES = 64 * 1024
@@ -38,9 +42,16 @@ class ManifestError(ValueError):
 
 
 class LimitedBuffer(io.BytesIO):
+    def __init__(self, max_bytes: int = MAX_MANIFEST_BYTES):
+        super().__init__()
+        self.max_bytes = max_bytes
+
     def write(self, part: bytes) -> int:
-        if self.tell() + len(part) > MAX_MANIFEST_BYTES:
-            raise ManifestError("MANIFEST_EXCEEDS_64_KIB")
+        if self.tell() + len(part) > self.max_bytes:
+            # Preserve the original fixed manifest's public error contract.
+            raise ManifestError("XML_BYTE_LIMIT_EXCEEDED" if
+                                self.max_bytes == MAX_REGISTERED_XML_BYTES
+                                else "MANIFEST_EXCEEDS_64_KIB")
         return super().write(part)
 
 
@@ -100,8 +111,9 @@ def summarize(xml_bytes: bytes) -> dict:
     }
 
 
-def fetch_manifest(sock, key_path: Path) -> dict:
-    """Single exact read-only RECV using existing SDB framing/stream decoder."""
+def fetch_fixed_xml_bytes(sock, key_path: Path, *, registered_package: bool = False) -> bytes:
+    """One allowlisted, bounded SDB RECV. Returns bytes only to the phone."""
+    path = REGISTERED_PACKAGE_PATH if registered_package else MANIFEST_PATH
     connection = Connection(sock, key_path)
     try:
         connection.handshake()
@@ -115,10 +127,11 @@ def fetch_manifest(sock, key_path: Path) -> dict:
         raise ManifestError("SDB_SYNC_OPEN_INVALID")
     try:
         connection.send(b"WRTE", LOCAL_STREAM, remote,
-                        SYNC_HDR.pack(b"RECV", len(MANIFEST_PATH)) + MANIFEST_PATH)
+                        SYNC_HDR.pack(b"RECV", len(path)) + path)
     except (OSError, SdbError, TimeoutError):
         raise ManifestError("SDB_MANIFEST_REQUEST_FAILED") from None
-    limited = LimitedBuffer()
+    limited = LimitedBuffer(MAX_REGISTERED_XML_BYTES if registered_package
+                            else MAX_MANIFEST_BYTES)
     decoder = ReadOnlySyncDecoder(limited)
     for _ in range(MAX_STREAM_FRAMES):
         try:
@@ -143,8 +156,13 @@ def fetch_manifest(sock, key_path: Path) -> dict:
         except (OSError, SdbError, TimeoutError):
             raise ManifestError("SDB_MANIFEST_TRANSFER_FAILED") from None
         if decoder.done:
-            return summarize(limited.getvalue())
+            return limited.getvalue()
     raise ManifestError("SDB_FRAME_LIMIT")
+
+
+def fetch_manifest(sock, key_path: Path) -> dict:
+    """Preserve original fixed package-root probe behavior and report."""
+    return summarize(fetch_fixed_xml_bytes(sock, key_path))
 
 
 def collect(ip: str, key_path: Path, timeout: int = 12) -> dict:

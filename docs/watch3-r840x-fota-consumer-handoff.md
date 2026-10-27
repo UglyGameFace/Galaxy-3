@@ -347,3 +347,55 @@ attributes. If not, **do not invent** a different path or infer no
 daemon; use passive public/vendor package evidence and the already
 extracted binary to investigate owner code instead. No update
 triggering, exploit payload, unsigned boot or stock recovery proved.
+
+
+## October 27: actual installed FOTA package XML found (physical evidence)
+
+After merged #67, the owner's authenticated read-only SDB `LIST` on
+`/usr/share/packages` completed with **146 other entries**, and found
+the exact file `com.samsung.fota-consumer.xml` as a **2,215-byte
+REGULAR_FILE**, with at least one POSIX DAC read bit. The separate
+`/opt/share/packages` LIST completed with 10 unrelated entries and
+**no matching file**. This resolves why the earlier incorrectly assumed
+package-root `tizen-manifest.xml` could not be read: it was not listed
+there on this particular watch. The published native Tizen RPM layout
+explicitly registers `<package>.xml` under `/usr/share/packages`;
+the physical watch now confirms that exact location. This file's
+contents are not yet known. DAC read bits do not prove SDB access due
+to Tizen SMACK restrictions.
+
+The next evidence gate is a **single exact-path, fixed, read-only RECV**
+of the file actually listed, not another guessed path. To avoid a
+duplicate transport stack, `watch3_r08_fota_manifest_probe.py`'s
+existing sync implementation is reused by a new
+`watch3_r08_fota_package_registration_pull.py`; the former's default
+package-root mode remains intact.
+
+The new program:
+- Reads only `/usr/share/packages/com.samsung.fota-consumer.xml`,
+  limited to 16 KiB by the streaming decoder;
+- Parses well-formed XML offline, refusing DTD/entities, without
+  interpreting package records as D-Bus execution evidence;
+- Saves raw XML only in Termux as **mode-0600 exclusive local file**
+  `~/watch3-r840x-fota-package-registration.xml`, not on GitHub;
+- Saves separate privacy-filtered JSON, with source hash, byte count,
+  root tag, safe executable basenames and limited app IDs;
+- Never issues SDB `SEND`, shell, FOTA `Launch`, firmware install,
+  privileged operations, or writes to the watch.
+
+After mock-watch CI succeeds and merge completes:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_fota_package_registration_pull.py --watch-ip 10.0.0.65
+cat ~/watch3-r840x-fota-package-registration.json
+```
+
+If it succeeds, `cp -n ~/watch3-r840x-fota-package-registration.xml
+~/storage/downloads/watch3-fota-package-registration.xml` copies it
+into Android Downloads for private upload to this conversation.
+**Do not add the raw XML to the repository.** If the RECV fails,
+capture the exact redacted failure and do not infer root or absent
+FOTA. No code execution or image flashing occurs. Root, ownership of
+`fota.consumer`, unsigned kernel boot, and full stock rescue remain
+unproven and separate.
