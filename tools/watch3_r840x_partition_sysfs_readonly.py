@@ -18,7 +18,7 @@ import re
 import sys
 
 from watch3_r08_android_sdb import (
-    PARTITION_SYSFS_PROBES, SdbError, collect,
+    PARTITION_SYSFS_PROBES, PARTITION_SYSFS_FIXED_PROBES, SdbError, collect,
 )
 
 SCHEMA = "uglyos-r840x-sysfs-partition-names-v1"
@@ -57,7 +57,11 @@ def _parse_one_block(lines: list[str]) -> tuple[int, str] | None:
     number = int(match.group(1))
     if not PARTNO_RE.fullmatch(values.get("PARTN", "")) or int(values["PARTN"]) != number:
         raise PartitionLabelsError("PARTNUMBER_MISMATCH")
-    label = values.get("PARTNAME", "")
+    # The Linux kernel *optionally* exports PARTNAME when the partition
+    # metadata contains a volume name. Missing PARTNAME != unknown name.
+    if "PARTNAME" not in values:
+        return number, "not_exported"
+    label = values["PARTNAME"]
     if not LABEL_RE.fullmatch(label):
         return number, "unclassified"
     return number, label.lower() if label.lower() in KNOWN_PARTITION_LABELS else "unclassified"
@@ -95,10 +99,13 @@ def parse_sysfs(raw: str) -> dict:
         if index in found:
             raise PartitionLabelsError("DUPLICATE_PARTITION_RECORD")
         found[index] = label
+    name_field_count = sum(label != "not_exported" for label in found.values())
     return {
-        "state": ("SYSFS_PARTITION_LABELS_OBSERVED" if found
-                  else "NO_VALID_SYSFS_PARTITION_RECORDS"),
+        "state": ("SYSFS_PARTITION_LABELS_OBSERVED" if name_field_count else
+                  "SYSFS_PARTITION_METADATA_ONLY_NO_PARTNAME" if found else
+                  "NO_VALID_SYSFS_PARTITION_RECORDS"),
         "reported_partition_count": len(found),
+        "partname_field_count": name_field_count,
         "all_21_numbered_partitions_observed": len(found) == EXPECTED_PARTITIONS,
         "missing_partition_indices": sorted(set(range(1, EXPECTED_PARTITIONS + 1)) - set(found)),
         "partition_name_records": [
@@ -152,6 +159,68 @@ def inspect_live(ip: str, key_path: Path) -> dict:
     return result
 
 
+def inspect_fixed_sample(ip: str, key_path: Path) -> dict:
+    """Three explicit sysfs files only; no shell wildcard or partition dump.
+
+    A successful uevent read establishes at most *that file's* metadata,
+    NOT the missing 18 entries nor a PIT/stock restoration.
+    """
+    result = _base_report()
+    result["source_path_expression"] = list(PARTITION_SYSFS_FIXED_PROBES.values())
+    result["probe_mode"] = "THREE_EXPLICIT_TEXT_PATHS_NO_WILDCARD"
+    values, errors = collect(ip, key_path, probes=PARTITION_SYSFS_FIXED_PROBES)
+    observations = []
+    witnessed = 0
+    name_fields = 0
+    for key, expected in (("partition_p1_uevent", 1),
+                          ("partition_p20_uevent", 20),
+                          ("partition_p21_uevent", 21)):
+        item = {"partition_index": expected, "status": "NOT_READ"}
+        if key in errors:
+            # These are fixed internal categories only; never raw shell text.
+            code = errors[key]
+            allowed = {
+                "SDB_SHELL_TIMED_OUT", "SDB_SHELL_CLOSED_OR_REFUSED",
+                "SDB_PROTOCOL_OR_READ_FAILURE", "SDB_TRANSPORT_UNREACHABLE",
+                "SYSFS_EMPTY_SHELL_OUTPUT", "SYSFS_ACCESS_DENIED",
+                "SYSFS_PATH_OR_COMMAND_NOT_FOUND",
+            }
+            item["status"] = code if code in allowed else "OTHER_UNAVAILABLE"
+        elif key in values:
+            try:
+                parsed = parse_sysfs(values[key])
+                fields = parsed["partition_name_records"]
+                # Refuse unrelated device output or multiple records from a
+                # command that should have opened ONE literal sysfs file.
+                if len(fields) != 1 or fields[0]["index"] != expected:
+                    item["status"] = "NO_MATCHING_SINGLE_SYSFS_RECORD"
+                else:
+                    item["status"] = ("PARTNAME_FIELD_OBSERVED" if
+                                      parsed["partname_field_count"] else
+                                      "UEVENT_READABLE_BUT_PARTNAME_ABSENT")
+                    item["kernel_reported_label"] = fields[0]["kernel_reported_label"]
+                    witnessed += 1
+                    name_fields += parsed["partname_field_count"]
+            except PartitionLabelsError:
+                item["status"] = "MALFORMED_OR_CONFLICTING_SYSFS_RECORD"
+        observations.append(item)
+    result["probe_summary"] = {
+        "tested_partition_indices": [1, 20, 21],
+        "readable_uevent_files": witnessed,
+        "partname_fields_observed": name_fields,
+        "probes": observations,
+        "remaining_partition_indices_not_tested": [
+            i for i in range(1, EXPECTED_PARTITIONS + 1) if i not in (1, 20, 21)
+        ],
+        "full_partition_layout_proven": False,
+    }
+    result["owner_watch_sysfs_observed"] = witnessed > 0
+    result["state"] = ("FIXED_SYSFS_PARTNAME_FIELDS_OBSERVED" if name_fields else
+                       "FIXED_SYSFS_UEVENT_READABLE_WITHOUT_NAMES" if witnessed else
+                       "FIXED_SYSFS_NO_VALID_TEXT_OBSERVATIONS")
+    return result
+
+
 def _private_write(path: Path, body: dict) -> None:
     if not path.parent.is_dir():
         raise PartitionLabelsError("REPORT_DIRECTORY_MISSING")
@@ -174,11 +243,17 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--offline-sample", type=Path, help="Synthetic local text only, no watch")
     parser.add_argument("--key-path", type=Path,
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
-    parser.add_argument("--report", type=Path,
-                        default=Path.home() / "watch3-r840x-sysfs-partition-names.json")
+    parser.add_argument("--fixed-paths", action="store_true",
+                        help="Use only three explicit sysfs text files: p1/p20/p21; no wildcard")
+    parser.add_argument("--report", type=Path, default=None,
+                        help="Private exclusive JSON output; use new name per observation")
     args = parser.parse_args(argv)
     try:
-        path = args.report.expanduser()
+        if args.fixed_paths and args.offline_sample:
+            raise PartitionLabelsError("FIXED_PATHS_AND_OFFLINE_SAMPLE_ARE_SEPARATE_MODES")
+        path = (args.report or (Path.home() /
+                ("watch3-r840x-sysfs-fixed-three.json" if args.fixed_paths
+                 else "watch3-r840x-sysfs-partition-names.json"))).expanduser()
         # Avoid even the optional networked read when local evidence exists.
         if path.exists() or path.is_symlink():
             raise PartitionLabelsError("REPORT_ALREADY_EXISTS")
@@ -193,7 +268,9 @@ def main(argv: list[str] | None = None) -> int:
             result["report"] = parse_sysfs(raw)
             result["state"] = "OFFLINE_SAMPLE_ONLY_NOT_A_REAL_WATCH_OBSERVATION"
         else:
-            result = inspect_live(args.watch_ip, args.key_path.expanduser())
+            result = (inspect_fixed_sample(args.watch_ip, args.key_path.expanduser())
+                      if args.fixed_paths else
+                      inspect_live(args.watch_ip, args.key_path.expanduser()))
         _private_write(path, result)
     except (PartitionLabelsError, SdbError, OSError, UnicodeError) as exc:
         reason = str(exc) if isinstance(exc, PartitionLabelsError) else "LOCAL_OR_AUTHENTICATED_SDB_ERROR"
