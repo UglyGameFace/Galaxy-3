@@ -105,6 +105,24 @@ class RecoveryZipTests(unittest.TestCase):
         self.assertIn("INVALID_OR_UNREADABLE_ZIP", audit(bad, TARGET)["issues"])
         self.assertIn("ARCHIVE_UNREADABLE", audit(self.root / "none.zip", TARGET)["issues"])
 
+    def test_declared_central_directory_limits_before_parsing_metadata(self):
+        path = self.archive()
+        original = path.read_bytes()
+        signature = bytes.fromhex("504b0506")
+        offset = original.rfind(signature)
+        self.assertGreaterEqual(offset, 0)
+        # EOCD: entries total is at offset+10; central-directory size +12.
+        excessive = bytearray(original)
+        excessive[offset + 8:offset + 12] = (600).to_bytes(2, "little") * 2
+        path.write_bytes(excessive)
+        self.assertEqual(audit(path, TARGET)["issues"], ["UNSAFE_MEMBER_COUNT"])
+        oversized = bytearray(original)
+        oversized[offset + 12:offset + 16] = (1048576).to_bytes(4, "little")
+        path.write_bytes(oversized)
+        self.assertEqual(audit(path, TARGET)["issues"], ["UNSAFE_CENTRAL_DIRECTORY"])
+        path.write_bytes(original)
+        self.assertTrue(audit(path, TARGET)["zip_metadata_readable"])
+
     def test_streamed_sha256_is_identity_not_authenticity(self):
         path = self.archive()
         report = audit(path, TARGET, checksum=True)
