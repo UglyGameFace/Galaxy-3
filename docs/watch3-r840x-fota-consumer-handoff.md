@@ -534,3 +534,59 @@ prove an active owner or that any FOTA payload is accepted. Recovery
 service content may establish a recovery *procedure or helper*, but
 a safe stock restore and custom unsigned kernel boot still require
 independent hardware/firmware verification.
+
+
+## October 27: SDB client does not exist on Android; use existing authenticated Python reader
+
+Physical read-only PR #71 report from owner's R840X:
+`fota-consumer.service` remote read returned
+`REMOTE_MISSING_DENIED_OR_UNREADABLE` despite earlier successful
+LIST. Do **not** infer file absence, root, or D-Bus name from a failed
+RECV. These unit texts **were successfully read**:
+- `recovery-update.service`, 238B,
+  `Type=oneshot`, `ExecStart=/usr/bin/recovery-update.sh`,
+  `After=Wants=wait-mount@opt-usr.service`.
+- `update-service.service`, 245B, `Type=dbus`,
+  `BusName=com.samsung.updateservice`,
+  `ExecStart=/usr/bin/launch_app`,
+  `Requires=After=dbus.socket`. This name is different from
+  `fota.consumer`.
+- `rw-update.service`, 215B, `Type=oneshot`,
+  `ExecStart=/usr/bin/rw-update-systemd.sh`,
+  `Requires=After=sysinit.target`.
+- `appcessoryservices.xml`, 2036B, retrieved successfully, but the
+  conservative offline parser refused a DTD; no SAP content executed.
+
+The assistant mistakenly suggested a Termux command using an uninstalled
+`sdb` binary. The owner's phone replied `No command sdb found`.
+This is a **host command-not-found** error, NOT a watch access failure,
+and should not prompt installation of `sdb`, new PC assumptions,
+watch rooting, or retrying nonfunctional CLI commands.
+
+The known 238B `recovery-update.service` gives an *actual observed*
+`ExecStart` path: `/usr/bin/recovery-update.sh`. A new tiny,
+single-purpose `tools/watch3_r08_recovery_script_pull.py` uses our
+existing authenticated Python SDB sync RECV, adds exactly that fixed
+allowlisted path to the shared read-only receiver, and saves the
+*script as unexecuted bytes* with source SHA-256 to a new 0700 Termux
+directory with exclusive mode-0600 original and report. The original
+five-file inventory and read operations remain unchanged. The bounded
+8KiB maximum may reject a larger script, in which case revisit the
+size bound only after obtaining the file's actual size using a
+fixed-path metadata probe; do NOT run the script or try to bypass
+permissions.
+
+After the read-only synthetic CI passes on both runners and PR merges:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_recovery_script_pull.py --watch-ip 10.0.0.65
+cat ~/watch3-r840x-recovery-script-evidence/recovery-script-report.json
+```
+
+For deeper offline inspection, owner may copy the private
+`~/watch3-r840x-recovery-script-evidence/recovery-update.sh` into
+Android Downloads and attach it to the chat; never execute, source,
+or copy its code into an on-watch shell. Read-only inspection of a
+stock helper script does not demonstrate custom boot, signature bypass,
+or a functioning stock restoration pathway.
