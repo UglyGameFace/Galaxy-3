@@ -32,6 +32,49 @@ Linux 4.9.59 target. It is **NOT A SAMSUNG FLASHABLE IMAGE**. Neither
 offline filesystem integrity nor a preserved copy demonstrates that
 the R840X bootloader accepts a custom kernel.
 
+## VERIFIED physical GitHub preservation outcome (October 27, 2026)
+
+**This workflow has actually completed successfully.** Verified from
+[Actions run #40530865234](https://github.com/UglyGameFace/Galaxy-3/actions/runs/40530865234),
+not inferred from an accepted PR:
+
+- Trigger: `push` to `main`, run **40530865234** at
+  **2026-10-27 15:25 UTC**. Both jobs, `test-image-identity-gate` and
+  `preserve-image-and-stage`, finished **success**.
+- The workflow downloaded the original October 24 binary from run
+  **40095182440**, not an experimental rebuild or recompile.
+  The verifier checked its complete **755,658,752-byte** ext4 and
+  exact pinned SHA-256
+  `8358d60f213c7acf8857a7a9795e7de9a35acbc70d6d3743b72299dfe8a3ed72`.
+  The real job log prints
+  `ORIGINAL_OFFLINE_IMAGE_VERIFIED_FOR_RETENTION` and
+  `PASS: original historical ext4 fully matched and is NOT FLASHABLE`.
+- [Re-preserved immutable ext4 artifact **12746886409**](
+  https://github.com/UglyGameFace/Galaxy-3/actions/runs/40530865234/artifacts/12746886409):
+  `galaxy3-r08-PRESERVED-OFFLINE-NOT-FLASHABLE-image-40530865234`,
+  GitHub zip `249,555,979` bytes; **expired=false** as inspected.
+- [Re-preserved build provenance artifact **12746666455**](
+  https://github.com/UglyGameFace/Galaxy-3/actions/runs/40530865234/artifacts/12746666455):
+  `galaxy3-r08-PRESERVED-build-provenance-40530865234`,
+  GitHub zip `101,139` bytes; **expired=false** as inspected.
+- **Actual `expires_at` for both preserved artifacts:**
+  `2027-01-25T15:25:42Z`. This was fetched from the real workflow
+  artifact API; it is not merely the requested 90-day policy.
+- The *original* 2026-10-24 artifacts still expire on
+  **2026-10-31T13:01:30Z** (ext4) and
+  **2026-10-31T13:01:46Z** (stage); that's no longer a
+  data-loss deadline because the exact bytes were successfully
+  re-preserved with their independent provenance proof.
+
+**Remaining preservation risk:** GitHub Actions artifacts expire.
+Before **2027-01-25**, obtain an independent, durable copy if the
+project still needs that exact original image, or use a separately
+authorized and checksum-verifying retention workflow. Do **not**
+rerun the 250 MB preservation gratuitously or claim that CI
+artifacts provide permanent storage. The re-preserved image is an
+AsteroidOS **root filesystem**, NOT a Samsung signed boot package,
+NOT a stock recovery package and **NOT FLASHABLE**.
+
 ## Safe one-time preservation
 
 New workflow
@@ -57,14 +100,13 @@ no watch/network probe. It is a controlled GitHub artifact copy.
 It may use GitHub Actions storage, but creates no paid external
 accounts and requires no PC; GitHub is already connected.
 
-## After the workflow actually succeeds
+## Preservation confirmation
 
-Verify the **new** `PRESERVED-OFFLINE-NOT-FLASHABLE` artifact exists,
-has the full original file and source fingerprint, and note its *actual*
-expiry. Do not claim preservation merely because a PR merged, the
-validator passed, or the workflow started. Preserve an independent copy
-via Android Downloads or private long-term storage when practical;
-GitHub Actions artifacts are temporary by design.
+The preserved binary and actual expiration are documented above from
+the completed workflow and artifact metadata. For later status checks,
+re-verify the exact GitHub artifact IDs and expiration rather than
+assuming all old artifact links stay live indefinitely. An independent
+long-term copy is still prudent; NO boot or stock recovery is proven.
 
 ## Remaining first-boot NO-GO blockers (not changed by this retention work)
 
