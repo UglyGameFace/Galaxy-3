@@ -590,3 +590,85 @@ Android Downloads and attach it to the chat; never execute, source,
 or copy its code into an on-watch shell. Read-only inspection of a
 stock helper script does not demonstrate custom boot, signature bypass,
 or a functioning stock restoration pathway.
+
+
+## October 27: all four privately supplied original vendor files verified offline
+
+Owner privately attached the three successfully retrieved systemd unit files
+and the SAP XML. Their exact SHA-256 and lengths independently match the
+actual live R840X `#71` report, excluding accidental changes in the
+transfer or attachments:
+
+| Filename | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `recovery-update.service` | 238 | `8e511434fd0be3f6be16d23242c364cc570c317518ce60210b573b694bb9fda8` |
+| `rw-update.service` | 215 | `8c20c8e1064a9f7b4521a01cf64ed62da7da499c241e90343353a602b50a9f80` |
+| `update-service.service` | 245 | `017640aa04aa8c2290eac37c9af95da54612b4163be75964f89412c759fc30ff` |
+| `appcessoryservices.xml` | 2036 | `1ece1d36e8cba9d4a6527295f67c5d0ddf7b2ae0a3b2fb5e7243935fb40533a1` |
+
+### Actual configuration (not an exploit or an install procedure)
+
+- **Recovery unit:** `[Service] Type=oneshot`,
+  `SmackProcessLabel=System::Privileged`,
+  `ExecStart=/usr/bin/recovery-update.sh`, with
+  `Wants=After=wait-mount@opt-usr.service` and
+  `[Install] WantedBy=multi-user.target`. The unit itself does not
+  explicitly contain `User=root`; do not assert active privileges
+  beyond this configuration. The *script contents* remain inaccessible
+  from the actual watch's SDB `sync:RECV`.
+- **Read/write update unit:** `Type=oneshot`,
+  **`User=root`, `Group=root`**, `SmackProcessLabel=System::Privileged`,
+  `ExecStart=/usr/bin/rw-update-systemd.sh`,
+  `Requires=After=sysinit.target`. These are privileged unit
+  declarations, **not proof** of exploitable elevation or firmware
+  write access by the unprivileged watch owner.
+- **Samsung update app unit:** `Type=dbus`,
+  **`ExecStart=/usr/bin/launch_app com.samsung.update-service`**,
+  `BusName=com.samsung.updateservice`,
+  **`User=app_fw`, `Group=app_fw`**,
+  `SmackProcessLabel=System`,
+  `Requires=After=dbus.socket`. Note that this D-Bus name is **not**
+  `fota.consumer`; owner of the latter remains unverified.
+- **SAP peer profile:** application `com.samsung.fota-service`,
+  `serviceImpl=com.samsung.fota-service`,
+  `profile id=/system/sfota`, `name=FOTA`, `role=Consumer`,
+  `version=1.0`; `TRANSPORT_BT` and `TRANSPORT_WIFI`;
+  one `serviceChannel id=125`, `qosDataRate=high`,
+  `qosPriority=high`, `qosType=restrictedDatagramInOrder`.
+  This identifies the accessory/phone peer profile only.
+  The original SAP XML has an **internal DTD with ELEMENT and ATTLIST
+  declarations, not an executable payload**. The original strict
+  summary parser rejected all DTDs as a precaution. A narrowly bounded
+  offline parser can remove this known internal DTD after rejecting
+  external/entity declarations and inspect its XML fields. This is
+  **not DTD schema validation** (in particular, the DTD's
+  `dataRate/priority/reliability` attribute names differ from the
+  instance's `qosDataRate/qosPriority/qosType` fields).
+  Do not start SAP communication, register services or trigger update.
+
+### Offline analysis, no further SDB connections
+
+`tools/analyze_watch3_r08_fota_handoff_offline.py` accepts only a
+**local directory** containing those four original files. It checks
+exact length and SHA-256 against the proven user/device evidence before
+parsing, filters output to safe service and SAP fields, stores a private
+mode-0600 JSON without replacing existing files, and never imports SDB,
+opens a socket, runs an update script, shells out, or contacts the watch.
+It also refuses external XML DTDs and entity declarations.
+
+Run in Termux only if the original four files are still saved locally:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/analyze_watch3_r08_fota_handoff_offline.py \
+  --input-dir ~/watch3-r840x-fota-handoff-evidence \
+  --output ~/watch3-r840x-fota-offline-analysis.json
+cat ~/watch3-r840x-fota-offline-analysis.json
+```
+
+Because this code authenticates **this watch's exact four attached files**,
+another watch/firmware version with different hashes will fail closed rather
+than being silently reported as the same firmware. There is **no supported,
+proven stock restore or unsigned boot** yet. Prioritize exact R840X stock
+firmware provenance and non-destructive download/recovery channel evidence
+over indefinitely probing further inaccessible privileged files.
