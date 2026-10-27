@@ -26,6 +26,36 @@ Third-party catalog labels and file extensions can be spoofed. Samsung signing
 cannot be verified merely from an archive name, ZIP CRC or SHA256 without a
 trusted independent reference. Odin/PIT parsing is research, not recovery.
 
+## Later October 27 physical active-CSC result: PAP (not a rescue signature)
+
+Owner ran the merged fixed-path [read-only CSC probe](
+watch3-r840x-active-csc-readonly.md) against the **actual** functioning
+SM-R840X in normal Tizen and supplied its privacy-filtered report.
+The SDB `sync:RECV` request for
+`/opt/system/csc-default/output/csc-active-customer.log`
+successfully returned active CSC **`PAP`**.
+Status was `CSC_CANDIDATE_FROM_OWNER_WATCH_FIXED_PATH`, with
+`watch_write_performed=false`, `odin_session_started=false`,
+`pit_requested=false`, `firmware_written=false`,
+`full_stock_recovery_proven=false` and `flash_allowed=false`.
+
+**Firmware indexing consequence:** Do not continue calling active
+CSC "unknown"; it is **PAP** in the current Tizen configuration.
+However the *factory sales code*, exact OEM LDU firmware CSC
+pack, geographic production region, signed bootloader identity and
+supported restoration packages remain **unknown**.
+
+Older [in-store Samsung Galaxy demo phones](
+https://stackoverflow.com/questions/36836024/same-android-version-and-same-device-model-but-only-one-cannot-download-app)
+and a [Galaxy S8 Live Demo Unit report](
+https://4pda.to/forum/index.php?showtopic=824699&st=300)
+also report `CSC: PAP`. Generic public CSC charts call `PAP`
+"Europe (PAP)". The overlap is **consistent with demo-unit
+association**, but **not** evidence of a European **R840X**
+signed recovery package or permission to flash consumer `SM-R840`
+software. Old `ATFA-(OXA)` listing and XAR/KOO public FOTA
+checks are not this watch's active CSC. Same strict **NO_GO**.
+
 ## October 27 expanded public-source audit: exact-model source confidence
 
 Investigated fresh public metadata and code references **without requesting
