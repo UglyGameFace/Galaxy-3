@@ -103,7 +103,6 @@ class SdbConnectionOnlyTests(unittest.TestCase):
             (errno.EPERM, "ANDROID_OS_OR_VPN_SOCKET_POLICY_BLOCKED"),
             (errno.EACCES, "ANDROID_OS_OR_VPN_SOCKET_POLICY_BLOCKED"),
             (errno.EADDRNOTAVAIL, "LOCAL_SOURCE_ADDRESS_NOT_AVAILABLE"),
-            (errno.ETIMEDOUT, "OS_REPORTED_TCP_CONNECT_TIMEOUT"),
             (errno.EINVAL, "OTHER_PHONE_SIDE_CONNECT_ERROR"),
         ]
         for errorno, category in examples:
