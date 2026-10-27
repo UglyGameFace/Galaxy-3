@@ -193,8 +193,7 @@ class R840XFotaRegistrationTests(unittest.TestCase):
         # Existing default target and parser contract remain unchanged.
         self.assertEqual(manifest.MANIFEST_PATH,
                          b"/usr/apps/com.samsung.fota-consumer/tizen-manifest.xml")
-        self.assertEqual(registration.registration_path if hasattr(registration,
-                         "registration_path") else manifest.REGISTERED_PACKAGE_PATH,
+        self.assertEqual(manifest.REGISTERED_PACKAGE_PATH,
                          b"/usr/share/packages/com.samsung.fota-consumer.xml")
 
 
