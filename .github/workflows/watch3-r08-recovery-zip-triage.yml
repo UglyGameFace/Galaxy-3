@@ -1,0 +1,29 @@
+name: UgLy|OS R08 recovery firmware ZIP metadata triage (OFF DEVICE)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/audit_watch3_r840x_recovery_zip.py'
+      - 'tests/test_watch3_r840x_recovery_zip.py'
+      - 'docs/watch3-r08-stock-firmware-triage.md'
+      - '.github/workflows/watch3-r08-recovery-zip-triage.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-firmware-triage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate metadata-only inspection and no-go security contracts
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_watch3_r840x_recovery_zip.py -v
+          python3 -m py_compile tools/audit_watch3_r840x_recovery_zip.py
+          git diff --check
+          echo 'PASS: synthetic ZIP evidence only; no candidate firmware was acquired or verified.'
+          echo 'NO_GO: no recovery transport, OEM signing or bootloader acceptance proven.'
