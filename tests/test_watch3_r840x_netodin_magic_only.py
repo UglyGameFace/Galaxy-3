@@ -28,6 +28,7 @@ def localhost_session(peer_reply: bytes):
         request = peer.recv(1024)
         assert request == MAGIC_OUT, "Unexpected outgoing payload: " + repr(request)
         peer.sendall(peer_reply)
+        peer.shutdown(socket.SHUT_WR)
         # The listener must not emit any further packets or commands.
         after = peer.recv(1024)
         assert after == b"", "Unsafe Odin command or payload sent: " + repr(after)
