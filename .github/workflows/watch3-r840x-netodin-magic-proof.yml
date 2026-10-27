@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'tools/watch3_r840x_netodin_magic_only.py'
+      - 'tools/audit_watch3_r840x_odin_offline.py'
+      - 'tests/test_watch3_r840x_odin_offline.py'
+      - 'docs/watch3-r840x-odin-offline-risk-classification.md'
       - 'tools/watch3_r840x_ap_network_preflight.py'
       - 'tests/test_watch3_r840x_ap_network_preflight.py'
       - 'tests/test_watch3_r840x_netodin_magic_only.py'
@@ -29,8 +32,20 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s tests -p test_watch3_r840x_netodin_magic_only.py -v
+          python3 -m unittest discover -s tests -p test_watch3_r840x_odin_offline.py -v
           python3 -m unittest discover -s tests -p test_watch3_r840x_ap_network_preflight.py -v
-          python3 -m py_compile tools/watch3_r840x_netodin_magic_only.py tools/watch3_r840x_ap_network_preflight.py
+          python3 -m py_compile tools/watch3_r840x_netodin_magic_only.py tools/watch3_r840x_ap_network_preflight.py tools/audit_watch3_r840x_odin_offline.py
+          python3 tools/audit_watch3_r840x_odin_offline.py --report /tmp/r840x-odin-offline-audit.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/r840x-odin-offline-audit.json').read_text())
+          assert data['new_live_command_authorized'] is False
+          assert data['network_packets_sent'] is False
+          assert all(not entry['watch_allowed_now'] for entry in data['commands'])
+          assert all(entry['expected_wire_bytes'] == 1024 for entry in data['commands'][1:])
+          print('PASS: no new live Odin commands permitted')
+          PY
           git diff --check
           echo 'PASS: local-only Wi-Fi inspection, explicit local subnet binding and loopback peer contract'
-          echo 'NO-GO: not tested on the R840X, bootloader exploit, recovery or flash'
+          echo 'NO-GO: no 1024-byte Odin commands have been tested on physical R840X; only four-byte magic handshake proven'
