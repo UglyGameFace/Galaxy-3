@@ -5,6 +5,33 @@ kernel boot or damaged-partition restoration is proven. This document
 describes the least-privileged *protocol* experiment, not a way to flash
 or repair the watch. Use only on a watch you own and can physically access.
 
+## Verified physical outcome: 2026-10-27
+
+The owner **completed the actual magic-only transport experiment** on
+their SM-R840X using Android Termux and the watch's Wireless Download
+**AP Mode**. Watch firmware screen photographed model `SM-R840X`;
+host bound `192.168.49.20:13579` on the temporary watch AP and
+`watch3_r840x_netodin_magic_only.py` returned
+`ODIN_LOKE_MAGIC_VERIFIED_UNAUTHENTICATED_PEER` with
+`received_loke=true`. The client sent **only** four bytes `ODIN`,
+then read four bytes `LOKE` and disconnected. The watch reported
+`wd_core_process_cmd: Failed to recv cmd (0 != 1024)`, consistent
+with the absence of a required follow-up 1024-byte frame, not proof of
+hardware corruption. The owner then explicitly confirmed **normal
+Tizen boot** after leaving Download Mode.
+
+This establishes a working Android-to-Watch3 **magic** transport,
+NOT successful full Odin session negotiation, PIT/partition access,
+signature acceptance, a restorable stock image or UgLy|OS first boot.
+The older setup/experiment recipe retained below is **historical**,
+not a request to repeat the physical test. **No more live Odin
+commands** on the owner's only working watch until signed exact-R840X
+stock rescue and a verified recovery path exist.
+
+For the frozen Ragnarök command source audit and exact NO-GO opcode
+matrix see [offline Odin command risk classification](
+watch3-r840x-odin-offline-risk-classification.md).
+
 ## Proposed bootloader transport measurement
 
 The existing Termux SDB port 26101 runs against Tizen. It tells us nothing
@@ -259,7 +286,7 @@ remain UNPROVEN*. The tool sends no firmware or partition-write commands.
 
 No serials, bootloader data, Wi-Fi keys, network identifiers or IPs are
 saved to the redacted JSON. GitHub CI only runs synthetic local TCP
-tests. No claim is made that this experiment has happened on hardware.
+tests. Historical pre-test note (superseded): the magic-only measurement has now been completed on the owner's real SM-R840X as documented at the top. GitHub CI remains synthetic and has never contacted a watch.
 
 ## Follow-on gate, NOT included
 
