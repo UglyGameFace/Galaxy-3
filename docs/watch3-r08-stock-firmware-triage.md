@@ -26,6 +26,56 @@ Third-party catalog labels and file extensions can be spoofed. Samsung signing
 cannot be verified merely from an archive name, ZIP CRC or SHA256 without a
 trusted independent reference. Odin/PIT parsing is research, not recovery.
 
+## Updated October 27: real Odin magic proven; full watch firmware still unavailable
+
+The owner physically showed `SM-R840X` Wireless Download WPS/AP screens,
+used a phone-local TCP/13579 listener to exchange four-byte `ODIN` →
+`LOKE`, and **confirmed stock Tizen rebooted normally afterward**.
+This proves **basic live bootloader transport**, not a complete Odin
+session, PIT transfer, partition writes, signing acceptance or rescue
+after a bad boot. The [offline command risk audit](
+watch3-r840x-odin-offline-risk-classification.md) explicitly refuses
+every 1024-byte Odin command on the owner's only functioning watch.
+
+A separate current-source check adds a key blocker that makes phone
+downloader experimentation a poor use of time:
+
+- Samsung's actual [SM-R840X official support page](
+  https://www.samsung.com/uk/support/model.SM-R840XTKAEUA/)
+  exposes manuals and safety guides, with no published full-firmware
+  rescue archive in its `softwares` listing.
+- The open-source [Bifrost Samsung FUS downloader FAQ](
+  https://github.com/Ff428/SamloaderKotlin)
+  explicitly says Samsung does not serve **full watch firmware**
+  through its download route. Thus neither Bifrost on Android nor
+  Samloader/FUS should be advertised as a verified way to obtain
+  this exact R840X rescue ZIP. This is a vendor/tool-author
+  *availability statement*, not proof no repair center could possess
+  offline factory firmware.
+- Independent public repair-package catalogs still identify an
+  **older** `R840XXXU1ATFA` R840X 3-file package, while the owner's
+  actual installed build is `R840XXXU1AUA2`. There are no
+  independently authenticated complete package bytes/hashes,
+  trusted Samsung signatures, compatible PIT/rollback metadata or
+  documented verified R840X restore success here.
+
+**Practical direction:** obtain *legitimately and securely* sourced
+same-variant complete firmware from an authorized service/repair channel,
+or a demonstrably authentic candidate for **offline analysis only**.
+Do **not** pay for or install unverified flash utilities, assume a
+retail R840 ROM is compatible, or test an old ATFA package just to
+see whether it might work. A full rescue failure could brick the only
+working watch.
+
+The ZIP audit's past string
+`R840X_DOWNLOAD_MODE_AND_STOCK_RECOVERY_UNVERIFIED` wrongly joined
+two independent statements. It has been replaced by the narrower
+`EXACT_R840X_STOCK_RESTORATION_AND_LOADER_ACCEPTANCE_UNVERIFIED`.
+The tool now carries an explicitly **owner-specific, static, dated**
+record of the physical magic-only test separately from the trust of
+an arbitrary ZIP. Neither a correctly named ZIP nor the known
+magic exchange changes its final `NO_GO` decision.
+
 ## Android-only offline triage, without extracting anything
 
 If a legitimate R840X recovery ZIP is obtained, inspect its central directory
@@ -48,7 +98,8 @@ The optional `--sha256` streams bytes (slower for 837MB); it does not
 authenticate them.
 
 The report lists only recognized `BL/AP/CSC/CP` component prefixes,
-firmware build tokens, model mismatches, archive size/hash and warnings.
+firmware build tokens, model mismatches, archive size/hash, source-separated
+physical magic-only evidence, and warnings.
 ZIP member data are not extracted or executed. Unsupported nesting and
 malformed archive layouts remain unverified. The result is **always NO_GO**
 even when all expected names match.

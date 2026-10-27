@@ -44,9 +44,44 @@ class RecoveryZipTests(unittest.TestCase):
         self.assertEqual(r["parts_named"], ["AP", "BL", "CSC"])
         self.assertEqual(r["watch_build_tokens"], [TARGET])
         self.assertIn("ARCHIVE_IDENTITY_AND_SAMSUNG_SIGNATURE_UNVERIFIED", r["issues"])
+        self.assertIn("EXACT_R840X_STOCK_RESTORATION_AND_LOADER_ACCEPTANCE_UNVERIFIED",
+                      r["issues"])
+        self.assertNotIn("R840X_DOWNLOAD_MODE_AND_STOCK_RECOVERY_UNVERIFIED", r["issues"])
+        self.assertIs(r["archive_authenticity_verified"], False)
+        self.assertIs(r["archive_rollback_compatibility_verified"], False)
+        observed = r["known_owner_watch_evidence"]
+        self.assertEqual(observed["provenance"], "PHYSICAL_SM_R840X_OWNER_2026_10_27")
+        self.assertTrue(observed["wireless_download_menu_observed"])
+        self.assertTrue(observed["wireless_download_wps_and_ap_observed"])
+        self.assertTrue(observed["four_byte_odin_loke_magic_observed"])
+        self.assertTrue(observed["stock_tizen_returned_after_magic"])
+        for key in ("full_odin_session_verified", "pit_transfer_verified",
+                    "firmware_write_verified", "stock_restoration_verified",
+                    "unsigned_custom_boot_verified"):
+            self.assertIs(observed[key], False)
         for key in ("signature_verified", "bootloader_acceptance_verified",
                     "stock_restoration_verified", "watch_modified"):
             self.assertIs(r[key], False)
+
+    def test_archive_with_false_metadata_never_erases_prior_hardware_result(self):
+        r = audit(self.archive("different.zip", [
+            "BL_R840XXXU1ATFA.tar.md5", "AP_R840XXXU1ATFA.tar.md5",
+            "CSC_R840XXXU1ATFA.tar.md5",
+        ]), TARGET)
+        self.assertIn("R840X_BUILD_DIFFERS_FROM_INSTALLED", r["issues"])
+        self.assertTrue(r["known_owner_watch_evidence"]["four_byte_odin_loke_magic_observed"])
+        self.assertFalse(r["known_owner_watch_evidence"]["full_odin_session_verified"])
+        self.assertFalse(r["stock_restoration_verified"])
+        self.assertFalse(r["archive_authenticity_verified"])
+        self.assertEqual(r["status"], "NO_GO")
+
+    def test_invalid_archive_does_not_conflate_archive_failure_with_hardware_proof(self):
+        failed = audit(self.root / "does-not-exist.zip", TARGET)
+        self.assertIn("ARCHIVE_UNREADABLE", failed["issues"])
+        self.assertTrue(failed["known_owner_watch_evidence"]["wireless_download_wps_and_ap_observed"])
+        self.assertTrue(failed["known_owner_watch_evidence"]["four_byte_odin_loke_magic_observed"])
+        self.assertFalse(failed["known_owner_watch_evidence"]["stock_restoration_verified"])
+        self.assertEqual(failed["status"], "NO_GO")
 
     def test_real_lead_older_R840X_build_is_mismatch(self):
         r = audit(self.archive("R840XXXU1ATFA-(OXA).zip", [

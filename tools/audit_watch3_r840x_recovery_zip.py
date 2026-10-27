@@ -102,6 +102,23 @@ def audit(path: Path, expected_build: str, checksum: bool = False) -> dict:
         "stock_restoration_verified": False,
         "bootloader_acceptance_verified": False,
         "watch_modified": False,
+        # Archived source evidence from *this owner's* actual SM-R840X,
+        # independent of whatever untrusted archive is supplied here.
+        # Neither the ZIP audit nor firmware filename establishes these.
+        "known_owner_watch_evidence": {
+            "provenance": "PHYSICAL_SM_R840X_OWNER_2026_10_27",
+            "wireless_download_menu_observed": True,
+            "wireless_download_wps_and_ap_observed": True,
+            "four_byte_odin_loke_magic_observed": True,
+            "stock_tizen_returned_after_magic": True,
+            "full_odin_session_verified": False,
+            "pit_transfer_verified": False,
+            "firmware_write_verified": False,
+            "stock_restoration_verified": False,
+            "unsigned_custom_boot_verified": False,
+        },
+        "archive_authenticity_verified": False,
+        "archive_rollback_compatibility_verified": False,
     }
     issues = report["issues"]
     try:
@@ -183,7 +200,7 @@ def audit(path: Path, expected_build: str, checksum: bool = False) -> dict:
                 issues.append("STOCK_BL_AP_CSC_COMPONENT_NAMES_NOT_PROVEN")
             # Archive names and layout cannot establish OEM authenticity.
             issues.append("ARCHIVE_IDENTITY_AND_SAMSUNG_SIGNATURE_UNVERIFIED")
-            issues.append("R840X_DOWNLOAD_MODE_AND_STOCK_RECOVERY_UNVERIFIED")
+            issues.append("EXACT_R840X_STOCK_RESTORATION_AND_LOADER_ACCEPTANCE_UNVERIFIED")
     except (BadZipFile, OSError, EOFError, ValueError, RuntimeError):
         issues.append("INVALID_OR_UNREADABLE_ZIP")
     return report
