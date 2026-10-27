@@ -290,3 +290,56 @@ manifest filename not listed in that one directory**; if it is listed,
 record DAC file metadata but retain the prior RECV failure as an open
 SMACK/access/transport question. No shell, file download, service
 launch, D-Bus invocation, firmware update, root or watch write.
+
+
+## Exact FOTA package manifest absent; shift from apps to systemd daemon metadata
+
+The owner's physical SM-R840X `--fota-package-root-only` after merged
+PR #66 returned `fota_package_root.status=LIST_COMPLETE`,
+`tizen_manifest=NOT_SEEN_IN_LIST`, and `other_or_unreported_entries=6`.
+This confirms only that the *exact filename* was not listed in the
+known system package root; do not retry the same manifest RECV without
+new evidence. It does **not** invalidate the authentic `fota-service`
+ELF, which was successfully retrieved from that package's `bin`
+directory.
+
+A published Samsung Tizen wearable package registry lists
+`com.samsung.fota-service` and `com.samsung.fota-syspopup` as UI
+applications under `com.samsung.fota-consumer`, not a declared
+background service. It does not prove the identity of the separate
+D-Bus `fota.consumer` receiver.
+Source: https://gist.github.com/avipars/bf4ebf3efa1bcceb77025b8b9159a6df
+
+The official Tizen platform white paper documents systemd-controlled
+platform daemons and two vendor unit search directories:
+`/usr/lib/systemd/system` and `/usr/lib/systemd/user`.
+Source: https://www.tizen.org/sites/default/files/page/tizen_for_platform_developers_and_manufacturers.pdf
+The systemd unit spec also documents `/etc/systemd/system` for
+system-wide overrides. Source:
+https://www.freedesktop.org/software/systemd/man/systemd.unit.html
+
+**Issue #47 next evidence gate:** the existing SDB `LIST` inventory
+now supports `--fota-systemd-only`. It does only three fixed
+read-only directory listings, each with a finite 512 KiB/1024-entry
+bound to handle realistic unit-directory density. It discloses only
+bounded `fota`, `firmware`, or `update` unit names ending with
+`.service`, `.socket`, `.target`, or `.timer`, plus file types
+and size, and counts all other entries without showing their names.
+Never claim that absence rules out a daemon with a different name or
+an active D-Bus registration. No `systemctl`, DBus calls, shell,
+RECV, launch, FOTA update or device write is involved.
+
+After PR tests pass and the PR is merged:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_fota_consumer_inventory.py \
+  --watch-ip 10.0.0.65 --fota-systemd-only
+cat ~/watch3-r840x-fota-systemd-units.json
+```
+
+A positive unit name allows an *explicitly scoped, read-only* retrieval
+of that one configuration file to map its `ExecStart` and D-Bus
+`BusName` fields without launching it. This remains one of several
+methods of daemon registration. Bootloader signature acceptance, a
+working custom boot, and stock recovery are still unproven.
