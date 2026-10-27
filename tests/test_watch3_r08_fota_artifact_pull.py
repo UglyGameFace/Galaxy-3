@@ -17,6 +17,7 @@ from watch3_r08_android_sdb import VERSION, frame, receive
 from watch3_r08_fota_artifact_pull import (
     ArtifactPullError, FOTA_EXECUTABLE, LOCAL_STREAM, MAX_BINARY_BYTES,
     SYNC_HDR, ReadOnlySyncDecoder, capture, pull_fota,
+    _save_local_exclusive,
 )
 
 
@@ -176,6 +177,52 @@ class FotaArtifactTests(unittest.TestCase):
                     capture("10.0.0.65", Path("/unused"), dest)
             self.assertFalse(dest.exists())
             self.assertEqual(list(Path(td).iterdir()), [])
+
+    def test_android_compatible_exclusive_copy_never_uses_os_link(self):
+        import os
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            temporary = folder / ".download"
+            dest = folder / "fota.bin"
+            temporary.write_bytes(elf32(b"from-watch"))
+            # Android/Termux Python can lack os.link: force that API to fail
+            # if a regression accidentally reintroduces it.
+            with patch("watch3_r08_fota_artifact_pull.os.link",
+                       side_effect=AssertionError("must not hard-link"), create=True):
+                _save_local_exclusive(str(temporary), dest, temporary.stat().st_size)
+            self.assertEqual(dest.read_bytes(), temporary.read_bytes())
+            self.assertEqual(dest.stat().st_mode & 0o077, 0)
+            # Must not overwrite even if a file appeared after initial check.
+            with self.assertRaisesRegex(ArtifactPullError,
+                                        "LOCAL_OUTPUT_ALREADY_EXISTS"):
+                _save_local_exclusive(str(temporary), dest, temporary.stat().st_size)
+            self.assertEqual(dest.read_bytes(), temporary.read_bytes())
+
+    def test_local_copy_failure_cleans_incomplete_destination_only(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            temporary = folder / ".download"
+            dest = folder / "fota.bin"
+            temporary.write_bytes(elf32(b"from-watch"))
+            with patch("watch3_r08_fota_artifact_pull.shutil.copyfileobj",
+                       side_effect=OSError("simulated Android write error")):
+                with self.assertRaisesRegex(OSError, "simulated Android"):
+                    _save_local_exclusive(str(temporary), dest, temporary.stat().st_size)
+            self.assertFalse(dest.exists())
+            self.assertEqual(temporary.read_bytes(), elf32(b"from-watch"))
+
+    def test_local_short_copy_is_refused_and_removed(self):
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            temporary = folder / ".download"
+            dest = folder / "fota.bin"
+            temporary.write_bytes(elf32(b"from-watch"))
+            with self.assertRaisesRegex(ArtifactPullError,
+                                        "LOCAL_COPY_SIZE_MISMATCH"):
+                _save_local_exclusive(str(temporary), dest,
+                                      temporary.stat().st_size + 1)
+            self.assertFalse(dest.exists())
 
     def test_nonlocal_and_injected_paths_rejected_before_socket(self):
         with tempfile.TemporaryDirectory() as td:
