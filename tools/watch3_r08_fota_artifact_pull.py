@@ -46,6 +46,17 @@ class ArtifactPullError(ValueError):
     """Categorical failure; never includes raw watch data or private addresses."""
 
 
+def _sdb_stage_error(stage: str, exc: Exception) -> ArtifactPullError:
+    """Redacted stage and error class, never a raw watch/socket message."""
+    if isinstance(exc, TimeoutError):
+        kind = "TIMEOUT"
+    elif isinstance(exc, SdbError):
+        kind = "PROTOCOL_OR_AUTH_FAILURE"
+    else:
+        kind = "IO_FAILURE"
+    return ArtifactPullError(f"SDB_{stage}_{kind}")
+
+
 class ReadOnlySyncDecoder:
     """Streaming decoder of adb/SDB sync RECV DATA/DONE or FAIL packets."""
 
@@ -114,20 +125,32 @@ def pull_fota(sock, key_path: Path, outfile, *, component="fota-service") -> dic
     if component not in EXECUTABLES:
         raise ArtifactPullError("COMPONENT_NOT_ALLOWLISTED")
     channel = Connection(sock, key_path)
-    channel.handshake()
-    channel.send(b"OPEN", LOCAL_STREAM, 0, b"sync:\x00")
-    kind, remote, local, body = receive(sock)
+    try:
+        channel.handshake()
+    except (SdbError, OSError, TimeoutError) as exc:
+        raise _sdb_stage_error("HANDSHAKE", exc) from None
+    try:
+        channel.send(b"OPEN", LOCAL_STREAM, 0, b"sync:\x00")
+        kind, remote, local, body = receive(sock)
+    except (SdbError, OSError, TimeoutError) as exc:
+        raise _sdb_stage_error("SYNC_OPEN", exc) from None
     if kind == b"CLSE" and local == LOCAL_STREAM:
         raise ArtifactPullError("SDB_SYNC_SERVICE_REFUSED")
     if (kind != b"OKAY" or local != LOCAL_STREAM or remote == 0 or body):
         raise ArtifactPullError("SDB_SYNC_OPEN_NOT_ACKNOWLEDGED")
     path = EXECUTABLES[component]
     # RECV is read-only by specification. SEND/STAT/DELETE are never sent.
-    channel.send(b"WRTE", LOCAL_STREAM, remote,
-                 SYNC_HDR.pack(b"RECV", len(path)) + path)
+    try:
+        channel.send(b"WRTE", LOCAL_STREAM, remote,
+                     SYNC_HDR.pack(b"RECV", len(path)) + path)
+    except (SdbError, OSError, TimeoutError) as exc:
+        raise _sdb_stage_error("SYNC_TRANSFER", exc) from None
     decoder = ReadOnlySyncDecoder(outfile)
     for _ in range(MAX_STREAM_FRAMES):
-        kind, arg0, arg1, body = receive(sock)
+        try:
+            kind, arg0, arg1, body = receive(sock)
+        except (SdbError, OSError, TimeoutError) as exc:
+            raise _sdb_stage_error("SYNC_TRANSFER", exc) from None
         if arg0 != remote or arg1 != LOCAL_STREAM:
             raise ArtifactPullError("SDB_SYNC_STREAM_ID_MISMATCH")
         if kind == b"OKAY":
@@ -136,8 +159,14 @@ def pull_fota(sock, key_path: Path, outfile, *, component="fota-service") -> dic
             raise ArtifactPullError("SDB_SYNC_CLOSED_BEFORE_DONE")
         if kind != b"WRTE":
             raise ArtifactPullError("UNEXPECTED_SDB_SYNC_FRAME")
-        channel.send(b"OKAY", LOCAL_STREAM, remote)
-        decoder.feed(body)
+        try:
+            channel.send(b"OKAY", LOCAL_STREAM, remote)
+        except (SdbError, OSError, TimeoutError) as exc:
+            raise _sdb_stage_error("SYNC_TRANSFER", exc) from None
+        try:
+            decoder.feed(body)
+        except OSError:
+            raise ArtifactPullError("LOCAL_BINARY_WRITE_FAILED") from None
         if decoder.done:
             # Neither send a second request nor persist anything to the watch.
             break
@@ -204,8 +233,15 @@ def capture(ip: str, key_path: Path, destination: Path, timeout: int = 12,
     fd, temporary = tempfile.mkstemp(prefix=".watch3-fota-readonly-", dir=destination.parent)
     try:
         with os.fdopen(fd, "wb") as outfile:
-            with socket.create_connection((ip, PORT), timeout=timeout) as sock:
-                sock.settimeout(timeout)
+            try:
+                sock = socket.create_connection((ip, PORT), timeout=timeout)
+            except (OSError, TimeoutError) as exc:
+                raise _sdb_stage_error("TCP_CONNECT", exc) from None
+            with sock:
+                try:
+                    sock.settimeout(timeout)
+                except (OSError, TimeoutError) as exc:
+                    raise _sdb_stage_error("SOCKET_SETUP", exc) from None
                 result = pull_fota(sock, key_path, outfile, component=component)
             outfile.flush()
             os.fsync(outfile.fileno())
@@ -238,7 +274,9 @@ def main() -> int:
                          component=args.component)
     except (ArtifactPullError, SdbError, OSError, TimeoutError) as exc:
         # Never print a remote server error, watch IDs, addresses or binary data.
-        reason = str(exc) if isinstance(exc, ArtifactPullError) else "SDB_UNAVAILABLE_OR_REJECTED"
+        reason = (str(exc) if isinstance(exc, ArtifactPullError) else
+                  "WATCH_IP_OR_SDB_CONFIGURATION_ERROR" if isinstance(exc, SdbError)
+                  else "LOCAL_IO_ERROR")
         print("NO_ARTIFACT: " + reason, file=sys.stderr)
         return 1
     report_path = (Path.home() / "watch3-r840x-fota-artifact-evidence.json"
