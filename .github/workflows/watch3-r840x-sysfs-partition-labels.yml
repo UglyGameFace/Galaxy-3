@@ -7,6 +7,7 @@ on:
       - 'tools/watch3_r08_android_sdb.py'
       - 'tools/watch3_r840x_partition_sysfs_readonly.py'
       - 'tests/test_watch3_r840x_partition_sysfs_readonly.py'
+      - 'tests/test_watch3_r840x_sdb_connect_only.py'
       - 'docs/watch3-r840x-sysfs-partition-labels.md'
       - '.github/workflows/watch3-r840x-sysfs-partition-labels.yml'
   workflow_dispatch:
@@ -29,6 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s tests -p 'test_watch3_r840x_partition_sysfs_readonly.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r840x_sdb_connect_only.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_storage_mapping.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_android_sdb.py' -v
           python3 -m py_compile tools/watch3_r840x_partition_sysfs_readonly.py
@@ -42,6 +44,11 @@ jobs:
           assert 'cat /sys/class/block/mmcblk0p20/uevent' in sdb
           assert 'cat /sys/class/block/mmcblk0p21/uevent' in sdb
           assert 'PARTITION_SYSFS_FIXED_PROBES' in script
+          assert 'SINGLE_SDB_TCP_HANDSHAKE_NO_SHELL_OR_SYSFS' in script
+          assert 'SDB_HANDSHAKE_COMPLETE_NO_SYSFS_READ' in script
+          assert 'TCP_PORT_REFUSED' in script
+          assert 'TCP_CONNECT_TIMED_OUT' in script
+          assert '--connection-only' in script
           assert 'THREE_EXPLICIT_TEXT_PATHS_NO_WILDCARD' in script
           assert 'SYSFS_PARTITION_METADATA_ONLY_NO_PARTNAME' in script
           assert 'MAX_TEXT_BYTES = 16 * 1024' in script

@@ -156,6 +156,82 @@ The read-only safety result remains **`NO_GO`** for any
 firmware action, root, Odin session, PIT request, stock rescue,
 retail cross-flash or alternate UgLy|OS boot.
 
+## Physical follow-up: October 27 fixed-path SDB transport failures
+
+The owner ran the three exact sysfs `uevent` reads in normal Tizen:
+
+- `mmcblk0p1/uevent`: `SDB_TRANSPORT_UNREACHABLE`.
+- `mmcblk0p20/uevent`: `SDB_TRANSPORT_UNREACHABLE`.
+- `mmcblk0p21/uevent`: `SDB_TRANSPORT_UNREACHABLE`.
+
+The preserved output file was
+`~/watch3-r840x-sysfs-fixed-three.json`. It recorded
+`readable_uevent_files=0`, `partname_fields_observed=0`,
+`owner_watch_sysfs_observed=false` and
+`FIXED_SYSFS_NO_VALID_TEXT_OBSERVATIONS`.
+
+**Do not conclude any of those three partitions are absent or have
+no `PARTNAME`.** The existing SDB collector maps multiple
+`OSError`/timeout failures, including a socket connect failure
+and failures during later SDB activity, into that single
+`SDB_TRANSPORT_UNREACHABLE` category. It does **not** establish
+which connection stage failed. Repeating three fixed file probes
+while disconnected would not improve the evidence.
+
+### Next smallest diagnosis: one TCP/SDB handshake, no shell at all
+
+A new opt-in `--connection-only` mode uses the existing exact
+watch-side private IP, sends only the ordinary SDB connection hello
+on TCP **26101**, and **does not open a Tizen shell, request any
+sysfs file, inspect raw partition bytes, interact with NetOdin,
+reboot the watch or change its settings**.
+
+It produces a fresh private JSON report
+`~/watch3-r840x-sdb-connection-redacted.json`, without the watch IP
+or raw SDB response. It refuses to overwrite an existing file
+*before* opening the network connection.
+
+After merging the corresponding PR and confirming the watch is in
+**normal Tizen** with Wi-Fi debugging enabled and joined to your
+phone hotspot/trusted local network, read the watch's **currently
+displayed IP** and run once:
+
+```sh
+cd ~/Galaxy-3 && git switch main && git pull --ff-only origin main
+python tools/watch3_r840x_partition_sysfs_readonly.py \\
+  --watch-ip WATCH_CURRENT_WIFI_IP --connection-only
+cat ~/watch3-r840x-sdb-connection-redacted.json
+```
+
+Do **not** use a prior `10.0.0.x` address from logs by assumption.
+If you run a VPN on the phone, make sure ordinary phone-to-watch
+private-network traffic is permitted. We already know the watch
+previously returned CSC `PAP` over SDB at a different time;
+that success **does not prove current Wi-Fi reachability**.
+
+The categorical states mean:
+
+| Result | What it really establishes |
+| --- | --- |
+| `TCP_PORT_REFUSED` | The supplied host refused port 26101. Debugging may be off, service absent, stale IP or wrong host. |
+| `TCP_CONNECT_TIMED_OUT` | No completed TCP connection in 4 seconds; check currently shown watch IP, Wi-Fi/hotspot/VPN/firewall. |
+| `TCP_NETWORK_UNREACHABLE_OR_BLOCKED` | Local TCP connection failed for a different network reason, but no watch identity or sysfs state was established. |
+| `SDB_HANDSHAKE_TIMED_OUT` | TCP worked, but normal SDB handshake timed out. |
+| `SDB_HANDSHAKE_IO_FAILURE` | TCP connected but dropped or failed during SDB handshake. |
+| `SDB_AUTHORIZATION_OR_LOCAL_KEY_UNAVAILABLE` | Watch may request authorization or local RSA key material may be unavailable; do not share keys or tokens. |
+| `SDB_HANDSHAKE_PROTOCOL_FAILED` | TCP connected but expected SDB handshake did not complete. |
+| `SDB_HANDSHAKE_COMPLETE_NO_SYSFS_READ` | A host at that IP responded to SDB. **No Tizen shell, sysfs label or partition was tested**; not a guarantee of the device's full identity. |
+
+If this proves the network/SDB is healthy, the **separate**
+`--fixed-paths` text-only test can be considered with a **new**
+`--report` filename, never by deleting or overwriting the original.
+If the handshake fails, do not run any more sysfs probes or escalate
+to privileged SDB/Odin; resolve ordinary IP, Wi-Fi and debugging
+first. The absence of labels remains **unresolved**, not negative.
+
+All statuses preserve `NO_GO` for flashing, stock recovery,
+custom kernel acceptance, or partition modification.
+
 ## Interpreting results without inventing recovery
 
 - `SYSFS_PARTITION_LABELS_OBSERVED`: a consistent subset of
