@@ -12,11 +12,13 @@ import json
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import struct
 import sys
 from zipfile import BadZipFile, ZipFile
 
 MAX_ARCHIVE_BYTES = 3 * 1024 * 1024 * 1024
 MAX_MEMBERS = 256
+MAX_CENTRAL_DIRECTORY_BYTES = 512 * 1024
 MAX_NAME_LENGTH = 200
 # The exact X suffix and XXX firmware marker distinguish a demo watch from
 # SM-R840 retail firmware. Do not equate the two.
@@ -47,6 +49,33 @@ def _identity(tokens: list[str]) -> tuple[list[str], list[str]]:
         watch.update(R840X_BUILD.findall(token))
         retail.update(R840_BUILD.findall(token))
     return sorted(watch), sorted(retail)
+
+
+def _preflight_central_directory(path: Path, size: int) -> str | None:
+    """Bound ZIP metadata *before* zipfile allocates memory for its entries."""
+    with path.open("rb") as file:
+        file.seek(max(0, size - (65535 + 22)))
+        tail = file.read(65535 + 22)
+    offset = tail.rfind(b"PK\\x05\\x06")
+    if offset < 0 or offset + 22 > len(tail):
+        return "INVALID_OR_UNREADABLE_ZIP"
+    try:
+        sig, disk, start, on_disk, total, cd_size, cd_offset, comment = (
+            struct.unpack_from("<4s4H2IH", tail, offset))
+    except struct.error:
+        return "INVALID_OR_UNREADABLE_ZIP"
+    if sig != b"PK\\x05\\x06" or offset + 22 + comment != len(tail):
+        return "INVALID_OR_UNREADABLE_ZIP"
+    if disk != 0 or start != 0 or on_disk != total:
+        return "INVALID_OR_UNREADABLE_ZIP"
+    if total == 0 or total > MAX_MEMBERS:
+        return "UNSAFE_MEMBER_COUNT"
+    if cd_size == 0 or cd_size > MAX_CENTRAL_DIRECTORY_BYTES:
+        return "UNSAFE_CENTRAL_DIRECTORY"
+    eocd_abs = size - len(tail) + offset
+    if cd_offset + cd_size > eocd_abs:
+        return "INVALID_OR_UNREADABLE_ZIP"
+    return None
 
 
 def audit(path: Path, expected_build: str, checksum: bool = False) -> dict:
@@ -83,6 +112,14 @@ def audit(path: Path, expected_build: str, checksum: bool = False) -> dict:
     report["archive_bytes"] = size
     if size <= 0 or size > MAX_ARCHIVE_BYTES:
         issues.append("ARCHIVE_SIZE_OUT_OF_BOUNDS")
+        return report
+
+    try:
+        unsafe_reason = _preflight_central_directory(path, size)
+    except OSError:
+        unsafe_reason = "ARCHIVE_UNREADABLE"
+    if unsafe_reason:
+        issues.append(unsafe_reason)
         return report
 
     if checksum:
