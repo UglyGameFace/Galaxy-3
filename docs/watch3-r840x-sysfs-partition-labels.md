@@ -304,7 +304,6 @@ serial, private keys or networking identifiers are saved.
 | `PHONE_NETWORK_INTERFACE_DOWN` | Local network interface unavailable |
 | `ANDROID_OS_OR_VPN_SOCKET_POLICY_BLOCKED` | OS refused creating/using the socket; local network policy may be involved |
 | `LOCAL_SOURCE_ADDRESS_NOT_AVAILABLE` | Local source address unavailable |
-| `OS_REPORTED_TCP_CONNECT_TIMEOUT` | OS timed out during the phone-side connection attempt |
 | `TARGET_OR_INTERMEDIARY_REFUSED_PORT` | A peer actively refused SDB port 26101; debugging or IP still needs verification |
 | `TCP_CONNECT_TIMEOUT_NO_REPLY` | TCP connection never completed before application timeout |
 | `OTHER_PHONE_SIDE_CONNECT_ERROR` | No reliable subtype; do not infer a specific root cause |
