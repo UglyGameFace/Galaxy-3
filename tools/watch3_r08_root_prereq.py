@@ -17,6 +17,7 @@ ROOT_PATH_PROBES = {
     "launcher_caps": "getcap -v /usr/sbin/sdbd-tarlauncher",
     "dotnet_runtime": "/usr/bin/dotnet --list-runtimes",
     "tar_features": "/usr/bin/tar --help",
+    "control_version": "cat /proc/version",
 }
 REQUIRED = {
     "dotnet_caps": frozenset(("cap_setgid", "cap_sys_admin")),
@@ -25,6 +26,7 @@ REQUIRED = {
 CAP_LINE = re.compile(r"^(cap_[a-z0-9_]+(?:,cap_[a-z0-9_]+)*)=([eip]+)$")
 RUNTIME_LINE = re.compile(r"^Microsoft\.NETCore\.App (\d+)\.(\d+)\.\d+ \[[^\]\r\n]+\]$")
 MAX_TEXT = 64 * 1024
+READ_FAILURE_CODES = frozenset(("NO_OUTPUT", "COMMAND_REPORTED_ERROR", "SHELL_REJECTED", "SHELL_TIMEOUT", "SDB_PROTOCOL_ERROR", "NETWORK_ERROR"))
 
 
 def _caps(raw: str | None, path: str, required: frozenset[str]) -> str:
@@ -80,6 +82,8 @@ def summarize_root_path(values: dict[str, str], errors: dict[str, str]) -> dict[
     def observed(key: str) -> str | None:
         value = observations.get(key)
         return value if key not in missing and isinstance(value, str) else None
+    version = observed("control_version")
+    control = ("READ_CONTROL_CONFIRMED" if version is not None and len(version) <= MAX_TEXT and version.startswith("Linux version ") else "READ_CONTROL_UNAVAILABLE")
     checks = {
         "dotnet_capabilities": _caps(
             observed("dotnet_caps"), "/usr/bin/dotnet", REQUIRED["dotnet_caps"]),
@@ -100,16 +104,34 @@ def summarize_root_path(values: dict[str, str], errors: dict[str, str]) -> dict[
         "SUPPORTED_RUNTIME_ABSENT",
         "ARCHIVE_TO_COMMAND_ABSENT",
     }
+    delivery = {}
+    for name in ROOT_PATH_PROBES:
+        if name in missing:
+            marker = missing[name]
+            delivery[name] = marker if marker in READ_FAILURE_CODES else "UNAVAILABLE_OTHER"
+        elif name in observations:
+            delivery[name] = "OUTPUT_RECEIVED"
+        else:
+            delivery[name] = "NO_OUTPUT"
     if all(checks[name] == good[name] for name in good):
         status = "STATIC_PREREQUISITES_OBSERVED"
     elif any(value in fail for value in checks.values()):
         status = "STATIC_PATH_NOT_SUPPORTED"
     else:
         status = "INCONCLUSIVE"
+    if status != "INCONCLUSIVE":
+        reason = "STATIC_EVIDENCE_OBTAINED"
+    elif control == "READ_CONTROL_CONFIRMED":
+        reason = "ROOT_PROBES_UNRESOLVED_BUT_READ_ONLY_SDB_WORKS"
+    else:
+        reason = "SDB_READ_CHANNEL_OR_COMMANDS_UNRESOLVED"
     return {
-        "schema": "uglyos-r840x-archive-root-prerequisites-v1",
+        "schema": "uglyos-r840x-archive-root-prerequisites-v2",
         "status": status,
         "checks": checks,
+        "sdb_control": control,
+        "evidence_delivery": delivery,
+        "inconclusive_reason": reason,
         # Categorical acquisition stage, distinct from the parsers above.
         # OUTPUT_RECEIVED + UNAVAILABLE means valid SDB data was obtained but
         # the current narrow parser did not recognize it.
