@@ -1,0 +1,46 @@
+name: UgLy|OS R08 Qt6 Watch3 bezel pointer/wheel filter (NO DEVICE)
+
+# Pin and apply Qt6 source before ever paying for an AArch64 QtBase rebuild.
+# No actual watch, no evdev stream, no device writes, no flashing.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'meta-noblesse/recipes-qt/qt6/**'
+      - 'tests/test_watch3_r08_bezel_qt_filter.py'
+      - 'docs/uglyos-r08-bezel-qt-input.md'
+      - '.github/workflows/watch3-r08-bezel-qt-input.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-qt6-filter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify machine-scoped patch metadata and no device privileges
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_bezel_qt_filter.py' -v
+          python3 -m py_compile tests/test_watch3_r08_bezel_qt_filter.py
+          grep -Fxq 'Upstream-Status: Pending' meta-noblesse/recipes-qt/qt6/qtbase/0001-noblesse-r08-tizen-detent-wheel-only.patch
+      - name: Apply actual source delta to pinned QtBase 6.11.3 input backends
+        run: |
+          set -euo pipefail
+          mkdir -p pinned/src/platformsupport/input/evdevmouse pinned/src/platformsupport/input/libinput
+          base=https://raw.githubusercontent.com/qt/qtbase/v6.11.3/src/platformsupport/input
+          curl -fLSs --retry 2 --max-time 30 "$base/evdevmouse/qevdevmousehandler.cpp" -o pinned/src/platformsupport/input/evdevmouse/qevdevmousehandler.cpp
+          curl -fLSs --retry 2 --max-time 30 "$base/evdevmouse/qevdevmousehandler_p.h" -o pinned/src/platformsupport/input/evdevmouse/qevdevmousehandler_p.h
+          curl -fLSs --retry 2 --max-time 30 "$base/libinput/qlibinputhandler.cpp" -o pinned/src/platformsupport/input/libinput/qlibinputhandler.cpp
+          git -C pinned init -q
+          patch="$GITHUB_WORKSPACE/meta-noblesse/recipes-qt/qt6/qtbase/0001-noblesse-r08-tizen-detent-wheel-only.patch"
+          git -C pinned apply --check "$patch"
+          git -C pinned apply "$patch"
+          git -C pinned add -N src
+          git -C pinned diff --check
+          UGLYOS_PINNED_QTBASE_ROOT=pinned python3 -m unittest discover -s tests -p 'test_watch3_r08_bezel_qt_filter.py' -v
+          echo 'PASS: both Qt6.11.3 input backends retain wheel delivery and suppress only Watch3 auxiliary pointer motion'
+          echo 'NOT TESTED: target QtBase compile, installed rootfs, runtime libinput, native wheel or safe boot'
