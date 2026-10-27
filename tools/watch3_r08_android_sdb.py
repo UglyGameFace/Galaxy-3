@@ -23,6 +23,7 @@ from watch3_r08_power_baseline import summarize_power
 from watch3_r08_bezel_capabilities import summarize_bezel
 from watch3_r08_boot_memory import summarize_memory
 from watch3_r08_root_prereq import ROOT_PATH_PROBES, summarize_root_path
+from watch3_r08_fota_services import FOTA_PATH_PROBES, FOTA_FILE_PATHS, summarize_fota_path
 
 # Read ONLY the pinned Samsung battery device's read-only sysfs uevent.
 # No wildcard, arbitrary paths, raw blocks or writes; its exact identity
@@ -44,6 +45,7 @@ ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **
 # Preserve the existing audited boot/power/bezel contract; root-path checks
 # are a separate, opt-in, fixed read-only set.
 ALLOWED_PROBES.update(ROOT_PATH_PROBES)
+ALLOWED_PROBES.update(FOTA_PATH_PROBES)
 
 PORT = 26101
 VERSION = 0x00100000
@@ -399,7 +401,8 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
     observations, problems = {}, {}
     if (probes is not PROBES and probes is not STORAGE_PROBES and
             probes is not POWER_PROBES and probes is not BEZEL_PROBES and
-            probes is not BOOT_MEMORY_PROBES and probes is not ROOT_PATH_PROBES):
+            probes is not BOOT_MEMORY_PROBES and probes is not ROOT_PATH_PROBES and
+            probes is not FOTA_PATH_PROBES):
         raise SdbError("Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed (plus the fixed root-path set)")
     for name in probes:
         try:
@@ -419,12 +422,13 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
                         alt = Connection(second, key_path)
                         alt.handshake()
                         value = alt.shell(name, style="tizen-command")
-            if probes is ROOT_PATH_PROBES:
+            if probes is ROOT_PATH_PROBES or probes is FOTA_PATH_PROBES:
                 # A missing `getcap` binary and a missing TARGET are different.
                 # Trust a negative ls result only when it names the exact path.
                 path_probe = {
                     "dotnet_file": "/usr/bin/dotnet",
                     "launcher_file": "/usr/sbin/sdbd-tarlauncher",
+                    **FOTA_FILE_PATHS,
                 }
                 target = path_probe.get(name)
                 if (target and target in value and
@@ -449,7 +453,7 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
                 "authorization", "authentication", "private key", "crypto", "rsa"
             )):
                 raise
-            if probes is ROOT_PATH_PROBES:
+            if probes is ROOT_PATH_PROBES or probes is FOTA_PATH_PROBES:
                 if isinstance(exc, ShellCloseError):
                     problems[name] = ("SDB_SHELL_TIMEOUT" if "timed out" in str(exc)
                                       else "SDB_SHELL_CLOSED_OR_REFUSED")
@@ -458,7 +462,7 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
             else:
                 problems[name] = "Read-only property unavailable over SDB"
         except (OSError, TimeoutError):
-            problems[name] = ("SDB_TRANSPORT_UNREACHABLE" if probes is ROOT_PATH_PROBES
+            problems[name] = ("SDB_TRANSPORT_UNREACHABLE" if probes is ROOT_PATH_PROBES or probes is FOTA_PATH_PROBES
                               else "Watch did not answer this SDB read")
     return observations, problems
 
@@ -487,6 +491,9 @@ def main():
     parser.add_argument("--root-path-only", action="store_true",
                         help="Read fixed Samsung archive-launcher capabilities and runtime; "
                              "no exploits, installs, writes or root elevation")
+    parser.add_argument("--fota-path-only", action="store_true",
+                        help="Read fixed Tizen FOTA service paths and process names; "
+                             "never trigger OTA, install or change firmware")
     parser.add_argument("--report", type=Path,
                         help="Optional local privacy-filtered JSON destination")
     parser.add_argument("--key-path", type=Path,
@@ -494,9 +501,10 @@ def main():
     args = parser.parse_args()
     if sum((args.diagnose_only, args.storage_only,
             args.power_only, args.bezel_only, args.boot_memory_only,
-            args.root_path_only)) > 1:
+            args.root_path_only, args.fota_path_only)) > 1:
         parser.error("Choose at most one of --diagnose-only, --storage-only, "
-                     "--power-only, --bezel-only, --boot-memory-only or --root-path-only")
+                     "--power-only, --bezel-only, --boot-memory-only, "
+                     "--root-path-only or --fota-path-only")
     if args.diagnose_only:
         try:
             diagnose(args.watch_ip, args.key_path)
@@ -523,6 +531,12 @@ def main():
             report = summarize_memory(values, errors)
             dest = args.report or (Path.home() /
                                    "watch3-r08-boot-memory-redacted.json")
+        elif args.fota_path_only:
+            values, errors = collect(args.watch_ip, args.key_path,
+                                     probes=FOTA_PATH_PROBES)
+            report = summarize_fota_path(values, errors)
+            dest = args.report or (Path.home() /
+                                   "watch3-r08-fota-path-redacted.json")
         elif args.root_path_only:
             values, errors = collect(args.watch_ip, args.key_path,
                                      probes=ROOT_PATH_PROBES)
@@ -548,7 +562,10 @@ def main():
               "hotspot/TCP, SDB handshake and read-only shell problems.",
               file=sys.stderr)
         return 1
-    if args.root_path_only:
+    if args.fota_path_only:
+        print("FOTA SERVICE: " + report["status"] +
+              "; no update, injection, exploit or firmware change attempted.")
+    elif args.root_path_only:
         print("ROOT PATH: " + report["status"] +
               "; static prerequisites only. No root, exploit or boot was attempted.")
     elif args.power_only and report["status"] != "OBSERVED_TIZEN_BATTERY":
@@ -565,6 +582,7 @@ def main():
               ("power" if args.power_only else "bezel capability" if args.bezel_only else
                "boot memory" if args.boot_memory_only else
                "root-path prerequisite" if args.root_path_only else
+               "FOTA service" if args.fota_path_only else
                "storage" if args.storage_only else "boot") +
               " report saved locally.")
     print("Report path:", dest)
