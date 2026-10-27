@@ -83,8 +83,76 @@ def parse_version_xml(data: bytes, model: str) -> dict:
         "retail_build_tokens": retail,
     }
 
-def public_probe(opener=None, *, observed_csc_only: bool = False) -> list[dict]:
-    """Fixed host, 3 historical OR 1 owner-confirmed PAP GET, no device IDs."""
+def summarize_version_xml_shape(data: bytes) -> dict:
+    """Only structural tag names and link-type booleans, NEVER raw URLs/values.
+
+    The observed Samsung PAP record may provide version history without
+    a complete stock image. Neither an apparent link nor its absence can
+    establish the availability or authenticity of an R840X repair archive.
+    """
+    basic = parse_version_xml(data, MODEL_R840X)
+    if basic["state"] in (
+        "PUBLIC_METADATA_OVERSIZED", "EMPTY_RESPONSE",
+        "XML_DTD_OR_ENTITY_BLOCKED", "NOT_VALID_VERSION_XML",
+        "NOT_VERSIONINFO_XML",
+    ):
+        return {"state": basic["state"], "structure_valid": False}
+    try:
+        root = ET.fromstring(data)
+    except (ET.ParseError, ValueError):
+        return {"state": "XML_STRUCTURE_PARSE_REFUSED", "structure_valid": False}
+    if root.tag != "versioninfo":
+        return {"state": "NOT_VERSIONINFO_XML", "structure_valid": False}
+
+    # Fixed small allowlist for text-free schema metadata. Do NOT copy
+    # arbitrary XML text, attribute values, hostnames or binary links.
+    safe_tag = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}\\Z")
+    nodes = 0
+    paths: set[str] = set()
+    archive_url_like = 0
+    generic_http_url_like = 0
+    stack = [(root, tuple())]
+    while stack:
+        node, parent = stack.pop()
+        nodes += 1
+        if nodes > 2048 or len(parent) > 10:
+            return {"state": "XML_STRUCTURE_COMPLEXITY_LIMIT", "structure_valid": False}
+        # Never surface attacker-controlled raw tag names.
+        tag = node.tag
+        if not isinstance(tag, str) or not safe_tag.fullmatch(tag):
+            return {"state": "XML_UNEXPECTED_TAG_NAME", "structure_valid": False}
+        current = parent + (tag,)
+        paths.add("/".join(current))
+        if len(paths) > 128:
+            return {"state": "XML_STRUCTURE_UNEXPECTED_FIELD_COUNT",
+                    "structure_valid": False}
+        if not list(node):
+            value = (node.text or "").strip()
+            if value.lower().startswith(("https://", "http://")):
+                generic_http_url_like += 1
+                if re.search(r"\\.(?:zip|tar|md5|img|bin|enc4)(?:[?#].*)?\\Z",
+                             value, flags=re.I):
+                    archive_url_like += 1
+        for child in reversed(list(node)):
+            stack.append((child, current))
+    return {
+        "state": "STRUCTURE_OBSERVED_FROM_PUBLIC_VERSION_XML",
+        "structure_valid": True,
+        "xml_byte_length": len(data),
+        "observed_element_paths": sorted(paths),
+        "number_of_unique_element_paths": len(paths),
+        "http_url_looking_text_count": generic_http_url_like,
+        "archive_url_suffix_looking_text_count": archive_url_like,
+        "raw_xml_retained_or_reported": False,
+        "download_url_values_reported": False,
+        "official_repair_archive_authenticated": False,
+        "absence_of_url_does_not_prove_archive_nonexistence": True,
+    }
+
+
+def public_probe(opener=None, *, observed_csc_only: bool = False,
+                 inspect_xml_shape: bool = False) -> list[dict]:
+    """Fixed host, 3 historical OR 1 PAP GET; optional redacted XML layout."""
     if opener is None:
         opener = build_opener(NoRedirect(),
                               HTTPSHandler(context=ssl.create_default_context()))
@@ -107,6 +175,8 @@ def public_probe(opener=None, *, observed_csc_only: bool = False) -> list[dict]:
             with opener.open(req, timeout=PROBE_TIMEOUT) as response:
                 body = response.read(MAX_XML_BYTES + 1)
                 result.update(parse_version_xml(body, model))
+                if inspect_xml_shape:
+                    result["xml_structure_redacted"] = summarize_version_xml_shape(body)
         except HTTPError as error:
             # 3xx when redirects disallowed, 403/404 when unavailable; never
             # trust a failed endpoint as proof of firmware nonexistence.
@@ -153,6 +223,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="Explicitly fetch 3 historical PUBLIC FOTA version.xml URLs")
     ap.add_argument("--probe-owner-active-csc", action="store_true",
                     help="Only one fixed PUBLIC SM-R840X/PAP version.xml metadata request")
+    ap.add_argument("--inspect-owner-pap-xml-structure", action="store_true",
+                    help="One PUBLIC PAP version.xml GET; report sanitized XML tag paths ONLY")
     ap.add_argument("--offline-sample", type=Path,
                     help="Parse only an existing local XML fixture; no network access")
     ap.add_argument("--output", type=Path,
@@ -160,9 +232,10 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if sum(bool(x) for x in (args.probe_public_metadata,
                              args.probe_owner_active_csc,
+                             args.inspect_owner_pap_xml_structure,
                              args.offline_sample)) != 1:
-        ap.error("Choose exactly one of --probe-public-metadata, "
-                 "--probe-owner-active-csc or --offline-sample")
+        ap.error("Choose exactly one of the historical, PAP, structural PAP, "
+                 "or local XML sample modes")
     if args.offline_sample:
         try:
             if args.offline_sample.is_symlink() or args.offline_sample.stat().st_size > MAX_XML_BYTES:
@@ -175,8 +248,13 @@ def main(argv: list[str] | None = None) -> int:
                    "state": "OFFLINE_SAMPLE_ONLY", "device_contacted": False,
                    **parse_version_xml(data, MODEL_R840X)}]
     else:
-        probes = public_probe(observed_csc_only=args.probe_owner_active_csc)
-    report = (json.dumps(report_for(probes, observed_csc_only=args.probe_owner_active_csc),
+        probes = public_probe(
+            observed_csc_only=(args.probe_owner_active_csc or
+                               args.inspect_owner_pap_xml_structure),
+            inspect_xml_shape=args.inspect_owner_pap_xml_structure)
+    report = (json.dumps(report_for(
+        probes, observed_csc_only=(args.probe_owner_active_csc or
+                                  args.inspect_owner_pap_xml_structure)),
                          indent=2) + "\n")
     if args.output:
         try:
