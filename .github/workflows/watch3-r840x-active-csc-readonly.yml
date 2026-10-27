@@ -1,0 +1,43 @@
+name: SM-R840X active CSC read-only SDB probe (NO WATCH CI)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/watch3_r840x_csc_readonly.py'
+      - 'tests/test_watch3_r840x_csc_readonly.py'
+      - 'docs/watch3-r840x-active-csc-readonly.md'
+      - '.github/workflows/watch3-r840x-active-csc-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mock-sdb-csc:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Simulate SDB sync-only CSC path and enforce no-watch limits
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_watch3_r840x_csc_readonly.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_fota_manifest_probe.py' -v
+          python3 -m py_compile tools/watch3_r840x_csc_readonly.py
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('tools/watch3_r840x_csc_readonly.py').read_text()
+          assert 'CSC_PATH = b"/opt/system/csc-default/output/csc-active-customer.log"' in s
+          assert 'SYNC_HDR.pack(b"RECV", len(CSC_PATH)) + CSC_PATH' in s
+          assert 'b"SEND"' not in s
+          assert 'b"ODIN"' not in s
+          assert 'b"shell:' not in s
+          assert '"flash_allowed": False' in s
+          print('PASS: only fixed-path SDB read; no watch or firmware touched')
+          PY
+          git diff --check
