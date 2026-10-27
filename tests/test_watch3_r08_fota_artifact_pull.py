@@ -15,7 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from watch3_r08_android_sdb import VERSION, frame, receive
 from watch3_r08_fota_artifact_pull import (
-    ArtifactPullError, FOTA_EXECUTABLE, LOCAL_STREAM, MAX_BINARY_BYTES,
+    ArtifactPullError, FOTA_EXECUTABLE, EXECUTABLES, LOCAL_STREAM, MAX_BINARY_BYTES,
     SYNC_HDR, ReadOnlySyncDecoder, capture, pull_fota,
     _save_local_exclusive,
 )
@@ -96,6 +96,50 @@ class FotaArtifactTests(unittest.TestCase):
         self.assertNotIn(b"SEND", bytes(sock.sent))
         self.assertNotIn(b"DELE", bytes(sock.sent))
         self.assertNotIn(b"exec", bytes(sock.sent).lower())
+
+    def test_updateclient_read_only_path_is_exact_and_report_is_distinct(self):
+        binary = elf32(b"updateclient")
+        sock = sdb_peer([SYNC_HDR.pack(b"DATA", len(binary)) + binary,
+                         SYNC_HDR.pack(b"DONE", 0)])
+        output = io.BytesIO()
+        result = pull_fota(sock, Path("/unused"), output, component="updateclient")
+        frames = requests(bytes(sock.sent))
+        path = EXECUTABLES["updateclient"]
+        self.assertEqual(frames[2][3], SYNC_HDR.pack(b"RECV", len(path)) + path)
+        self.assertEqual(output.getvalue(), binary)
+        self.assertEqual(result["candidate"],
+                         "com.samsung.tizen.update-client/updateclient")
+        self.assertFalse(result["watch_write_performed"])
+        self.assertNotIn(b"SEND", bytes(sock.sent))
+        self.assertNotIn(b"shell:", bytes(sock.sent))
+
+    def test_default_still_original_and_reject_unknown_source_before_connect(self):
+        self.assertEqual(EXECUTABLES["fota-service"], FOTA_EXECUTABLE)
+        with self.assertRaisesRegex(ArtifactPullError, "COMPONENT_NOT_ALLOWLISTED"):
+            pull_fota(None, Path("/unused"), io.BytesIO(),
+                      component="../../dev/block")
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaisesRegex(ArtifactPullError, "COMPONENT_NOT_ALLOWLISTED"):
+                capture("10.0.0.65", Path("/unused"), Path(td) / "bad.bin",
+                        component="fota-syspopup")
+            self.assertEqual(list(Path(td).iterdir()), [])
+
+    def test_updateclient_capture_is_private_and_no_overwrite(self):
+        binary = elf32(b"updateclient")
+        sock = sdb_peer([SYNC_HDR.pack(b"DATA", len(binary)) + binary,
+                         SYNC_HDR.pack(b"DONE", 0)])
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "updateclient.bin"
+            with patch("watch3_r08_fota_artifact_pull.socket.create_connection",
+                       return_value=sock):
+                report = capture("10.0.0.65", Path("/unused"), dest,
+                                 component="updateclient")
+            self.assertEqual(dest.read_bytes(), binary)
+            self.assertEqual(dest.stat().st_mode & 0o077, 0)
+            self.assertEqual(report["sha256"], hashlib.sha256(binary).hexdigest())
+            with self.assertRaisesRegex(ArtifactPullError, "LOCAL_OUTPUT_ALREADY_EXISTS"):
+                capture("10.0.0.65", Path("/unused"), dest,
+                        component="updateclient")
 
     def test_aarch64_elf_header_is_recognized(self):
         header = bytearray(20)

@@ -84,3 +84,47 @@ the missing component required to investigate what verifies delta.tar
 and in which principal it executes. Do not send malicious requests or
 replace update archives on the only watch. Stock recovery and signing
 limits must be demonstrated separately before any alternate-OS attempt.
+
+
+## October 27: physical consumer-directory results and targeted next file
+
+Owner's actual SM-R840X read-only SDB LIST completed. Package binary
+directory exposed `fota-service` (87,036 bytes, matching the extracted
+ELF) and `fota-syspopup` (40,812 bytes) with two filtered entries.
+FOTA save directory LIST did not show `delta.tar`. That is an observation
+at one moment, not proof that the update path is forever empty or writable.
+
+A public Tizen wearable package inventory separately labels
+`fota-syspopup` a UI app and identifies the service application
+`com.samsung.tizen.update-client`, executable
+`/usr/apps/com.samsung.tizen.update-client/bin/updateclient`:
+https://gist.github.com/avipars/bf4ebf3efa1bcceb77025b8b9159a6df
+
+The owner's earlier R840X FOTA-path probe saw the `update-client`
+*directory*; the precise executable, D-Bus ownership, privilege context,
+and signature-check code are still NOT verified. The updated original
+RECV tool (no duplicate transport implementation) now supports only
+two literal source choices: default `fota-service` and optional
+`updateclient`. On Android/Termux, after this PR is merged and its
+NO-WATCH synthetic CI passes:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_fota_artifact_pull.py --watch-ip 10.0.0.65 --component updateclient
+cat ~/watch3-r840x-updateclient-artifact-evidence.json
+```
+
+Use the watch's current local Wi-Fi address if different. The new
+binary and report stay on the owner's phone in separate private filenames,
+created exclusively without overwriting existing files. It sends only
+an authenticated read-only SDB `sync:RECV`, bounded to 8 MiB, and checks
+that returned bytes are ARM/AArch64 ELF; no watch write, shell, SAP packet,
+D-Bus launch, bootloader transition, update request, or exploit.
+
+**Interpretation:** A successful read establishes real binary bytes for
+offline analysis of the consumer/verification architecture, not a root
+exploit or unsigned-boot permission. An SDB `FAIL` means
+missing/denied/unreadable cannot be distinguished. If the exact
+`updateclient` can be recovered, inspect it OFFLINE before pursuing
+any other FOTA surface. Stock restore and bootloader acceptance remain
+independent mandatory proof gates.
