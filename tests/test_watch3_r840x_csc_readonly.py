@@ -102,9 +102,12 @@ class SafeCscTests(unittest.TestCase):
         with self.assertRaisesRegex(csc.CscError, "CSC_FILE_MISSING_DENIED_OR_UNREADABLE") as ctx:
             csc.fetch_fixed_csc(stream, Path("/synthetic"))
         self.assertNotIn("serial", str(ctx.exception))
-        failed = csc.collect("10.0.0.65", Path("/synthetic"))
+        with patch("watch3_r840x_csc_readonly.socket.create_connection",
+                   side_effect=[peer([SYNC_HDR.pack(b"FAIL", len(secret)) + secret])]):
+            failed = csc.collect("10.0.0.65", Path("/synthetic"))
         self.assertEqual(failed["status"], "CSC_NOT_YET_CONFIRMED")
-        self.assertFalse(failed["stock_recovery_proven"] if "stock_recovery_proven" in failed else failed["full_stock_recovery_proven"])
+        self.assertEqual(failed["state"], "CSC_FILE_MISSING_DENIED_OR_UNREADABLE")
+        self.assertFalse(failed["full_stock_recovery_proven"])
 
     def test_oversized_remote_stream_refused_before_unbounded_storage(self):
         with self.assertRaisesRegex(csc.CscError, "CSC_LOG_BYTE_LIMIT_EXCEEDED"):
