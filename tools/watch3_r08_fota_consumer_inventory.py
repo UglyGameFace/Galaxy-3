@@ -33,6 +33,15 @@ DIRECTORIES = {
     "consumer_binary_directory": b"/usr/apps/com.samsung.fota-consumer/bin",
     "fota_save_directory": b"/opt/usr/data/fota/save",
 }
+# Standard D-Bus activation directories per dbus.freedesktop.org specification.
+# These are hypothesis locations; only the named service is reported.
+# Do not infer service absence if LIST is empty, denied, or inconclusive.
+DBUS_DIRECTORIES = {
+    "dbus_system_vendor": b"/usr/share/dbus-1/system-services",
+    "dbus_system_override": b"/etc/dbus-1/system-services",
+    "dbus_session_vendor": b"/usr/share/dbus-1/services",
+}
+DBUS_ACTIVATION_FILENAME = "fota.consumer.service"
 CANDIDATE_NAME = re.compile(r"(?:fota|update)[a-z0-9._-]{0,63}\Z")
 EXACT_BIN_NAMES = frozenset((
     "fota-service", "fota-consumer", "fota_consumer",
@@ -126,6 +135,11 @@ class DirectoryDecoder:
                         "executable_by_someone_dac": bool(mode & 0o111),
                         "bytes": size if size <= 8 * 1024 * 1024 else "OVER_8_MIB",
                     }
+            elif scope in DBUS_DIRECTORIES and name == DBUS_ACTIVATION_FILENAME:
+                self.candidates[name] = {
+                    "kind": mode_kind(mode),
+                    "bytes": size if size <= 64 * 1024 else "OVER_64_KIB",
+                }
             elif scope == "fota_save_directory" and name == "delta.tar":
                 self.archive = {
                     "kind": mode_kind(mode),
@@ -146,6 +160,17 @@ class DirectoryDecoder:
                 "meaning": ("Only names beginning fota/update are shown. "
                             "Missing candidate is not proof an updater is absent."),
             }
+        if scope in DBUS_DIRECTORIES:
+            return {
+                "status": "LIST_COMPLETE" if self.count else "EMPTY_OR_INACCESSIBLE",
+                "fota_consumer_activation_file": (
+                    self.candidates.get(DBUS_ACTIVATION_FILENAME, "NOT_SEEN_IN_LIST")
+                ),
+                "other_or_unreported_entries": max(0, self.count - len(self.candidates)),
+                "meaning": ("Only the exact fota.consumer.service filename is reported. "
+                            "Absent listing does not exclude dynamic D-Bus name ownership, "
+                            "nonstandard activation paths, or restricted listings."),
+            }
         return {
             "status": "LIST_COMPLETE" if self.count else "EMPTY_OR_INACCESSIBLE",
             "delta_tar": self.archive or "NOT_SEEN_IN_LIST",
@@ -156,9 +181,9 @@ class DirectoryDecoder:
 
 def list_one(sock, key_path: Path, scope: str) -> dict:
     """Issue exactly one fixed LIST on already-authorized SDB sync."""
-    if scope not in DIRECTORIES:
+    if scope not in DIRECTORIES and scope not in DBUS_DIRECTORIES:
         raise InventoryError("SCOPE_NOT_ALLOWED")
-    path = DIRECTORIES[scope]
+    path = (DIRECTORIES if scope in DIRECTORIES else DBUS_DIRECTORIES)[scope]
     conn = Connection(sock, key_path)
     conn.handshake()
     conn.send(b"OPEN", LOCAL_STREAM, 0, b"sync:\x00")
@@ -186,10 +211,11 @@ def list_one(sock, key_path: Path, scope: str) -> dict:
     raise InventoryError("SDB_LIST_FRAME_LIMIT")
 
 
-def inventory(ip: str, key_path: Path, timeout: int = 12) -> dict:
+def inventory(ip: str, key_path: Path, timeout: int = 12,
+              *, dbus_services_only: bool = False) -> dict:
     ip = private_watch_ip(ip)
     scopes = {}
-    for scope in DIRECTORIES:
+    for scope in (DBUS_DIRECTORIES if dbus_services_only else DIRECTORIES):
         try:
             with socket.create_connection((ip, PORT), timeout=timeout) as sock:
                 sock.settimeout(timeout)
@@ -199,8 +225,10 @@ def inventory(ip: str, key_path: Path, timeout: int = 12) -> dict:
         except (OSError, TimeoutError, ValueError):
             scopes[scope] = {"status": "SDB_UNAVAILABLE"}
     return {
-        "schema": "uglyos-r840x-fota-consumer-inventory-v1",
-        "status": "READ_ONLY_FIXED_DIRECTORY_INVENTORY",
+        "schema": ("uglyos-r840x-fota-dbus-activation-v1" if dbus_services_only
+                   else "uglyos-r840x-fota-consumer-inventory-v1"),
+        "status": ("READ_ONLY_FIXED_DBUS_DIRECTORY_INVENTORY" if dbus_services_only
+                   else "READ_ONLY_FIXED_DIRECTORY_INVENTORY"),
         "directory_results": scopes,
         "known_fota_service_sha256":
             "008c67e782eb3d97b0ddb7abc7606b86dc493576c24de476a2110d6e5a681757",
@@ -218,14 +246,21 @@ def inventory(ip: str, key_path: Path, timeout: int = 12) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--watch-ip", required=True)
+    parser.add_argument("--dbus-services-only", action="store_true",
+                        help="List only fixed standard D-Bus activation directories")
     parser.add_argument("--key-path", type=Path,
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     parser.add_argument("--report", type=Path,
                         default=Path.home() / "watch3-r840x-fota-consumer-inventory.json")
     args = parser.parse_args()
     try:
-        result = inventory(args.watch_ip, args.key_path)
-        path = args.report.expanduser()
+        result = inventory(args.watch_ip, args.key_path,
+                           dbus_services_only=args.dbus_services_only)
+        # Default report path remains unchanged for existing callers.
+        path = (Path.home() / "watch3-r840x-fota-dbus-services.json"
+                if args.dbus_services_only and args.report ==
+                   Path.home() / "watch3-r840x-fota-consumer-inventory.json"
+                else args.report.expanduser())
         payload = (json.dumps(result, indent=2) + "\n").encode("utf-8")
         if not path.parent.is_dir():
             raise InventoryError("REPORT_DIRECTORY_MISSING")
@@ -245,7 +280,8 @@ def main() -> int:
         reason = str(exc) if isinstance(exc, InventoryError) else "LOCAL_FILE_ERROR"
         print("INVENTORY_ERROR: " + reason, file=sys.stderr)
         return 1
-    print("READ_ONLY_FOTA_DIRECTORY_INVENTORY: " + str(path))
+    print(("READ_ONLY_DBUS_ACTIVATION_INVENTORY: " if args.dbus_services_only
+           else "READ_ONLY_FOTA_DIRECTORY_INVENTORY: ") + str(path))
     print("NO firmware writes, FOTA calls, root, exploit or custom boot attempted.")
     return 0
 
