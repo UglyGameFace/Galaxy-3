@@ -53,6 +53,45 @@ ZIP member data are not extracted or executed. Unsupported nesting and
 malformed archive layouts remain unverified. The result is **always NO_GO**
 even when all expected names match.
 
+## Optional nested Odin component inventory
+
+The original ZIP-only audit cannot establish whether a BL/AP/CSC component
+contains real firmware images. The companion offline analyzer enumerates
+**nested TAR headers** without extracting any member onto storage or running
+any executable:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/audit_watch3_r840x_odin_components.py \
+  "/sdcard/Download/R840XXXU1ATFA-(OXA).zip" \
+  --expected-build R840XXXU1AUA2 \
+  --output ~/watch3-r08-odin-contents.json
+cat ~/watch3-r08-odin-contents.json
+```
+
+The path is an example only, **not a file presently on the user's phone**.
+It scans only BL/AP/CSC/CP archives with `.tar` or `.tar.md5`
+suffixes, reports the embedded filenames and declared sizes, identifies
+names containing boot/recovery and potential PIT files, and checks for
+path traversal, links, excessive file counts and oversized archives.
+A counterfeit ZIP with fake `boot.img` and `recovery.img` names can
+pass an inventory. ZIP CRC, TAR metadata and a file hash are **not**
+Samsung firmware-signature checks. A reported PIT *name* is not a parsed,
+authenticated partition map. No actual vendor package was supplied to
+CI; all tests use tiny obviously fake fixtures.
+
+**Bootloader research finding:** Samsung's July 2021 wearable security
+bulletin documents `CVE-2021-25434` (parameter partition) and
+`CVE-2021-25435` (recovery partition), both affecting Watch3 firmware
+before its July 2021 release. The physical watch reports a pre-July
+`R840XXXU1AUA2` build, but the applicability of those specific flaws
+to this LDU bootloader, whether a reproducible research proof exists,
+and any safe reversible loading method have **not** been established.
+No malformed partition submissions or live wireless-download exploit
+experiments are authorized by the archive tool.
+
+Official advisory: https://security.samsungmobile.com/serviceWeb.smsb?year=2021&month=7
+
 ## Gates before a recovery can be called real
 
 1. Obtain authorized genuine stock **R840X** firmware, show content listing
