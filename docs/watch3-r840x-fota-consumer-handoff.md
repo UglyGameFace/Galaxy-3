@@ -290,3 +290,60 @@ manifest filename not listed in that one directory**; if it is listed,
 record DAC file metadata but retain the prior RECV failure as an open
 SMACK/access/transport question. No shell, file download, service
 launch, D-Bus invocation, firmware update, root or watch write.
+
+
+## Physical result: no tizen-manifest.xml in FOTA package root
+
+Owner's read-only `--fota-package-root-only` run on main
+`be6662f` returned `LIST_COMPLETE`, six filtered entries, and
+`tizen_manifest=NOT_SEEN_IN_LIST` for the exact directory
+`/usr/apps/com.samsung.fota-consumer`. Earlier `sync:RECV` of
+`/usr/apps/com.samsung.fota-consumer/tizen-manifest.xml` was refused
+with `MANIFEST_MISSING_DENIED_OR_UNREADABLE`. In combination these
+indicate **that specific manifest path is not seen**. Stop retrying it.
+
+### Better Tizen package registry locations, grounded in install artifacts
+
+A published Tizen native RPM packaging spec for the Cobalt application
+explicitly installs the executable under `/usr/apps/<package>/bin`
+and the XML manifest under `/usr/share/packages/<package>.xml`:
+https://cobalt.googlesource.com/cobalt/+/refs/heads/release_11/src/starboard/tizen/packaging/com.youtube.cobalt.spec
+Samsung Tizen web/hybrid package documentation independently identifies
+`/opt/share/packages/<package>.xml` for those package types:
+https://github.com/Samsung/tizen-docs/blob/master/docs/application/web/index.md
+
+The actual R840X FOTA package identity is evidenced by the successfully
+pulled service at
+`/usr/apps/com.samsung.fota-consumer/bin/fota-service`.
+Therefore use only exact name `com.samsung.fota-consumer.xml`
+in two fixed directories: `/usr/share/packages` and
+`/opt/share/packages`. These are **layout hypotheses, not** a claim
+that the user's watch has that registration or that these are exhaustive.
+
+Extending the original SDB `LIST` inventory with
+`--fota-package-index-only` performs precisely two independent,
+read-only directory queries. It reports only the exact package XML
+filename's kind, bounded size, and ordinary DAC read bit, plus counts
+of other entries; no other filenames or raw contents are exposed.
+The entry limit for these two directories alone increases from 256
+to 2,048 to avoid truncating typical larger registries. The existing
+512 KiB total LIST limit, frame limit, default original two scopes,
+D-Bus mode, one-package-root mode, no remote writes and private
+0600 no-overwrite report remain intact.
+
+After mock-watch CI passes and the PR merges:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_fota_consumer_inventory.py \
+  --watch-ip 10.0.0.65 --fota-package-index-only
+cat ~/watch3-r840x-fota-package-index.json
+```
+
+If a registered manifest appears, the evidence-gated next step is a
+separate limited `RECV` of only that exact file followed by local,
+privacy-filtered parsing of `service-application` and `exec`
+attributes. If not, **do not invent** a different path or infer no
+daemon; use passive public/vendor package evidence and the already
+extracted binary to investigate owner code instead. No update
+triggering, exploit payload, unsigned boot or stock recovery proved.
