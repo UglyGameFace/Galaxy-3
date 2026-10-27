@@ -14,6 +14,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import socket
 import struct
@@ -150,6 +151,35 @@ def pull_fota(sock, key_path: Path, outfile) -> dict[str, object]:
     }
 
 
+
+def _save_local_exclusive(temporary: str, destination: Path, expected_size: int) -> None:
+    """Copy onto Android/Termux without os.link and without replacing a file.
+
+    O_EXCL makes the no-overwrite check atomic, even when a different
+    process creates the destination after capture()'s initial check.
+    The temporary file is already fully received, ELF-checked and synced.
+    A failed copy removes only the destination we exclusively created.
+    """
+    try:
+        descriptor = os.open(str(destination),
+                             os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        raise ArtifactPullError("LOCAL_OUTPUT_ALREADY_EXISTS") from None
+    try:
+        with os.fdopen(descriptor, "wb") as target:
+            with open(temporary, "rb") as source:
+                shutil.copyfileobj(source, target, length=64 * 1024)
+            target.flush()
+            os.fsync(target.fileno())
+        if destination.stat().st_size != expected_size:
+            raise ArtifactPullError("LOCAL_COPY_SIZE_MISMATCH")
+    except BaseException:
+        # Only our freshly O_EXCL-created local destination is deleted.
+        # Never delete an existing file belonging to the owner.
+        destination.unlink(missing_ok=True)
+        raise
+
+
 def capture(ip: str, key_path: Path, destination: Path, timeout: int = 12) -> dict[str, object]:
     """Write output on the phone only, atomically, and never replace it."""
     ip = private_watch_ip(ip)
@@ -166,12 +196,10 @@ def capture(ip: str, key_path: Path, destination: Path, timeout: int = 12) -> di
                 result = pull_fota(sock, key_path, outfile)
             outfile.flush()
             os.fsync(outfile.fileno())
-        # This check protects an existing local file. It does NOT update the watch.
-        if destination.exists() or destination.is_symlink():
-            raise ArtifactPullError("LOCAL_OUTPUT_ALREADY_EXISTS")
-        # Hard-link creation is exclusive: never replace an existing phone file.
-        os.link(temporary, destination)
-        os.unlink(temporary)
+        # Android's Termux Python may not expose os.link(). Use an atomic
+        # O_CREAT|O_EXCL reservation and copy the validated local temporary.
+        # Never clobber an existing phone file, even under a race.
+        _save_local_exclusive(temporary, destination, result["bytes"])
         return result
     finally:
         if os.path.exists(temporary):
