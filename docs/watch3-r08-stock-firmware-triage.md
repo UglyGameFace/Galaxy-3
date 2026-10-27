@@ -26,6 +26,51 @@ Third-party catalog labels and file extensions can be spoofed. Samsung signing
 cannot be verified merely from an archive name, ZIP CRC or SHA256 without a
 trusted independent reference. Odin/PIT parsing is research, not recovery.
 
+## October 27 expanded public-source audit: exact-model source confidence
+
+Investigated fresh public metadata and code references **without requesting
+firmware bytes, logging into paywalls, downloading installers, touching the
+watch or running network Odin commands**. The evidence levels below are
+deliberately separate: **model registered** does not mean **archive exists**;
+**archive named** does not mean **archive authentic**; **authentic ZIP hash**
+does not mean **bootloader accepts it**; **loader accepts stock** would not
+mean **custom UgLy|OS boots**.
+
+| Source and observed evidence | Confidence in *that narrow fact* | Missing before restoration |
+| --- | --- | --- |
+| [Samsung Electronics Service Korea wearable download catalog](https://www.samsungsvc.co.kr/download?code=%EC%9B%A8%EC%96%B4%EB%9F%AC%EB%B8%94) explicitly lists **SM-R840X** separately from **SM-R840**, also alongside other `X` demonstration variants. | **High** that Samsung recognizes a distinct R840X support model; **zero** new actual firmware bytes | The catalog index does not itself expose a tested R840X full firmware archive, bootloader signature, rollback flag or restore guide. Clicking/selecting the exact X model did not yield independently verified package bytes here. |
+| [Samsung's official R840 firmware release notes](https://doc.samsungmobile.com/SM-R840/XAR/doc.html) carry **`R840XXU1...`** versions (without the `XXX` segment); the owner's live R840X build is **`R840XXXU1AUA2`**. | **High** that retail update history is for a **different firmware model**; no inference about exact hardware acceptance | Neither `R840XXU1DWK2` nor other retail builds validate R840X custom boot, downgrade or rescue. |
+| [Contemporaneous July 28, 2020 public firmware-list post](https://www.reddit.com/r/u_gsm2file/comments/hzfoeq) explicitly names **`R840X R840XXXU1ATFA 3File`**. Previously indexed [HalabTech R840X folder](https://support.halabtech.com/index.php?a=downloads&b=folder&id=112593) also named that same older package (~837 MB). | **Medium** confidence the **ATFA package label** circulated in 2020. This is a vendor/listing claim, **not independent binary authentication**; both listings could originate from the same untrusted supplier. | **No original package bytes, trusted publisher manifest or SHA256, Samsung signing evidence, exact `AUA2` support, PIT, anti-rollback evaluation or confirmed restore outcome**. |
+| [SamFrew Galaxy Watch3 firmware model index](https://samfrew.com/devices/galaxy-watch3) lists nine retail/market models but does not list **SM-R840X** among those models at inspection. | **High** for what that consumer-oriented public index shows; absence is **not** proof Samsung or an authorized repair shop never had R840X files. | Searching retail repositories or installing a generic phone firmware downloader cannot replace independent same-model recovery evidence. |
+| [Samsung SM-R840X public UK support page](https://www.samsung.com/uk/support/model.SM-R840XTKAEUA/) supplies manuals/safety documents; [Bifrost downloader FAQ](https://github.com/Ff428/SamloaderKotlin) states Samsung's FUS route does not serve **full watch firmware**. | **High** for the public support-page content and the **tool author's own documented limitation**; not evidence no offline service image exists. | A genuinely complete full-stock signed R840X package remains missing. |
+
+### Target evidence that would actually unblock offline engineering
+
+A **lawfully obtained complete** factory/repair ZIP is a candidate only after
+it arrives with an independently attributable original publisher/channel,
+exact **SM-R840X / R840XXXU1AUA2** model/build information, full BL/AP/CSC
+and any required model-specific components, device variant/PIT partition
+information, a trusted cryptographic fingerprint/signature reference, and
+a reproducible original-device rescue procedure. A different signed build
+could eventually be considered **only if** Samsung-specific bootloader,
+rollback and partition compatibility is independently proven, not inferred
+from shared `U1` text.
+
+After obtaining a candidate, the existing
+`audit_watch3_r840x_recovery_zip.py` and
+`audit_watch3_r840x_odin_components.py` can inspect a **locally
+supplied file entirely offline**. They only validate ZIP/TAR
+structure and naming and MUST continue to report **`NO_GO`**.
+Even authentic, correctly named file bytes would not establish that
+the owner's unique LDU watch can be restored after a failed custom boot.
+
+**Public-source research result (not vendor negative proof):** no
+independently authenticated complete **`R840XXXU1AUA2`** recovery
+archive or approved alternate-build rollback route was obtained.
+No one should buy speculative firmware access, cross-flash
+retail `R840`, use combination images or run further 1024-byte
+NetOdin commands on the only working watch to fill this gap.
+
 ## Updated October 27: real Odin magic proven; full watch firmware still unavailable
 
 The owner physically showed `SM-R840X` Wireless Download WPS/AP screens,
