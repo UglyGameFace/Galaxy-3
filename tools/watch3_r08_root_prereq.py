@@ -110,6 +110,14 @@ def summarize_root_path(values: dict[str, str], errors: dict[str, str]) -> dict[
         "schema": "uglyos-r840x-archive-root-prerequisites-v1",
         "status": status,
         "checks": checks,
+        # Categorical acquisition stage, distinct from the parsers above.
+        # OUTPUT_RECEIVED + UNAVAILABLE means valid SDB data was obtained but
+        # the current narrow parser did not recognize it.
+        "acquisition": {
+            key: missing.get(key, "OUTPUT_RECEIVED" if key in observations
+                             else "NO_RESPONSE_RECORDED")
+            for key in ROOT_PATH_PROBES
+        },
         "sdb_command_injection_proven": False,
         "root_obtained": False,
         "unsigned_kernel_boot_proven": False,
