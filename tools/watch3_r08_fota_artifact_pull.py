@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Read one allowlisted Watch3 FOTA executable over authenticated SDB sync.
+"""Read a selected allowlisted Watch3 update executable over authenticated SDB sync.
 
 This is a bounded, host-local *read* of a normal Tizen application file.
 No SDB push, shell, install, flash, bootloader mode, root or watch write exists.
-The executable's path is a sibling-watch hypothesis, NOT proven on R840X.
+The updateclient path is from a public Tizen watch package inventory and
+the R840X's earlier update-client directory observation. Its readability
+and actual FOTA verification role are not yet proven.
 
 The binary stays on the owner's phone for offline analysis. Do not upload it
 to GitHub, and do not run it in Termux or on the watch.
@@ -28,6 +30,11 @@ from watch3_r08_android_sdb import (
 # Seen in a published Tizen wearable package inventory; exact R840X presence
 # is to be observed, not assumed.
 FOTA_EXECUTABLE = b"/usr/apps/com.samsung.fota-consumer/bin/fota-service"
+# Fixed allowlist, not arbitrary watch paths. Preserve the existing default.
+EXECUTABLES = {
+    "fota-service": FOTA_EXECUTABLE,
+    "updateclient": b"/usr/apps/com.samsung.tizen.update-client/bin/updateclient",
+}
 LOCAL_STREAM = 17
 MAX_BINARY_BYTES = 8 * 1024 * 1024
 MAX_SYNC_CHUNK = 256 * 1024
@@ -102,8 +109,10 @@ class ReadOnlySyncDecoder:
         raise ArtifactPullError("UNEXPECTED_ELF_ARCHITECTURE")
 
 
-def pull_fota(sock, key_path: Path, outfile) -> dict[str, object]:
+def pull_fota(sock, key_path: Path, outfile, *, component="fota-service") -> dict[str, object]:
     """Use only SDB OPEN sync:, WRTE RECV exact allowlisted path, OKAY/CLSE."""
+    if component not in EXECUTABLES:
+        raise ArtifactPullError("COMPONENT_NOT_ALLOWLISTED")
     channel = Connection(sock, key_path)
     channel.handshake()
     channel.send(b"OPEN", LOCAL_STREAM, 0, b"sync:\x00")
@@ -112,7 +121,7 @@ def pull_fota(sock, key_path: Path, outfile) -> dict[str, object]:
         raise ArtifactPullError("SDB_SYNC_SERVICE_REFUSED")
     if (kind != b"OKAY" or local != LOCAL_STREAM or remote == 0 or body):
         raise ArtifactPullError("SDB_SYNC_OPEN_NOT_ACKNOWLEDGED")
-    path = FOTA_EXECUTABLE
+    path = EXECUTABLES[component]
     # RECV is read-only by specification. SEND/STAT/DELETE are never sent.
     channel.send(b"WRTE", LOCAL_STREAM, remote,
                  SYNC_HDR.pack(b"RECV", len(path)) + path)
@@ -138,7 +147,8 @@ def pull_fota(sock, key_path: Path, outfile) -> dict[str, object]:
     return {
         "schema": "uglyos-r840x-sdb-fota-artifact-v1",
         "status": "READABLE_BINARY_COPIED_FROM_AUTHENTICATED_SDB",
-        "candidate": "com.samsung.fota-consumer/fota-service",
+        "candidate": ("com.samsung.fota-consumer/fota-service" if component == "fota-service"
+                      else "com.samsung.tizen.update-client/updateclient"),
         "bytes": decoder.byte_count,
         "sha256": decoder.digest.hexdigest(),
         "elf_kind": elf,
@@ -180,8 +190,11 @@ def _save_local_exclusive(temporary: str, destination: Path, expected_size: int)
         raise
 
 
-def capture(ip: str, key_path: Path, destination: Path, timeout: int = 12) -> dict[str, object]:
+def capture(ip: str, key_path: Path, destination: Path, timeout: int = 12,
+            *, component="fota-service") -> dict[str, object]:
     """Write output on the phone only, atomically, and never replace it."""
+    if component not in EXECUTABLES:
+        raise ArtifactPullError("COMPONENT_NOT_ALLOWLISTED")
     ip = private_watch_ip(ip)
     destination = destination.expanduser()
     if destination.exists() or destination.is_symlink():
@@ -193,7 +206,7 @@ def capture(ip: str, key_path: Path, destination: Path, timeout: int = 12) -> di
         with os.fdopen(fd, "wb") as outfile:
             with socket.create_connection((ip, PORT), timeout=timeout) as sock:
                 sock.settimeout(timeout)
-                result = pull_fota(sock, key_path, outfile)
+                result = pull_fota(sock, key_path, outfile, component=component)
             outfile.flush()
             os.fsync(outfile.fileno())
         # Android's Termux Python may not expose os.link(). Use an atomic
@@ -209,23 +222,40 @@ def capture(ip: str, key_path: Path, destination: Path, timeout: int = 12) -> di
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--watch-ip", required=True, help="Current local Watch3 Wi-Fi IP")
+    parser.add_argument("--component", choices=tuple(EXECUTABLES),
+                        default="fota-service",
+                        help="Fixed read-only source; default preserves original behavior")
     parser.add_argument("--key-path", type=Path,
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     parser.add_argument("--output", type=Path,
-                        default=Path.home() / "watch3-r840x-fota-service-readonly.bin",
-                        help="New private *phone* file; will not overwrite")
+                        default=None,
+                        help="Private phone file, defaults to component-specific filename")
     args = parser.parse_args()
+    output = (args.output if args.output is not None else
+              Path.home() / f"watch3-r840x-{args.component}-readonly.bin")
     try:
-        report = capture(args.watch_ip, args.key_path, args.output)
+        report = capture(args.watch_ip, args.key_path, output,
+                         component=args.component)
     except (ArtifactPullError, SdbError, OSError, TimeoutError) as exc:
         # Never print a remote server error, watch IDs, addresses or binary data.
         reason = str(exc) if isinstance(exc, ArtifactPullError) else "SDB_UNAVAILABLE_OR_REJECTED"
         print("NO_ARTIFACT: " + reason, file=sys.stderr)
         return 1
-    report_path = Path.home() / "watch3-r840x-fota-artifact-evidence.json"
-    report_path.write_text(json.dumps(report, indent=2) + "\n")
-    os.chmod(report_path, 0o600)
-    print("READ_ONLY_ARTIFACT_RECEIVED: " + str(args.output.expanduser()))
+    report_path = (Path.home() / "watch3-r840x-fota-artifact-evidence.json"
+                   if args.component == "fota-service" else
+                   Path.home() / "watch3-r840x-updateclient-artifact-evidence.json")
+    try:
+        with os.fdopen(os.open(report_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                               0o600), "w") as stream:
+            json.dump(report, stream, indent=2)
+            stream.write("\n")
+    except FileExistsError:
+        print("REPORT_ALREADY_EXISTS: " + str(report_path), file=sys.stderr)
+        return 1
+    except OSError:
+        print("REPORT_SAVE_FAILED", file=sys.stderr)
+        return 1
+    print("READ_ONLY_ARTIFACT_RECEIVED: " + str(output.expanduser()))
     print("REPORT: " + str(report_path))
     print("NO root, exploit, bootloader access or stock recovery proven.")
     return 0
