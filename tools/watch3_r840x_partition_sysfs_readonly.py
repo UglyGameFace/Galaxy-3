@@ -241,8 +241,6 @@ def _local_tcp_error_category(error: OSError) -> str:
         return "ANDROID_OS_OR_VPN_SOCKET_POLICY_BLOCKED"
     if code == errno.EADDRNOTAVAIL:
         return "LOCAL_SOURCE_ADDRESS_NOT_AVAILABLE"
-    if code == errno.ETIMEDOUT:
-        return "OS_REPORTED_TCP_CONNECT_TIMEOUT"
     # Never leak user IP, routing, credentials, errno descriptions or
     # untrusted OS exception text.
     return "OTHER_PHONE_SIDE_CONNECT_ERROR"
