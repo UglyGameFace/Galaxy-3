@@ -38,7 +38,8 @@ jobs:
           assert 'BOOT_MEMORY_PROBES = {' in source
           assert '"meminfo": "cat /proc/meminfo"' in source
           assert '"iomem": "cat /proc/iomem"' in source
-          assert 'ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES}' in source
+          assert 'ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES, **PARTITION_SYSFS_PROBES}' in source
+          assert '"partitions_uevent": "cat /sys/class/block/mmcblk0p[0-9]*/uevent"' in source
           assert 'Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed' in source
           flow = Path('.github/workflows/watch3-r08-battery-baseline.yml').read_text()
           assert 'NO WATCH' in flow
