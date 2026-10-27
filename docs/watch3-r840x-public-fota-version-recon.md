@@ -123,6 +123,39 @@ selected by geographic assumption, and the current active `PAP`
 does not establish original factory provenance, signed-image
 compatibility or stock repair acceptance.
 
+### Follow-up: determine whether the PAP XML exposes a download reference
+
+The October 27 confirmed `SM-R840X / PAP / R840XXXU1AUA2`
+public `version.xml` contains a firmware *version token*. The crucial
+next distinction is **what the XML actually includes**, versus what
+people assume a version endpoint includes.
+
+Other open-source readers including
+[jesec/samfirm.js](https://github.com/jesec/samfirm.js/blob/master/index.ts)
+and [SamFetch's public resource notes](
+https://github.com/ysfchn/SamFetch/blob/main/RESOURCES.md)
+read the `versioninfo/firmware/version/latest` and `upgrade` fields.
+The FOTA *version index* is not by itself an authenticated full
+Samsung recovery ZIP, nor does the presence of a generic `<url>`
+text node provide full boot/recovery images.
+
+A new **one-request, public-only**
+`--inspect-owner-pap-xml-structure` mode examines the existing,
+fixed PAP endpoint from GitHub Actions and emits **only**:
+bounded XML element paths, number of HTTP-looking text elements,
+number whose text *resembles* an archive URL suffix, and explicit
+`NO_GO` verification flags. It retains and publishes **no raw
+XML, URL value, private identifiers or file downloads**.
+Do **not** promote a suffix-looking URL to a genuine signed image;
+a missing link in this one file likewise does not mean no full
+firmware exists through another authorized repair channel.
+
+The original PAP confirmation
+[run #40567883134](https://github.com/UglyGameFace/Galaxy-3/actions/runs/40567883134)
+remains the source of the exact-build match. This follow-up
+is an additional metadata-shape observation, not a rerun of
+CSC detection and never interacts with the owner's only watch.
+
 ### New one-request manufacturer metadata check
 
 Rather than repeat the unrelated, historically guessed XAR/KOO

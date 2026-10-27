@@ -139,12 +139,99 @@ class PublicFotaTests(unittest.TestCase):
             with patch.object(recon, "public_probe", return_value=stub) as called:
                 self.assertEqual(
                     recon.main(["--probe-owner-active-csc", "--output", str(out)]), 0)
-            called.assert_called_once_with(observed_csc_only=True)
+            called.assert_called_once_with(observed_csc_only=True, inspect_xml_shape=False)
             report = json.loads(out.read_text())
             self.assertEqual(report["physical_active_csc_observed"], "PAP")
             self.assertFalse(report["flash_allowed"])
             self.assertFalse(report["firmware_downloaded"])
             self.assertEqual(len(report["observations"]), 1)
+
+    def test_owner_pap_version_xml_structure_only_never_reveals_urls(self):
+        body = (
+            b'<versioninfo><url>https://private-fake.example/firmware/</url>'
+            b'<firmware><model>SM-R840X</model><cc>PAP</cc>'
+            b'<version><latest>R840XXXU1AUA2/R840XXXU1AUA2/</latest>'
+            b'<upgrade><value>R840XXXU1ATFA</value></upgrade>'
+            b'</version></firmware></versioninfo>'
+        )
+        summary = recon.summarize_version_xml_shape(body)
+        self.assertTrue(summary["structure_valid"])
+        self.assertEqual(summary["state"], "STRUCTURE_OBSERVED_FROM_PUBLIC_VERSION_XML")
+        self.assertEqual(summary["http_url_looking_text_count"], 1)
+        self.assertEqual(summary["archive_url_suffix_looking_text_count"], 0)
+        self.assertIn("versioninfo/firmware/version/latest",
+                      summary["observed_element_paths"])
+        self.assertIn("versioninfo/url", summary["observed_element_paths"])
+        output = json.dumps(summary)
+        self.assertNotIn("private-fake", output)
+        self.assertNotIn("R840XXX", output)
+        self.assertNotIn("https://", output)
+        self.assertIs(summary["official_repair_archive_authenticated"], False)
+        self.assertTrue(summary["absence_of_url_does_not_prove_archive_nonexistence"])
+
+    def test_archive_looking_text_is_never_auto_firmware_authentication(self):
+        body = (b"<versioninfo><url>https://unverified.example/fake.tar.md5</url>"
+                b"<firmware><version><latest>R840XXXU1AUA2</latest>"
+                b"</version></firmware></versioninfo>")
+        summary = recon.summarize_version_xml_shape(body)
+        self.assertEqual(summary["archive_url_suffix_looking_text_count"], 1)
+        self.assertFalse(summary["official_repair_archive_authenticated"])
+        self.assertNotIn("unverified.example", json.dumps(summary))
+
+    def test_malformed_structure_fail_closed_and_no_xml_values_leaked(self):
+        for raw, status in (
+            (b"x" * (recon.MAX_XML_BYTES + 1), "PUBLIC_METADATA_OVERSIZED"),
+            (b"<!DOCTYPE versioninfo><versioninfo/>", "XML_DTD_OR_ENTITY_BLOCKED"),
+            (b"<html/>", "NOT_VERSIONINFO_XML"),
+            (b"broken", "NOT_VALID_VERSION_XML"),
+        ):
+            with self.subTest(status=status):
+                result = recon.summarize_version_xml_shape(raw)
+                self.assertEqual(result["state"], status)
+                self.assertFalse(result["structure_valid"])
+        deep = b"<versioninfo>" + b"<a>" * 12 + b"abc" + b"</a>" * 12 + b"</versioninfo>"
+        self.assertEqual(recon.summarize_version_xml_shape(deep)["state"],
+                         "XML_STRUCTURE_COMPLEXITY_LIMIT")
+        unusual = b'<versioninfo xmlns:private="urn:test"><private:secret/></versioninfo>'
+        self.assertEqual(recon.summarize_version_xml_shape(unusual)["state"],
+                         "XML_UNEXPECTED_TAG_NAME")
+
+    def test_structure_mode_sends_only_owner_pap_request_and_no_raw_xml(self):
+        body = (b"<versioninfo><url>https://test-secret.example/firmware/</url>"
+                b"<firmware><version><latest>R840XXXU1AUA2</latest>"
+                b"</version></firmware></versioninfo>")
+        fake = FakeOpener([body])
+        observations = recon.public_probe(opener=fake, observed_csc_only=True,
+                                          inspect_xml_shape=True)
+        self.assertEqual(fake.urls, [
+            "https://fota-cloud-dn.ospserver.net/firmware/PAP/SM-R840X/version.xml"
+        ])
+        self.assertEqual(len(observations), 1)
+        shape = observations[0]["xml_structure_redacted"]
+        self.assertTrue(shape["structure_valid"])
+        self.assertNotIn("test-secret.example", json.dumps(observations))
+        self.assertEqual(recon.report_for(observations, observed_csc_only=True)["result"], "NO_GO")
+
+    def test_owner_pap_structure_cli_preserves_no_go_and_one_get(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "shape.json"
+            stub = [{
+                "model": "SM-R840X", "region": "PAP",
+                "state": "R840X_BUILD_TOKEN_FOUND_IN_PUBLIC_FOTA_XML",
+                "r840x_build_tokens": ["R840XXXU1AUA2"],
+                "device_contacted": False, "downloaded_firmware": False,
+                "xml_structure_redacted": {"structure_valid": True},
+            }]
+            with patch.object(recon, "public_probe", return_value=stub) as mocked:
+                self.assertEqual(recon.main([
+                    "--inspect-owner-pap-xml-structure", "--output", str(out)
+                ]), 0)
+            mocked.assert_called_once_with(observed_csc_only=True, inspect_xml_shape=True)
+            saved = json.loads(out.read_text())
+            self.assertEqual(saved["result"], "NO_GO")
+            self.assertFalse(saved["firmware_downloaded"])
+            self.assertFalse(saved["flash_allowed"])
+            self.assertEqual(saved["physical_active_csc_observed"], "PAP")
 
     def test_network_failure_cannot_claim_missing_watch_firmware(self):
         fake = FakeOpener([TimeoutError("timeout")] * len(recon.PROBES))

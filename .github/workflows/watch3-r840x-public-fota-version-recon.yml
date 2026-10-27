@@ -31,22 +31,22 @@ jobs:
           git diff --check
           echo 'PASS: only mocked network responses; firmware and watch untouched.'
 
-  one-shot-owner-pap-version-xml:
+  one-shot-owner-pap-version-xml-structure:
     needs: offline-parser-regressions
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch exactly one PUBLIC SM-R840X PAP version.xml (confirmed active CSC only)
+      - name: Inspect one PUBLIC SM-R840X/PAP version.xml structure; never save raw XML or URL values
         run: |
           set -euo pipefail
           python3 tools/watch3_r840x_public_fota_version_recon.py \
-            --probe-owner-active-csc --output r840x-pap-fota-redacted.json
-          cat r840x-pap-fota-redacted.json
+            --inspect-owner-pap-xml-structure --output r840x-pap-xml-shape-redacted.json
+          cat r840x-pap-xml-shape-redacted.json
           python3 - <<'PY'
           import json
           from pathlib import Path
-          r = json.loads(Path('r840x-pap-fota-redacted.json').read_text())
+          r = json.loads(Path('r840x-pap-xml-shape-redacted.json').read_text())
           assert r['result'] == 'NO_GO'
           assert r['device_contacted'] is False
           assert r['firmware_downloaded'] is False
@@ -56,11 +56,18 @@ jobs:
           assert r['physical_active_csc_observed'] == 'PAP'
           assert r['observations'][0]['region'] == 'PAP'
           assert r['observations'][0]['model'] == 'SM-R840X'
-          print('PASS: public metadata outcomes recorded WITHOUT a watch or firmware download.')
+          shape = r['observations'][0].get('xml_structure_redacted')
+          if shape is not None:
+              assert shape['structure_valid'] in (True, False)
+              if shape['structure_valid']:
+                  assert shape['raw_xml_retained_or_reported'] is False
+                  assert shape['download_url_values_reported'] is False
+                  assert shape['official_repair_archive_authenticated'] is False
+          print('PASS: exactly one public PAP metadata GET, sanitized structure or honest failure; NO WATCH.')
           PY
       - name: Preserve only sanitized public model-region lookup states
         uses: actions/upload-artifact@v4
         with:
-          name: r840x-pap-public-fota-metadata-no-watch
-          path: r840x-pap-fota-redacted.json
+          name: r840x-pap-public-xml-structure-no-watch
+          path: r840x-pap-xml-shape-redacted.json
           retention-days: 14
