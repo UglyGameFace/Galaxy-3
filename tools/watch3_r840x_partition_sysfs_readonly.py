@@ -333,8 +333,10 @@ def main(argv: list[str] | None = None) -> int:
         reason = str(exc) if isinstance(exc, PartitionLabelsError) else "LOCAL_OR_AUTHENTICATED_SDB_ERROR"
         print("PARTITION_PROBE_ERROR: " + reason, file=sys.stderr)
         return 1
-    print("PARTITION_SYSFS_RESULT: " + str(path))
-    print("PARTITION_SYSFS_STATE: " + result["state"])
+    print(("SDB_CONNECTION_RESULT: " if args.connection_only else
+           "PARTITION_SYSFS_RESULT: ") + str(path))
+    print(("SDB_CONNECTION_STATE: " if args.connection_only else
+           "PARTITION_SYSFS_STATE: ") + result["state"])
     print("NO raw block bytes, PIT request, Odin session, firmware write or flash authorization.")
     return 0
 
