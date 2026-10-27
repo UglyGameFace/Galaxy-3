@@ -2,7 +2,7 @@
 
 **Issue:** [#47](https://github.com/UglyGameFace/Galaxy-3/issues/47)
 **Installed build:** `R840XXXU1AUA2`.
-**Actual CSC:** **UNKNOWN** until owner-derived evidence is obtained.
+**Actual active CSC:** **PAP**, now observed directly from the owner's physical SM-R840X fixed Tizen file (October 27, 2026); original sales CSC still unverified.
 
 ## Why this test instead of assuming `OXA`, `XAR` or `KOO`
 
@@ -19,19 +19,44 @@ reports **that watch's** active CSC in exactly:
 
 **Important difference:** The researched device is LTE
 `SM-R805U`, while ours is a Bluetooth LDU `SM-R840X`.
-An LDU could have a different customization layout, an empty
-placeholder, absent CSC, or permission restrictions. None has
-been proven on our watch. A read result from the exact file
-would be *direct, relevant evidence* of an active code but
-still would **not** authenticate a full stock repair image or
-authorize a firmware-region change.
+Prior to the owner test, presence and content of this path on the
+SM-R840X were unverified. The owner's successful October 27
+read-only SDB observation **now confirms this exact path exists
+and contains the uppercase code PAP on their physical watch**.
+It does **not** authenticate a full stock repair image, establish
+the original factory CSC, or authorize firmware-region changes.
 
 This is **not** the Android phone path `Settings > About phone >
 Service provider software version`. Nor is it the `*#1234#`
 phone dialer code. Don't blindly use phone-specific shortcuts
 or reset/change-CSC menus on a watch.
 
-## Safest test order
+## Verified owner's first physical CSC result
+
+The owner ran this already-merged tool in Termux and supplied the
+sanitized JSON result (not the raw system file):
+
+- `status=CSC_CANDIDATE_FROM_OWNER_WATCH_FIXED_PATH`
+- `state=ACTIVE_CSC_CANDIDATE_READ_FROM_EXACT_TIZEN_PATH`
+- `observed_active_csc_candidate=PAP`
+- `remote_path=/opt/system/csc-default/output/csc-active-customer.log`
+- `model=SM-R840X`, `installed_build=R840XXXU1AUA2`
+- `watch_write_performed=false`, `odin_session_started=false`,
+  `pit_requested=false`, `firmware_written=false`,
+  `full_stock_recovery_proven=false`, `flash_allowed=false`.
+
+**Result:** Active **PAP** on this watch. Older XAR/KOO public FOTA
+lookups were *hypotheses before this measurement*, not observed
+codes. Third-party CSC lists label PAP a European region and public
+Galaxy Watch4 X-variant firmware catalogs also use PAP; this is
+not proof of signed R840X stock rescue or bootloader compatibility.
+
+**The real CSC question is resolved for the current Tizen installation.**
+No need to repeat SDB reads unless device software actually changes
+or independent contradictory evidence emerges. Preserve the owner's
+original report; do not remove or overwrite it.
+
+## Historical safe test order (already completed on owner's watch)
 
 1. Leave the watch in **normal Tizen**, not Wireless Download,
    Recovery or AP mode. No reboot or re-pairing is needed.
@@ -100,8 +125,9 @@ changes CSC or modifies partitions.
 
 ## What this will and won't resolve
 
-**Can resolve:** A plausible active CSC value from a real
-system log on this exact R840X, if the file exists and is readable.
+**Resolved:** A concrete active **PAP** CSC from the physical
+SM-R840X in normal Tizen. This says nothing definitive about the
+original manufacturing CSC or complete vendor signed packages.
 
 **Cannot resolve alone:** The original factory CSC, the full
 regional firmware package identity, whether this LDU bootloader
