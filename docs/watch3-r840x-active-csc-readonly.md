@@ -47,9 +47,20 @@ sanitized JSON result (not the raw system file):
 
 **Result:** Active **PAP** on this watch. Older XAR/KOO public FOTA
 lookups were *hypotheses before this measurement*, not observed
-codes. Third-party CSC lists label PAP a European region and public
-Galaxy Watch4 X-variant firmware catalogs also use PAP; this is
-not proof of signed R840X stock rescue or bootloader compatibility.
+codes. After this measurement, the [separate **Samsung public PAP
+firmware-version check**](
+watch3-r840x-public-fota-version-recon.md) **succeeded on GitHub
+Actions #40567883134**, finding the exact installed
+`R840XXXU1AUA2` token under `SM-R840X/PAP`. The manufacturer
+thus publishes matching *version metadata*, **not a full bootable
+repair ZIP or acceptable custom loader**.
+
+Generic third-party CSC lists assign PAP to Europe, but public
+`SM-R860X`, `SM-R870X`, and `SM-R880X` demo-variant
+firmware catalogs also consistently use PAP. This suggests a
+demo-unit configuration association, **not** an established geographic
+origin for our R840X, an LDU-only universal CSC rule, or permission
+to flash retail firmware.
 
 **The real CSC question is resolved for the current Tizen installation.**
 No need to repeat SDB reads unless device software actually changes

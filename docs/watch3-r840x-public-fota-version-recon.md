@@ -53,6 +53,76 @@ https://samfrew.com/devices/galaxy-watch4-classic/sm-r890x .
 These are corroborating catalog references, **not signed LDU
 firmware bytes or a universal PAP flash compatibility rule**.
 
+### Completed October 27: actual Samsung server response for owner CSC PAP
+
+This is **not a proposed check anymore**. The owner-sourced active CSC
+`PAP` was used for an independently executed *public Samsung server*
+query in [GitHub Actions run #40567883134](
+https://github.com/UglyGameFace/Galaxy-3/actions/runs/40567883134).
+
+The three actual jobs **completed successfully**: `offline-parser-regressions`
+(Ubuntu 22.04 and 24.04) and `one-shot-owner-pap-version-xml`
+(Ubuntu 24.04). The latter issued **exactly one bounded HTTPS GET** to
+the public `SM-R840X/PAP/version.xml` endpoint, without accessing the
+owner's watch, uploading device identity, or downloading firmware.
+
+The real job log, NOT a synthetic test fixture, contains:
+
+- `model=SM-R840X`, `region=PAP`
+- `state=R840X_BUILD_TOKEN_FOUND_IN_PUBLIC_FOTA_XML`
+- `r840x_build_tokens=[R840XXXU1AUA2]`
+- `retail_build_tokens=[]`
+- `physical_active_csc_observed=PAP` (proven by separate owner SDB read)
+- `exact_stock_recovery_archive_obtained=false`,
+  `signed_stock_recovery_verified=false`,
+  `restoration_of_failed_boot_verified=false`,
+  `device_contacted=false`, `firmware_downloaded=false`,
+  `firmware_written=false`, `flash_allowed=false`,
+  `result=NO_GO`.
+
+The [sanitized metadata artifact, ID 12763761551](
+https://github.com/UglyGameFace/Galaxy-3/actions/runs/40567883134/artifacts/12763761551)
+was archived with requested 14-day retention; it is **not** an update
+image and may expire. The original workflow log also contains the
+sanitized token result.
+
+**Conclusion:** Samsung's public firmware-version metadata really
+recognizes the *specific model + active CSC + installed build* triple:
+`SM-R840X / PAP / R840XXXU1AUA2`. This is a reproducible and
+independent match to the physical watch. A `version.xml` entry,
+however, does not establish that Samsung FUS serves a full watch
+repair archive. The Bifrost author's full-watch firmware limitation,
+missing verified R840X signed recovery ZIP/PIT, and refusal to use
+retail `SM-R840` packages still apply.
+
+### Interpreting PAP carefully: demo association versus geography
+
+Public aggregators label `PAP` as Europe, and some label it Hungary.
+That should **not** be treated as verified manufacture/original
+sales country for this physical LDU:
+
+- [SamFrew SM-R860X](https://samfrew.com/devices/galaxy-watch4/sm-r860x),
+  [SM-R870X](https://samfrew.com/devices/galaxy-watch4/sm-r870x)
+  and [SM-R880X](https://samfrew.com/devices/galaxy-watch4-classic/sm-r880x)
+  list `PAP` as their sole catalog CSC, alongside `...XXX...`
+  builds on these **other X-suffix watch variants**.
+- An older [third-party Galaxy A9 2018 demo-unit discussion](
+  https://4pda.to/forum/index.php?showtopic=921470&st=2300)
+  likewise labels `PAP` as the original CSC for an `SM-A920X`
+  demo unit; it is a user-community claim on **another** device,
+  not an OEM Samsung policy statement.
+- Generic [CSC catalogs](https://technastic.com/samsung-csc-codes-list/)
+  label `PAP` as Europe but do not establish that this watch's
+  `PAP` identifies a particular retail region/market.
+
+The repeated independent **demo-model PAP association is suggestive,
+not proof of a universally reserved LDU-only code**, and the same
+CSC string might be reused for different purposes. No alternate
+CSC should be written to the watch, no retail CSC firmware should be
+selected by geographic assumption, and the current active `PAP`
+does not establish original factory provenance, signed-image
+compatibility or stock repair acceptance.
+
 ### New one-request manufacturer metadata check
 
 Rather than repeat the unrelated, historically guessed XAR/KOO
