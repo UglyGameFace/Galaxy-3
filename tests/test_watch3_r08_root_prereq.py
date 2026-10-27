@@ -54,6 +54,7 @@ def sent_commands(sock):
 class RootPrerequisiteTests(unittest.TestCase):
     def sample(self):
         return {
+            "sdb_baseline_version": "Linux version 4.9.59 test-kernel\n",
             "dotnet_caps": "/usr/bin/dotnet cap_sys_admin,cap_setgid=ep\n",
             "launcher_caps": "/usr/sbin/sdbd-tarlauncher cap_setuid,cap_setgid=ep\n",
             "dotnet_runtime": "Microsoft.NETCore.App 3.1.32 [/usr/share/dotnet/shared/Microsoft.NETCore.App]\n",
@@ -63,6 +64,7 @@ class RootPrerequisiteTests(unittest.TestCase):
     def test_positive_is_only_static_prerequisite_evidence(self):
         result = summarize_root_path(self.sample(), {})
         self.assertEqual(result["status"], "STATIC_PREREQUISITES_OBSERVED")
+        self.assertEqual(result["sdb_shell_baseline"], "KERNEL_VERSION_READ")
         self.assertFalse(result["root_obtained"])
         self.assertFalse(result["unsigned_kernel_boot_proven"])
         self.assertFalse(result["stock_recovery_proven"])
@@ -126,8 +128,24 @@ class RootPrerequisiteTests(unittest.TestCase):
             "tar options\n --to-command=COMMAND\n"
             "some archives have files not found\n additional help"))
 
+    def test_missing_baseline_keeps_static_positive_report_inconclusive(self):
+        data = self.sample()
+        data.pop("sdb_baseline_version")
+        report = summarize_root_path(data, {})
+        self.assertEqual(report["sdb_shell_baseline"], "NOT_OBSERVED")
+        self.assertEqual(report["status"], "INCONCLUSIVE")
+        self.assertEqual(
+            report["acquisition"]["sdb_baseline_version"],
+            "NO_RESPONSE_RECORDED")
+
+    def test_baseline_never_exposes_actual_kernel_or_private_tokens(self):
+        data = self.sample()
+        data["sdb_baseline_version"] = "Linux version 4.9.59 SECRET_BUILDER@HOST"
+        report = json.dumps(summarize_root_path(data, {}))
+        self.assertNotIn("SECRET_BUILDER", report)
+
     def test_fixed_allowlist_has_no_install_flash_or_injection(self):
-        self.assertEqual(len(ROOT_PATH_PROBES), 4)
+        self.assertEqual(len(ROOT_PATH_PROBES), 5)
         for query in ROOT_PATH_PROBES.values():
             for forbidden in (";", "`", "$(", "dd ", "flash", "install",
                               "rm ", "reboot", "|", ">"):
@@ -135,7 +153,7 @@ class RootPrerequisiteTests(unittest.TestCase):
 
     def test_sdb_closed_shell_exposes_category_not_device_exception(self):
         peers = [FakeSocket(frame(b"CNXN", VERSION, 262144, b"device::\x00")
-                            + frame(b"CLSE", 0, 2)) for _ in range(8)]
+                            + frame(b"CLSE", 0, 2)) for _ in range(10)]
         with patch("watch3_r08_android_sdb.socket.create_connection",
                    side_effect=peers):
             observed, missing = collect("10.54.86.131", Path("/unused"),
@@ -147,15 +165,18 @@ class RootPrerequisiteTests(unittest.TestCase):
         self.assertNotIn("10.54.86.131", serialized)
 
     def test_short_missing_tool_reply_preserves_exact_reason_category(self):
-        outputs = ["sh: getcap: not found\n"] * 4
+        outputs = ["Linux version 4.9.59 test-kernel\n"] + ["sh: getcap: not found\n"] * 4
         peers = [FakeSocket(peer(output)) for output in outputs]
         with patch("watch3_r08_android_sdb.socket.create_connection",
                    side_effect=peers):
             observed, missing = collect("10.54.86.131", Path("/unused"),
                                         probes=ROOT_PATH_PROBES)
-        self.assertFalse(observed)
+        self.assertEqual(set(observed), {"sdb_baseline_version"})
         self.assertEqual(set(missing.values()),
                          {"WATCH_REPORTED_COMMAND_OR_PATH_MISSING"})
+        self.assertEqual(
+            summarize_root_path(observed, missing)["sdb_shell_baseline"],
+            "KERNEL_VERSION_READ")
 
     def test_sdb_collect_only_issues_fixed_read_only_queries(self):
         outputs = self.sample()
@@ -165,7 +186,7 @@ class RootPrerequisiteTests(unittest.TestCase):
             observed, missing = collect("10.54.86.131", Path("/unused"),
                                         probes=ROOT_PATH_PROBES)
         self.assertFalse(missing)
-        self.assertEqual(connected.call_count, 4)
+        self.assertEqual(connected.call_count, 5)
         self.assertEqual(summarize_root_path(observed, {})["status"],
                          "STATIC_PREREQUISITES_OBSERVED")
         for index, key in enumerate(ROOT_PATH_PROBES):

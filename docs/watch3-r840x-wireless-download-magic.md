@@ -121,7 +121,7 @@ python tools/watch3_r08_android_sdb.py --watch-ip WATCH_CURRENT_IP --root-path-o
 cat ~/watch3-r08-root-path-redacted.json
 ```
 
-The four literal requests check file capabilities of `/usr/bin/dotnet` and `/usr/sbin/sdbd-tarlauncher`, installed .NET runtime versions, and whether the existing `/usr/bin/tar --help` advertises `--to-command`. The JSON output contains only categorical results; no raw process or network information. **STATIC_PREREQUISITES_OBSERVED** indicates this narrow route merits further engineering; it does not prove injected SDB commands are accepted, privilege elevation, unsigned code acceptance or recovery. **STATIC_PATH_NOT_SUPPORTED** requires an actual negative prerequisite observation. Failed/blocked reads yield **INCONCLUSIVE**, not a fabricated incompatibility. Tests use an in-memory fake SDB peer only. No device experimentation has happened.
+The five literal read-only requests first test the same authenticated SDB shell with `cat /proc/version`, then check file capabilities of `/usr/bin/dotnet` and `/usr/sbin/sdbd-tarlauncher`, installed .NET runtime versions, and whether the existing `/usr/bin/tar --help` advertises `--to-command`. The JSON output contains only categorical results; no raw process or network information. **STATIC_PREREQUISITES_OBSERVED** indicates this narrow route merits further engineering; it does not prove injected SDB commands are accepted, privilege elevation, unsigned code acceptance or recovery. **STATIC_PATH_NOT_SUPPORTED** requires an actual negative prerequisite observation. Failed/blocked reads yield **INCONCLUSIVE**, not a fabricated incompatibility. Tests use an in-memory fake SDB peer only. No device experimentation has happened.
 
 Do not use the TV-specific exploit binary, package-name payloads or kernel address assumptions on the only working watch.
 
@@ -133,8 +133,10 @@ missing utility/path errors and parser mismatches into the same vague result.
 That report **does not** show that the TV-derived archive-root prerequisites
 are missing, nor that SDB elevation is supported.
 
-Re-run the existing `--root-path-only` mode after updating main. The same
-four fixed read-only requests now report per-check `acquisition` categories:
+Re-run the existing `--root-path-only` mode after updating main. The five
+fixed read-only requests now begin with a kernel-version baseline and report
+`sdb_shell_baseline` as `KERNEL_VERSION_READ` or `NOT_OBSERVED`.
+The four original checks still report the existing per-check `acquisition` categories:
 `SDB_SHELL_CLOSED_OR_REFUSED`, `SDB_SHELL_TIMEOUT`,
 `SDB_PROTOCOL_OR_READ_FAILURE`, `SDB_TRANSPORT_UNREACHABLE`,
 `WATCH_REPORTED_COMMAND_OR_PATH_MISSING`, `WATCH_REPORTED_ACCESS_DENIED`,

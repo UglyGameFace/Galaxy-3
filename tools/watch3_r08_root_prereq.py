@@ -13,6 +13,7 @@ import re
 
 # No shell interpolation, uploads, archive staging, package install or writes.
 ROOT_PATH_PROBES = {
+    "sdb_baseline_version": "cat /proc/version",
     "dotnet_caps": "getcap -v /usr/bin/dotnet",
     "launcher_caps": "getcap -v /usr/sbin/sdbd-tarlauncher",
     "dotnet_runtime": "/usr/bin/dotnet --list-runtimes",
@@ -80,6 +81,13 @@ def summarize_root_path(values: dict[str, str], errors: dict[str, str]) -> dict[
     def observed(key: str) -> str | None:
         value = observations.get(key)
         return value if key not in missing and isinstance(value, str) else None
+    # A known fixed read on the SAME authenticated SDB transport lets an
+    # all-UNAVAILABLE report distinguish shell access from failing utilities.
+    baseline = observed("sdb_baseline_version")
+    baseline_ok = bool(
+        baseline is not None and
+        re.search(r"(?m)^Linux version [^\\s]{1,80}", baseline)
+    )
     checks = {
         "dotnet_capabilities": _caps(
             observed("dotnet_caps"), "/usr/bin/dotnet", REQUIRED["dotnet_caps"]),
@@ -100,7 +108,7 @@ def summarize_root_path(values: dict[str, str], errors: dict[str, str]) -> dict[
         "SUPPORTED_RUNTIME_ABSENT",
         "ARCHIVE_TO_COMMAND_ABSENT",
     }
-    if all(checks[name] == good[name] for name in good):
+    if baseline_ok and all(checks[name] == good[name] for name in good):
         status = "STATIC_PREREQUISITES_OBSERVED"
     elif any(value in fail for value in checks.values()):
         status = "STATIC_PATH_NOT_SUPPORTED"
@@ -109,6 +117,8 @@ def summarize_root_path(values: dict[str, str], errors: dict[str, str]) -> dict[
     return {
         "schema": "uglyos-r840x-archive-root-prerequisites-v1",
         "status": status,
+        "sdb_shell_baseline": ("KERNEL_VERSION_READ" if baseline_ok
+                               else "NOT_OBSERVED"),
         "checks": checks,
         # Categorical acquisition stage, distinct from the parsers above.
         # OUTPUT_RECEIVED + UNAVAILABLE means valid SDB data was obtained but
