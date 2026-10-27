@@ -45,10 +45,19 @@ BOOT_MEMORY_PROBES = {
 PARTITION_SYSFS_PROBES = {
     "partitions_uevent": "cat /sys/class/block/mmcblk0p[0-9]*/uevent",
 }
+# Owner's original wildcard read returned an inconclusive error. These
+# THREE literal sysfs text paths test shell/path availability without
+# relying on wildcard expansion. This is NOT a scan of 21 partitions;
+# p1, p20, p21 are diagnostic samples, not known boot/storage roles.
+PARTITION_SYSFS_FIXED_PROBES = {
+    "partition_p1_uevent": "cat /sys/class/block/mmcblk0p1/uevent",
+    "partition_p20_uevent": "cat /sys/class/block/mmcblk0p20/uevent",
+    "partition_p21_uevent": "cat /sys/class/block/mmcblk0p21/uevent",
+}
 
 # Explicit, fixed, read-only operations; storage and battery probe sets run
 # only when expressly requested. Normal boot collection stays unchanged.
-ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES, **PARTITION_SYSFS_PROBES}
+ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES, **PARTITION_SYSFS_PROBES, **PARTITION_SYSFS_FIXED_PROBES}
 # Preserve the existing audited boot/power/bezel contract; root-path checks
 # are a separate, opt-in, fixed read-only set.
 ALLOWED_PROBES.update(ROOT_PATH_PROBES)
@@ -409,7 +418,8 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
     if (probes is not PROBES and probes is not STORAGE_PROBES and
             probes is not POWER_PROBES and probes is not BEZEL_PROBES and
             probes is not BOOT_MEMORY_PROBES and probes is not ROOT_PATH_PROBES and
-            probes is not FOTA_PATH_PROBES and probes is not PARTITION_SYSFS_PROBES):
+            probes is not FOTA_PATH_PROBES and probes is not PARTITION_SYSFS_PROBES and
+            probes is not PARTITION_SYSFS_FIXED_PROBES):
         raise SdbError("Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed (plus the fixed root-path set)")
     for name in probes:
         try:
@@ -448,6 +458,17 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
                         problems[name] = reason
                     else:
                         observations[name] = value
+            elif probes is PARTITION_SYSFS_PROBES or probes is PARTITION_SYSFS_FIXED_PROBES:
+                # Categorical diagnostics only. Never leak vendor-supplied
+                # shell text, UUIDs, paths or arbitrary file contents.
+                if not value.strip():
+                    problems[name] = "SYSFS_EMPTY_SHELL_OUTPUT"
+                elif any(w in value.lower() for w in ("permission denied", "access denied")):
+                    problems[name] = "SYSFS_ACCESS_DENIED"
+                elif any(w in value.lower() for w in ("no such file", "not found")):
+                    problems[name] = "SYSFS_PATH_OR_COMMAND_NOT_FOUND"
+                else:
+                    observations[name] = value
             elif (not value.strip() or any(
                 warning in value.lower() for warning in (
                     "permission denied", "no such file", "not found", "access denied"
@@ -460,7 +481,14 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
                 "authorization", "authentication", "private key", "crypto", "rsa"
             )):
                 raise
-            if probes is ROOT_PATH_PROBES or probes is FOTA_PATH_PROBES:
+            if probes is PARTITION_SYSFS_PROBES or probes is PARTITION_SYSFS_FIXED_PROBES:
+                problems[name] = (
+                    "SDB_SHELL_TIMED_OUT" if isinstance(exc, ShellCloseError) and
+                    "timed out" in str(exc).lower() else
+                    "SDB_SHELL_CLOSED_OR_REFUSED" if isinstance(exc, ShellCloseError) else
+                    "SDB_PROTOCOL_OR_READ_FAILURE"
+                )
+            elif probes is ROOT_PATH_PROBES or probes is FOTA_PATH_PROBES:
                 if isinstance(exc, ShellCloseError):
                     problems[name] = ("SDB_SHELL_TIMEOUT" if "timed out" in str(exc)
                                       else "SDB_SHELL_CLOSED_OR_REFUSED")
@@ -469,7 +497,10 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
             else:
                 problems[name] = "Read-only property unavailable over SDB"
         except (OSError, TimeoutError):
-            problems[name] = ("SDB_TRANSPORT_UNREACHABLE" if probes is ROOT_PATH_PROBES or probes is FOTA_PATH_PROBES
+            problems[name] = ("SDB_TRANSPORT_UNREACHABLE" if
+                              probes is ROOT_PATH_PROBES or probes is FOTA_PATH_PROBES or
+                              probes is PARTITION_SYSFS_PROBES or
+                              probes is PARTITION_SYSFS_FIXED_PROBES
                               else "Watch did not answer this SDB read")
     return observations, problems
 
