@@ -77,6 +77,68 @@ Do not use `PAP` alone to select retail firmware or try NetOdin.
 The older advertised `R840XXXU1ATFA-(OXA)` multi-CSC name does
 not establish compatibility with a running PAP-configured R840X.
 
+## October 27 recovery mechanism cross-check: built-in Recovery is not full stock rescue
+
+A possible fallback was investigated **from manufacturer-controlled original
+source rather than guessing from the watch's Reboot Mode menu**:
+
+1. The pinned [Samsung Tizen porting manual's *System Recovery* source](
+   https://github.com/Samsung/tizen-docs/blob/d6400bdd0450b41a2842d5c9c63002ab876f88b9/docs/platform/porting/recovery.md)
+   documents a **generic Tizen 4.0 porting configuration**, not verified
+   runtime behavior of our Tizen 5.5 SM-R840X. Its bootloader must
+   **already be capable of loading** a recovery-specific kernel and
+   ramdisk (bootloader control is outside that document's scope).
+   Only after that boot does the `system-recovery` program look on
+   **removable storage** for `tizen-recovery.img` and write images
+   to storage partitions from its config.
+2. Samsung's published [Galaxy Watch3 Bluetooth specifications](
+   https://www.samsung.com/us/business/support/owners/product/galaxy-watch3-bluetooth/)
+   explicitly show **External Memory/microSD Capacity: N/A**. No
+   known accessible removable-card pathway has been established for
+   this Watch3 demo unit; its normal power charger is not a regular
+   exposed USB data port. Even a compatible signed recovery ramdisk
+   and a genuine archive would still require verified delivery,
+   partition layout and write authorization.
+3. Samsung's own [Watch3 reboot-mode Recovery instructions](
+   https://www.samsung.com/us/support/answer/ANS10003368/)
+   describe **factory reset**: removing user data and returning settings
+   to defaults, **not recreating destroyed bootloader, kernel,
+   recovery or partition images** from a complete signed stock set.
+   Entering that menu or completing a reset is not a demonstration
+   of recoverability from a failed UgLy|OS boot or bad NetOdin write.
+
+**Engineering verdict:** neither the phone-accessible **factory-reset
+Recovery** menu nor the generic Tizen `tizen-recovery.img` **removable
+media** workflow is an evidenced full-firmware rescue for our SM-R840X.
+No attempt was made to boot recovery, invoke its partition writer,
+format storage, reboot the watch, or install an archive. Do **not**
+reset the owner's working watch to test this hypothesis. A truly
+device-specific factory/repair recovery mechanism could still exist,
+but must be separately discovered and verified; these sources do
+not establish one.
+
+### Third-party retail BL page is not exact-R840X recovery evidence
+
+A new web listing offers a so-called free *retail*
+`SM-R840 / R840XXU1DWK2` bootloader file (about 37 MB) at
+https://www.zipfirmware.com/firmware/XFA/SM-R840/R840XXU1DWK2 .
+Its page **explicitly names retail SM-R840**, not the physical
+`SM-R840X/PAP/R840XXXU1AUA2`. It also includes generic
+Android Odin **USB cable and volume button** instructions even
+though the Watch3's owner-proven download transport is
+**Wireless Download AP with Odin/LOKE**. Its purported BL and
+full-server links did **not** yield independently verified bytes
+through the public research environment (they returned restricted
+fetch errors). The advertised ZIP, components, package size and
+third-party MD5 are **untrusted page claims**, not an OEM provenance
+chain. No vendor file was downloaded, run or flashed.
+
+If authentic retail BL bytes are eventually obtained lawfully, they
+may be used as **off-device format research only**; they cannot be
+used to repair, cross-flash or unlock this different LDU model.
+Do not promote another inaccessible sales-page label into a
+working rescue or source of signed Watch3 bootloader files.
+
 ## Candidate inventory, October 27, 2026
 
 | Candidate | What the public listing establishes | Blocker |
