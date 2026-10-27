@@ -1,0 +1,103 @@
+From: UgLy|OS
+Subject: [PATCH] R08 tizen_detent keep wheel, ignore hall pointer motion
+Upstream-Status: Pending
+
+Machine-scoped Qt 6.11.3 adaptation for Samsung Watch3 bezel.
+Only the exact tizen_detent device is affected; leave wheel delivery
+and all other pointer/touch/keyboard events intact.
+
+--- a/src/platformsupport/input/evdevmouse/qevdevmousehandler.cpp
++++ b/src/platformsupport/input/evdevmouse/qevdevmousehandler.cpp
+@@ -15,8 +15,9 @@
+ #include <private/qcore_unix_p.h> // overrides QT_OPEN
+ #include <private/qhighdpiscaling_p.h>
+ 
+-#include <errno.h>
+-
++#include <errno.h>
++#include <cstring>
++
+ #ifdef Q_OS_FREEBSD
+ #include <dev/evdev/input.h>
+ #else
+@@ -79,7 +80,19 @@
+     if (m_abs)
+         m_abs = getHardwareMaximum();
+ 
+-    detectHiResWheelSupport();
++    // Watch3 R08's 'tizen_detent' reports REL_WHEEL and REL_X.
++    // REL_X is hall-state data, NOT a cursor motion. Scope suppression
++    // to the exact named wheel-capable device; never affect real mice.
++    char inputName[128] = {};
++    if (::ioctl(m_fd, EVIOCGNAME(sizeof(inputName)), inputName) >= 0
++            && std::strcmp(inputName, "tizen_detent") == 0) {
++        unsigned char relFeatures[(REL_MAX / 8) + 1]{};
++        if (::ioctl(m_fd, EVIOCGBIT(EV_REL, sizeof(relFeatures)), relFeatures) >= 0
++                && TEST_BIT(relFeatures, REL_WHEEL))
++            m_watch3Detent = true;
++    }
++
++    detectHiResWheelSupport();
+ 
+     // socket notifier for events on the mouse device
+     m_notify = new QSocketNotifier(m_fd, QSocketNotifier::Read, this);
+@@ -222,8 +235,12 @@
+                 m_y = data->value;
+                 posChanged = true;
+             }
+-        } else if (data->type == EV_REL) {
+-            QPoint delta;
++        } else if (data->type == EV_REL) {
++            // Samsung's auxiliary REL_X / REL_Y detent diagnostics must
++            // not move the pointer. Do not swallow the real REL_WHEEL.
++            if (m_watch3Detent && (data->code == REL_X || data->code == REL_Y))
++                continue;
++            QPoint delta;
+             if (data->code == REL_X) {
+                 m_x += data->value;
+                 posChanged = true;
+--- a/src/platformsupport/input/evdevmouse/qevdevmousehandler_p.h
++++ b/src/platformsupport/input/evdevmouse/qevdevmousehandler_p.h
+@@ -67,7 +67,8 @@
+     Qt::MouseButton m_button;
+     QEvent::Type m_eventType;
+     int m_jitterLimitSquared;
+-    bool m_prevInvalid = true;
++    bool m_prevInvalid = true;
++    bool m_watch3Detent = false;
+     int m_hardwareWidth;
+     int m_hardwareHeight;
+     qreal m_hardwareScalerY;
+--- a/src/platformsupport/input/libinput/qlibinputhandler.cpp
++++ b/src/platformsupport/input/libinput/qlibinputhandler.cpp
+@@ -7,7 +7,8 @@
+ #include "qlibinputtouch_p.h"
+ 
+ #include <libudev.h>
+-#include <libinput.h>
++#include <libinput.h>
++#include <cstring>
+ #include <QtCore/QLoggingCategory>
+ #include <QtCore/QSocketNotifier>
+ #include <QtCore/private/qcore_unix_p.h>
+@@ -116,9 +117,17 @@
+ void QLibInputHandler::processEvent(libinput_event *ev)
+ {
+     libinput_event_type type = libinput_event_get_type(ev);
+-    libinput_device *dev = libinput_event_get_device(ev);
+-
+-    switch (type) {
++    libinput_device *dev = libinput_event_get_device(ev);
++
++    // Watch3 R08: preserve scroll-axis events from tizen_detent while
++    // discarding hall-state pointer motion. Never affect other devices.
++    const char *deviceName = libinput_device_get_name(dev);
++    if (deviceName && std::strcmp(deviceName, "tizen_detent") == 0
++            && (type == LIBINPUT_EVENT_POINTER_MOTION
++                || type == LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE))
++        return;
++
++    switch (type) {
+     case LIBINPUT_EVENT_DEVICE_ADDED:
+     {
+         // This is not just for hotplugging, it is also called for each input
