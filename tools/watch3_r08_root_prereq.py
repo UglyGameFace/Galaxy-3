@@ -18,6 +18,11 @@ ROOT_PATH_PROBES = {
     "launcher_caps": "getcap -v /usr/sbin/sdbd-tarlauncher",
     "dotnet_runtime": "/usr/bin/dotnet --list-runtimes",
     "tar_features": "/usr/bin/tar --help",
+    # Probe actual file existence separately: getcap itself may be missing.
+    "dotnet_file": "ls -ld /usr/bin/dotnet",
+    "launcher_file": "ls -ld /usr/sbin/sdbd-tarlauncher",
+    # Samsung Tizen may reject dotnet --list-runtimes but expose a symlink.
+    "dotnet_runtime_link": "readlink -f /usr/share/dotnet.tizen/netcoreapp",
 }
 REQUIRED = {
     "dotnet_caps": frozenset(("cap_setgid", "cap_sys_admin")),
@@ -65,6 +70,36 @@ def _runtime(raw: str | None) -> str:
             else "SUPPORTED_RUNTIME_ABSENT")
 
 
+def _file(raw: str | None, path: str, error: str | None) -> str:
+    """Conservative file existence from an ordinary ls -ld response."""
+    if error == "TARGET_PATH_NOT_FOUND":
+        return "FILE_ABSENT"
+    if error is not None or not isinstance(raw, str) or len(raw) > 2048:
+        return "UNAVAILABLE"
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if (len(lines) == 1 and lines[0].startswith(("-", "l"))
+            and path in lines[0].split()):
+        return "FILE_PRESENT"
+    return "UNAVAILABLE"
+
+
+def _tizen_runtime_link(raw: str | None) -> str:
+    """Recognize only a versioned Tizen .NET runtime path, not arbitrary text."""
+    if not isinstance(raw, str) or len(raw) > 1024:
+        return "UNAVAILABLE"
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if len(lines) != 1:
+        return "UNAVAILABLE"
+    match = re.fullmatch(
+        r"/usr/share/dotnet\.tizen/netcoreapp/(\\d+)\.(\\d+)\.(\\d+)", lines[0])
+    if not match:
+        return "UNAVAILABLE"
+    major, minor = int(match.group(1)), int(match.group(2))
+    return ("SUPPORTED_RUNTIME_PRESENT"
+            if major >= 6 or (major, minor) == (3, 1)
+            else "SUPPORTED_RUNTIME_ABSENT")
+
+
 def _tar(raw: str | None) -> str:
     if raw is None or not isinstance(raw, str) or len(raw) > MAX_TEXT:
         return "UNAVAILABLE"
@@ -88,13 +123,21 @@ def summarize_root_path(values: dict[str, str], errors: dict[str, str]) -> dict[
         baseline is not None and
         re.search(r"(?m)^Linux version [^\\s]{1,80}", baseline)
     )
+    runtime = _runtime(observed("dotnet_runtime"))
+    if runtime == "UNAVAILABLE":
+        runtime = _tizen_runtime_link(observed("dotnet_runtime_link"))
     checks = {
+        "dotnet_binary": _file(
+            observed("dotnet_file"), "/usr/bin/dotnet", missing.get("dotnet_file")),
+        "archive_launcher_binary": _file(
+            observed("launcher_file"), "/usr/sbin/sdbd-tarlauncher",
+            missing.get("launcher_file")),
         "dotnet_capabilities": _caps(
             observed("dotnet_caps"), "/usr/bin/dotnet", REQUIRED["dotnet_caps"]),
         "archive_launcher_capabilities": _caps(
             observed("launcher_caps"), "/usr/sbin/sdbd-tarlauncher",
             REQUIRED["launcher_caps"]),
-        "dotnet_runtime": _runtime(observed("dotnet_runtime")),
+        "dotnet_runtime": runtime,
         "archive_execution_option": _tar(observed("tar_features")),
     }
     good = {
@@ -108,9 +151,18 @@ def summarize_root_path(values: dict[str, str], errors: dict[str, str]) -> dict[
         "SUPPORTED_RUNTIME_ABSENT",
         "ARCHIVE_TO_COMMAND_ABSENT",
     }
-    if baseline_ok and all(checks[name] == good[name] for name in good):
+    # A demonstrably absent required executable rules out this exact TV
+    # route even if `getcap` is missing. Unknown ls output never does.
+    required_file_missing = any(
+        checks[name] == "FILE_ABSENT" for name in
+        ("dotnet_binary", "archive_launcher_binary")
+    )
+    if (baseline_ok and
+            all(checks[name] == good[name] for name in good) and
+            checks["dotnet_binary"] == "FILE_PRESENT" and
+            checks["archive_launcher_binary"] == "FILE_PRESENT"):
         status = "STATIC_PREREQUISITES_OBSERVED"
-    elif any(value in fail for value in checks.values()):
+    elif required_file_missing or any(value in fail for value in checks.values()):
         status = "STATIC_PATH_NOT_SUPPORTED"
     else:
         status = "INCONCLUSIVE"
