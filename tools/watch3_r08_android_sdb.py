@@ -22,6 +22,7 @@ from watch3_r08_storage_mapping import summarize_storage
 from watch3_r08_power_baseline import summarize_power
 from watch3_r08_bezel_capabilities import summarize_bezel
 from watch3_r08_boot_memory import summarize_memory
+from watch3_r08_root_prereq import ROOT_PATH_PROBES, summarize_root_path
 
 # Read ONLY the pinned Samsung battery device's read-only sysfs uevent.
 # No wildcard, arbitrary paths, raw blocks or writes; its exact identity
@@ -40,6 +41,9 @@ BOOT_MEMORY_PROBES = {
 # Explicit, fixed, read-only operations; storage and battery probe sets run
 # only when expressly requested. Normal boot collection stays unchanged.
 ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES}
+# Preserve the existing audited boot/power/bezel contract; root-path checks
+# are a separate, opt-in, fixed read-only set.
+ALLOWED_PROBES.update(ROOT_PATH_PROBES)
 
 PORT = 26101
 VERSION = 0x00100000
@@ -379,8 +383,8 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
     observations, problems = {}, {}
     if (probes is not PROBES and probes is not STORAGE_PROBES and
             probes is not POWER_PROBES and probes is not BEZEL_PROBES and
-            probes is not BOOT_MEMORY_PROBES):
-        raise SdbError("Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed")
+            probes is not BOOT_MEMORY_PROBES and probes is not ROOT_PATH_PROBES):
+        raise SdbError("Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed (plus the fixed root-path set)")
     for name in probes:
         try:
             with socket.create_connection((ip, PORT), timeout=timeout) as sock:
@@ -438,15 +442,19 @@ def main():
     parser.add_argument("--boot-memory-only", action="store_true",
                         help="Read only Tizen /proc/meminfo and /proc/iomem; "
                              "save privacy-filtered RAM ranges; no bootloader commands")
+    parser.add_argument("--root-path-only", action="store_true",
+                        help="Read fixed Samsung archive-launcher capabilities and runtime; "
+                             "no exploits, installs, writes or root elevation")
     parser.add_argument("--report", type=Path,
                         help="Optional local privacy-filtered JSON destination")
     parser.add_argument("--key-path", type=Path,
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     args = parser.parse_args()
     if sum((args.diagnose_only, args.storage_only,
-            args.power_only, args.bezel_only, args.boot_memory_only)) > 1:
+            args.power_only, args.bezel_only, args.boot_memory_only,
+            args.root_path_only)) > 1:
         parser.error("Choose at most one of --diagnose-only, --storage-only, "
-                     "--power-only, --bezel-only or --boot-memory-only")
+                     "--power-only, --bezel-only, --boot-memory-only or --root-path-only")
     if args.diagnose_only:
         try:
             diagnose(args.watch_ip, args.key_path)
@@ -473,6 +481,12 @@ def main():
             report = summarize_memory(values, errors)
             dest = args.report or (Path.home() /
                                    "watch3-r08-boot-memory-redacted.json")
+        elif args.root_path_only:
+            values, errors = collect(args.watch_ip, args.key_path,
+                                     probes=ROOT_PATH_PROBES)
+            report = summarize_root_path(values, errors)
+            dest = args.report or (Path.home() /
+                                   "watch3-r08-root-path-redacted.json")
         elif args.storage_only:
             values, errors = collect(args.watch_ip, args.key_path,
                                      probes=STORAGE_PROBES)
@@ -492,7 +506,10 @@ def main():
               "hotspot/TCP, SDB handshake and read-only shell problems.",
               file=sys.stderr)
         return 1
-    if args.power_only and report["status"] != "OBSERVED_TIZEN_BATTERY":
+    if args.root_path_only:
+        print("ROOT PATH: " + report["status"] +
+              "; static prerequisites only. No root, exploit or boot was attempted.")
+    elif args.power_only and report["status"] != "OBSERVED_TIZEN_BATTERY":
         print("UNAVAILABLE: Watch battery gauge not confirmed; no battery "
               "percentage or drain inferred. Redacted report saved locally.")
     elif args.bezel_only and report["status"] != "BEZEL_REL_WHEEL_ADVERTISED":
@@ -505,6 +522,7 @@ def main():
         print("PASS: privacy-filtered Watch3 " +
               ("power" if args.power_only else "bezel capability" if args.bezel_only else
                "boot memory" if args.boot_memory_only else
+               "root-path prerequisite" if args.root_path_only else
                "storage" if args.storage_only else "boot") +
               " report saved locally.")
     print("Report path:", dest)
