@@ -1,0 +1,29 @@
+name: R840X Wireless Download ODIN magic-only transport (NO WATCH)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/watch3_r840x_netodin_magic_only.py'
+      - 'tests/test_watch3_r840x_netodin_magic_only.py'
+      - 'docs/watch3-r840x-wireless-download-magic.md'
+      - '.github/workflows/watch3-r840x-netodin-magic-proof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  four-byte-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove exact magic-only contract on local TCP with no flash/session commands
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_watch3_r840x_netodin_magic_only.py -v
+          python3 -m py_compile tools/watch3_r840x_netodin_magic_only.py
+          git diff --check
+          echo 'PASS: socket loopback only; sends ODIN magic, receives LOKE, closes'
+          echo 'NO-GO: not tested on the R840X, bootloader exploit, recovery or flash'
