@@ -1,0 +1,63 @@
+name: R840X public Samsung FOTA metadata lookup (NO WATCH)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/watch3_r840x_public_fota_version_recon.py'
+      - 'tests/test_watch3_r840x_public_fota_version_recon.py'
+      - 'docs/watch3-r840x-public-fota-version-recon.md'
+      - '.github/workflows/watch3-r840x-public-fota-version-recon.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-parser-regressions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test fixed endpoint and zero-device, no firmware safety
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_watch3_r840x_public_fota_version_recon.py' -v
+          python3 -m py_compile tools/watch3_r840x_public_fota_version_recon.py
+          git diff --check
+          echo 'PASS: only mocked network responses; firmware and watch untouched.'
+
+  one-shot-public-version-xml:
+    needs: offline-parser-regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch at most three PUBLIC manufacturer version.xml metadata documents
+        run: |
+          set -euo pipefail
+          python3 tools/watch3_r840x_public_fota_version_recon.py \
+            --probe-public-metadata --output r840x-public-fota-redacted.json
+          cat r840x-public-fota-redacted.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path('r840x-public-fota-redacted.json').read_text())
+          assert r['result'] == 'NO_GO'
+          assert r['device_contacted'] is False
+          assert r['firmware_downloaded'] is False
+          assert r['firmware_written'] is False
+          assert r['odin_session_started'] is False
+          assert len(r['observations']) == 3
+          print('PASS: public metadata outcomes recorded WITHOUT a watch or firmware download.')
+          PY
+      - name: Preserve only sanitized public model-region lookup states
+        uses: actions/upload-artifact@v4
+        with:
+          name: r840x-public-fota-metadata-no-watch
+          path: r840x-public-fota-redacted.json
+          retention-days: 14
