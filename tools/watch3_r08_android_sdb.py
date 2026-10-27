@@ -38,10 +38,17 @@ BOOT_MEMORY_PROBES = {
     "meminfo": "cat /proc/meminfo",
     "iomem": "cat /proc/iomem",
 }
+# One fixed, read-only kernel uevent metadata request across numbered
+# eMMC partition pseudo-files. This shell glob ONLY matches sysfs text
+# ending in /uevent; it never opens /dev/mmcblk0 or an Odin session.
+# Whether the owner's Tizen SDB shell actually expands it is NOT proven.
+PARTITION_SYSFS_PROBES = {
+    "partitions_uevent": "cat /sys/class/block/mmcblk0p[0-9]*/uevent",
+}
 
 # Explicit, fixed, read-only operations; storage and battery probe sets run
 # only when expressly requested. Normal boot collection stays unchanged.
-ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES}
+ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES, **PARTITION_SYSFS_PROBES}
 # Preserve the existing audited boot/power/bezel contract; root-path checks
 # are a separate, opt-in, fixed read-only set.
 ALLOWED_PROBES.update(ROOT_PATH_PROBES)
@@ -402,7 +409,7 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
     if (probes is not PROBES and probes is not STORAGE_PROBES and
             probes is not POWER_PROBES and probes is not BEZEL_PROBES and
             probes is not BOOT_MEMORY_PROBES and probes is not ROOT_PATH_PROBES and
-            probes is not FOTA_PATH_PROBES):
+            probes is not FOTA_PATH_PROBES and probes is not PARTITION_SYSFS_PROBES):
         raise SdbError("Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed (plus the fixed root-path set)")
     for name in probes:
         try:
