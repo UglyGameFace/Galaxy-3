@@ -15,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from watch3_r08_android_sdb import VERSION, frame, receive
 from watch3_r08_fota_consumer_inventory import (
     SYNC_HDR, SYNC_DENT, LOCAL_STREAM, DIRECTORIES, DBUS_DIRECTORIES,
-    DBUS_ACTIVATION_FILENAME, PACKAGE_ROOT_SCOPE, PACKAGE_ROOT_DIRECTORY,
+    DBUS_ACTIVATION_FILENAME, PACKAGE_INDEX_DIRECTORIES, PACKAGE_INDEX_FILENAME,
+    PACKAGE_ROOT_SCOPE, PACKAGE_ROOT_DIRECTORY,
     PACKAGE_MANIFEST_FILENAME, InventoryError,
     DirectoryDecoder, list_one, inventory, main,
 )
@@ -203,6 +204,85 @@ class FixedFotaDirectoryInventoryTests(unittest.TestCase):
                                             "--report", str(target)]):
                 self.assertEqual(main(), 1)
             self.assertEqual(target.read_bytes(), old)
+
+    def test_package_index_paths_are_fixed_documented_system_locations(self):
+        self.assertEqual(PACKAGE_INDEX_DIRECTORIES, {
+            "system_package_registry": b"/usr/share/packages",
+            "opt_package_registry": b"/opt/share/packages",
+        })
+        self.assertEqual(PACKAGE_INDEX_FILENAME, "com.samsung.fota-consumer.xml")
+        for path in PACKAGE_INDEX_DIRECTORIES.values():
+            self.assertTrue(path.startswith(b"/"))
+            self.assertNotIn(b"..", path)
+            self.assertNotIn(b"/dev/", path)
+
+    def test_package_index_reports_exact_xml_only_not_private_files(self):
+        packet = (dent("com.example.private-token.xml") +
+                  dent(PACKAGE_INDEX_FILENAME, stat.S_IFREG | 0o640, 1584) +
+                  dent(".user-secrets") + done())
+        sock = peer([packet[:1], packet[1:7], packet[7:21], packet[21:]])
+        result = list_one(sock, Path("/unused"), "system_package_registry")
+        self.assertEqual(result["status"], "LIST_COMPLETE")
+        self.assertEqual(result["fota_package_xml"], {
+            "kind": "REGULAR_FILE", "bytes": 1584,
+            "readable_by_someone_dac": True,
+        })
+        self.assertEqual(result["other_or_unreported_entries"], 2)
+        self.assertNotIn("private-token", json.dumps(result))
+        self.assertNotIn("user-secrets", json.dumps(result))
+        outgoing_frames = outgoing(sock)
+        path = PACKAGE_INDEX_DIRECTORIES["system_package_registry"]
+        self.assertEqual(outgoing_frames[2][3], SYNC_HDR.pack(
+            b"LIST", len(path)) + path)
+        self.assertEqual(sum(x[0] == b"WRTE" for x in outgoing_frames), 1)
+        self.assertNotIn(b"RECV", bytes(sock.sent))
+        self.assertNotIn(b"SEND", bytes(sock.sent))
+        self.assertNotIn(b"shell:", bytes(sock.sent))
+
+    def test_many_packages_are_bounded_and_do_not_hide_target(self):
+        data = b"".join(dent(f"other-package-{i}.xml") for i in range(270))
+        data += dent(PACKAGE_INDEX_FILENAME) + done()
+        result = list_one(peer([data]), Path("/unused"), "system_package_registry")
+        self.assertEqual(result["status"], "LIST_COMPLETE")
+        self.assertEqual(result["other_or_unreported_entries"], 270)
+        self.assertEqual(result["fota_package_xml"]["kind"], "REGULAR_FILE")
+
+    def test_package_index_only_lists_two_scopes_and_retains_default(self):
+        samples = [
+            peer([dent(PACKAGE_INDEX_FILENAME) + done()]),
+            peer([done()]),
+        ]
+        with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                   side_effect=samples) as connect:
+            report = inventory("10.0.0.65", Path("/unused"),
+                               fota_package_index_only=True)
+        self.assertEqual(connect.call_count, 2)
+        self.assertEqual(set(report["directory_results"]), set(PACKAGE_INDEX_DIRECTORIES))
+        self.assertEqual(report["schema"], "uglyos-r840x-fota-package-index-v1")
+        self.assertEqual(report["status"], "READ_ONLY_FIXED_PACKAGE_INDEX_LIST")
+        self.assertFalse(report["watch_write_performed"])
+        self.assertNotIn("10.0.0.65", json.dumps(report))
+        with self.assertRaisesRegex(InventoryError, "SCOPES_MUTUALLY_EXCLUSIVE"):
+            inventory("10.0.0.65", Path("/unused"),
+                      fota_package_index_only=True, dbus_services_only=True)
+        with self.assertRaisesRegex(InventoryError, "SCOPES_MUTUALLY_EXCLUSIVE"):
+            inventory("10.0.0.65", Path("/unused"),
+                      fota_package_index_only=True, fota_package_root_only=True)
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "redacted.json"
+            with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                       side_effect=[peer([dent(PACKAGE_INDEX_FILENAME) + done()]),
+                                    peer([done()])]), patch.object(
+                sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+                              "--fota-package-index-only", "--report", str(out)]):
+                self.assertEqual(main(), 0)
+            self.assertEqual(out.stat().st_mode & 0o077, 0)
+            old = out.read_bytes()
+            with patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+                                            "--fota-package-index-only",
+                                            "--report", str(out)]):
+                self.assertEqual(main(), 1)
+            self.assertEqual(out.read_bytes(), old)
 
     def test_fragmented_dent_headers_and_names(self):
         data = dent("fota-service") + dent("fota-consumer") + (
