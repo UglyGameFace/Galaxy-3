@@ -69,6 +69,13 @@ class SafeCscTests(unittest.TestCase):
         self.assertEqual(csc.MAX_CSC_BYTES, 128)
         self.assertEqual(csc.report_base()["source_watch_model"], "SM-R805U")
         self.assertFalse(csc.report_base()["flash_allowed"])
+        # Physically observed Oct 27 on owner's SM-R840X; the note must
+        # not keep saying its existence on this model is unverified.
+        note = csc.report_base()["note"]
+        self.assertIn("SM-R840X", note)
+        self.assertIn("PAP", note)
+        self.assertNotIn("NOT yet independently", note)
+        self.assertIn("does NOT establish", note)
 
     def test_three_character_code_only_and_unknown_content_remains_unknown(self):
         for candidate in (b"XAR\n", b"VZW\r\n", b"KOO"):
