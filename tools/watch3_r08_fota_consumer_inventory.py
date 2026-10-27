@@ -60,6 +60,27 @@ PACKAGE_INDEX_DIRECTORIES = {
     "opt_package_registry": b"/opt/share/packages",
 }
 PACKAGE_INDEX_FILENAME = "com.samsung.fota-consumer.xml"
+# Owner-verified original 2,215-byte installed XML declares exactly
+# "accessory-services-location=/res/xml/appcessoryservices.xml".
+# Preserve Samsung's unusual spelling (appcessory, NOT accessory).
+SAP_RESOURCE_SCOPE = "fota_sap_profile_directory"
+SAP_RESOURCE_DIRECTORY = b"/usr/apps/com.samsung.fota-consumer/res/xml"
+SAP_RESOURCE_FILENAME = "appcessoryservices.xml"
+
+# Tizen platform white paper defines these vendor daemon unit paths.
+# /etc/systemd/system is the standard systemd override directory.
+SYSTEMD_DIRECTORIES = {
+    "fota_systemd_vendor_system": b"/usr/lib/systemd/system",
+    "fota_systemd_vendor_user": b"/usr/lib/systemd/user",
+    "fota_systemd_override": b"/etc/systemd/system",
+}
+SYSTEMD_FOTA_UNIT = re.compile(
+    r"[a-z0-9_.@-]{0,80}(?:fota|firmware|update)[a-z0-9_.@-]{0,40}"
+    r"\.(?:service|socket|target|timer)\Z",
+    re.IGNORECASE,
+)
+MAX_SYSTEMD_DENTS = 1024
+MAX_REPORTED_FOTA_UNITS = 32
 MAX_PACKAGE_INDEX_DENTS = 2048
 CANDIDATE_NAME = re.compile(r"(?:fota|update)[a-z0-9._-]{0,63}\Z")
 EXACT_BIN_NAMES = frozenset((
@@ -136,7 +157,9 @@ class DirectoryDecoder:
             self.pending = None
             self.count += 1
             if self.count > (MAX_PACKAGE_INDEX_DENTS
-                             if scope in PACKAGE_INDEX_DIRECTORIES else MAX_DENTS):
+                             if scope in PACKAGE_INDEX_DIRECTORIES else
+                             MAX_SYSTEMD_DENTS if scope in SYSTEMD_DIRECTORIES else
+                             MAX_DENTS):
                 raise InventoryError("DIRECTORY_ENTRY_LIMIT_REACHED")
             # Privacy gate: only small, plain-ASCII, non-hidden system names.
             # Never serialize unknown or private directory entries.
@@ -155,6 +178,17 @@ class DirectoryDecoder:
                         "executable_by_someone_dac": bool(mode & 0o111),
                         "bytes": size if size <= 8 * 1024 * 1024 else "OVER_8_MIB",
                     }
+            elif scope in SYSTEMD_DIRECTORIES and SYSTEMD_FOTA_UNIT.fullmatch(name):
+                if len(self.candidates) < MAX_REPORTED_FOTA_UNITS:
+                    self.candidates[name] = {
+                        "kind": mode_kind(mode),
+                        "bytes": size if size <= 64 * 1024 else "OVER_64_KIB",
+                    }
+            elif scope == SAP_RESOURCE_SCOPE and name == SAP_RESOURCE_FILENAME:
+                self.candidates[name] = {
+                    "kind": mode_kind(mode),
+                    "bytes": size if size <= 64 * 1024 else "OVER_64_KIB",
+                }
             elif scope in PACKAGE_INDEX_DIRECTORIES and name == PACKAGE_INDEX_FILENAME:
                 self.candidates[name] = {
                     "kind": mode_kind(mode),
@@ -191,6 +225,26 @@ class DirectoryDecoder:
                 "other_or_unreported_entries": max(0, self.count - len(self.candidates)),
                 "meaning": ("Only names beginning fota/update are shown. "
                             "Missing candidate is not proof an updater is absent."),
+            }
+        if scope in SYSTEMD_DIRECTORIES:
+            return {
+                "status": "LIST_COMPLETE" if self.count else "EMPTY_OR_INACCESSIBLE",
+                "matching_fota_unit_files": self.candidates,
+                "matching_names_truncated": len(self.candidates) >= MAX_REPORTED_FOTA_UNITS,
+                "other_or_unreported_entries": max(0, self.count - len(self.candidates)),
+                "meaning": ("Only bounded FOTA/firmware/update systemd unit names "
+                            "are exposed. Nonmatches, alternate names and dynamic "
+                            "D-Bus ownership remain outside this evidence."),
+            }
+        if scope == SAP_RESOURCE_SCOPE:
+            return {
+                "status": "LIST_COMPLETE" if self.count else "EMPTY_OR_INACCESSIBLE",
+                "declared_sap_profile_xml": self.candidates.get(
+                    SAP_RESOURCE_FILENAME, "NOT_SEEN_IN_LIST"),
+                "other_or_unreported_entries": max(0, self.count - len(self.candidates)),
+                "meaning": ("Only the exact appcessoryservices.xml name declared by "
+                            "Samsung's installed package XML is disclosed. The SAP "
+                            "peer profile does not identify the D-Bus FOTA receiver."),
             }
         if scope in PACKAGE_INDEX_DIRECTORIES:
             return {
@@ -236,7 +290,9 @@ class DirectoryDecoder:
 
 def list_one(sock, key_path: Path, scope: str) -> dict:
     """Issue exactly one fixed LIST on already-authorized SDB sync."""
-    if scope == PACKAGE_ROOT_SCOPE:
+    if scope == SAP_RESOURCE_SCOPE:
+        path = SAP_RESOURCE_DIRECTORY
+    elif scope == PACKAGE_ROOT_SCOPE:
         path = PACKAGE_ROOT_DIRECTORY
     elif scope in DIRECTORIES:
         path = DIRECTORIES[scope]
@@ -244,6 +300,8 @@ def list_one(sock, key_path: Path, scope: str) -> dict:
         path = DBUS_DIRECTORIES[scope]
     elif scope in PACKAGE_INDEX_DIRECTORIES:
         path = PACKAGE_INDEX_DIRECTORIES[scope]
+    elif scope in SYSTEMD_DIRECTORIES:
+        path = SYSTEMD_DIRECTORIES[scope]
     else:
         raise InventoryError("SCOPE_NOT_ALLOWED")
     conn = Connection(sock, key_path)
@@ -276,13 +334,16 @@ def list_one(sock, key_path: Path, scope: str) -> dict:
 def inventory(ip: str, key_path: Path, timeout: int = 12,
               *, dbus_services_only: bool = False,
               fota_package_root_only: bool = False,
-              fota_package_index_only: bool = False) -> dict:
+              fota_package_index_only: bool = False,
+              fota_handoff_index_only: bool = False) -> dict:
     if sum((dbus_services_only, fota_package_root_only,
-            fota_package_index_only)) > 1:
+            fota_package_index_only, fota_handoff_index_only)) > 1:
         raise InventoryError("SCOPES_MUTUALLY_EXCLUSIVE")
     ip = private_watch_ip(ip)
     scopes = {}
-    active_scopes = (PACKAGE_INDEX_DIRECTORIES if fota_package_index_only else
+    active_scopes = (list(SYSTEMD_DIRECTORIES) + [SAP_RESOURCE_SCOPE]
+                     if fota_handoff_index_only else
+                     PACKAGE_INDEX_DIRECTORIES if fota_package_index_only else
                      [PACKAGE_ROOT_SCOPE] if fota_package_root_only else
                      DBUS_DIRECTORIES if dbus_services_only else DIRECTORIES)
     for scope in active_scopes:
@@ -295,13 +356,16 @@ def inventory(ip: str, key_path: Path, timeout: int = 12,
         except (OSError, TimeoutError, ValueError):
             scopes[scope] = {"status": "SDB_UNAVAILABLE"}
     return {
-        "schema": ("uglyos-r840x-fota-package-index-v1"
+        "schema": ("uglyos-r840x-fota-handoff-index-v1"
+                   if fota_handoff_index_only else
+                   "uglyos-r840x-fota-package-index-v1"
                    if fota_package_index_only else
                    "uglyos-r840x-fota-root-manifest-list-v1"
                    if fota_package_root_only else
                    "uglyos-r840x-fota-dbus-activation-v1" if dbus_services_only
                    else "uglyos-r840x-fota-consumer-inventory-v1"),
-        "status": ("READ_ONLY_FIXED_PACKAGE_INDEX_LIST" if fota_package_index_only
+        "status": ("READ_ONLY_FOTA_HANDOFF_INDEX" if fota_handoff_index_only
+                   else "READ_ONLY_FIXED_PACKAGE_INDEX_LIST" if fota_package_index_only
                    else "READ_ONLY_FIXED_PACKAGE_ROOT_LIST" if fota_package_root_only
                    else "READ_ONLY_FIXED_DBUS_DIRECTORY_INVENTORY" if dbus_services_only
                    else "READ_ONLY_FIXED_DIRECTORY_INVENTORY"),
@@ -329,6 +393,8 @@ def main() -> int:
                       help="LIST only the known FOTA package root for tizen-manifest.xml")
     mode.add_argument("--fota-package-index-only", action="store_true",
                       help="LIST two fixed Tizen package registry directories for exact FOTA XML")
+    mode.add_argument("--fota-handoff-index-only", action="store_true",
+                      help="LIST three Tizen daemon unit directories and one XML-declared SAP directory")
     parser.add_argument("--key-path", type=Path,
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     parser.add_argument("--report", type=Path,
@@ -338,10 +404,13 @@ def main() -> int:
         result = inventory(args.watch_ip, args.key_path,
                            dbus_services_only=args.dbus_services_only,
                            fota_package_root_only=args.fota_package_root_only,
-                           fota_package_index_only=args.fota_package_index_only)
+                           fota_package_index_only=args.fota_package_index_only,
+                           fota_handoff_index_only=args.fota_handoff_index_only)
         # Default report path remains unchanged for existing callers.
         default_report = Path.home() / "watch3-r840x-fota-consumer-inventory.json"
-        path = (Path.home() / "watch3-r840x-fota-package-index.json"
+        path = (Path.home() / "watch3-r840x-fota-handoff-index.json"
+                if args.fota_handoff_index_only and args.report == default_report else
+                Path.home() / "watch3-r840x-fota-package-index.json"
                 if args.fota_package_index_only and args.report == default_report else
                 Path.home() / "watch3-r840x-fota-root-manifest-list.json"
                 if args.fota_package_root_only and args.report == default_report else
@@ -367,7 +436,8 @@ def main() -> int:
         reason = str(exc) if isinstance(exc, InventoryError) else "LOCAL_FILE_ERROR"
         print("INVENTORY_ERROR: " + reason, file=sys.stderr)
         return 1
-    print(("READ_ONLY_FOTA_PACKAGE_INDEX_LIST: " if args.fota_package_index_only
+    print(("READ_ONLY_FOTA_HANDOFF_INDEX: " if args.fota_handoff_index_only
+           else "READ_ONLY_FOTA_PACKAGE_INDEX_LIST: " if args.fota_package_index_only
            else "READ_ONLY_FOTA_PACKAGE_ROOT_LIST: " if args.fota_package_root_only
            else "READ_ONLY_DBUS_ACTIVATION_INVENTORY: " if args.dbus_services_only
            else "READ_ONLY_FOTA_DIRECTORY_INVENTORY: ") + str(path))
