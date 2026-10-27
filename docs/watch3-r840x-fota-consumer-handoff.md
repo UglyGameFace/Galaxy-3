@@ -534,3 +534,76 @@ prove an active owner or that any FOTA payload is accepted. Recovery
 service content may establish a recovery *procedure or helper*, but
 a safe stock restore and custom unsigned kernel boot still require
 independent hardware/firmware verification.
+
+
+## Physical recovery/update unit contents point to exact helper scripts
+
+The owner's actual #71 SDB RECV completed for four of five
+physical-watch-observed files:
+
+- `recovery-update.service` (238 bytes, SHA-256
+  `8e511434fd0be3f6be16d23242c364cc570c317518ce60210b573b694bb9fda8`):
+  `Type=oneshot`, `ExecStart=/usr/bin/recovery-update.sh`,
+  `After=Wants=wait-mount@opt-usr.service`.
+- `rw-update.service` (215 bytes, SHA-256
+  `8c20c8e1064a9f7b4521a01cf64ed62da7da499c241e90343353a602b50a9f80`):
+  `Type=oneshot`, `ExecStart=/usr/bin/rw-update-systemd.sh`,
+  `After=Requires=sysinit.target`.
+- `update-service.service` (245 bytes, SHA-256
+  `017640aa04aa8c2290eac37c9af95da54612b4163be75964f89412c759fc30ff`):
+  `Type=dbus`, `BusName=com.samsung.updateservice`,
+  `ExecStart=/usr/bin/launch_app`, `After=Requires=dbus.socket`.
+  Note that `com.samsung.updateservice` is not `fota.consumer`.
+  Arguments to `launch_app` are intentionally omitted by the redacted
+  JSON report, so inspect the authentic unit privately before inferring
+  which application it starts.
+- `appcessoryservices.xml` (2,036 bytes, SHA-256
+  `1ece1d36e8cba9d4a6527295f67c5d0ddf7b2ae0a3b2fb5e7243935fb40533a1`)
+  was retrieved successfully. Its internal `<!DOCTYPE>` caused the
+  conservative parser to reject automated parsing, NOT the original
+  download. Samsung SAP developer samples may contain internal DTD
+  declarations; do not execute DTD entities or treat it as an exploit.
+  Official SAP overview: https://developer.samsung.com/galaxy-accessory/faq.html .
+- `fota-consumer.service`, although a 386-byte REGULAR_FILE in the
+  earlier physical LIST, returned
+  `REMOTE_MISSING_DENIED_OR_UNREADABLE` on the actual RECV. No
+  `ExecStart` or bus configuration from this unit is known. Do not
+  classify the reason as definitely SMACK or absent without evidence.
+
+### New opt-in exact helper script retrieval
+
+The actual **unit ExecStart fields** give us two literal helper script
+paths, `/usr/bin/recovery-update.sh` and
+`/usr/bin/rw-update-systemd.sh`. Their on-watch existence or
+readability has not yet been tested. The existing proven
+`tools/watch3_r08_fota_handoff_pull.py` now supports optional
+`--observed-helpers-only`. It selects **only these two** constant
+remote paths (not arbitrary user input), uses two independent bounded
+8 KiB read-only SDB sync-v1 RECV operations, and saves bytes only in
+`~/watch3-r840x-fota-recovery-helpers/` as mode-0600 files in a
+mode-0700 exclusive local folder. It **does not parse or execute
+the shell scripts**, does not call systemctl or the D-Bus methods,
+and does not access firmware partitions. Its private JSON records per
+script read status/size/SHA without claiming preexisting file size
+or update capability. If either read fails, the other is still tried.
+The old original five-file default and output directory are unchanged.
+
+After CI and merge:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_fota_handoff_pull.py \
+  --watch-ip 10.0.0.65 --observed-helpers-only
+cat ~/watch3-r840x-fota-recovery-helpers/fota-handoff-report.json
+```
+
+If the two files are retrieved, inspect the **source text offline**
+before any other modification or attempted execution, tracking exact
+filesystem paths, signature verification, update archive processing,
+partition writes, and recovery triggers. That analysis is still not
+proof of safe stock restoration or unsigned custom kernel acceptance.
+
+The owner's four previously fetched raw unit/SAP files remain in the
+older `~/watch3-r840x-fota-handoff-evidence/` folder and may be
+copied to Android Downloads for private chat upload. Never upload
+raw source contents to the public repository without privacy review.
