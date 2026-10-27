@@ -156,7 +156,7 @@ class RootPrerequisiteTests(unittest.TestCase):
 
     def test_sdb_closed_shell_exposes_category_not_device_exception(self):
         peers = [FakeSocket(frame(b"CNXN", VERSION, 262144, b"device::\x00")
-                            + frame(b"CLSE", 0, 2)) for _ in range(10)]
+                            + frame(b"CLSE", 0, 2)) for _ in range(2 * len(ROOT_PATH_PROBES))]
         with patch("watch3_r08_android_sdb.socket.create_connection",
                    side_effect=peers):
             observed, missing = collect("10.54.86.131", Path("/unused"),
@@ -189,7 +189,7 @@ class RootPrerequisiteTests(unittest.TestCase):
             observed, missing = collect("10.54.86.131", Path("/unused"),
                                         probes=ROOT_PATH_PROBES)
         self.assertFalse(missing)
-        self.assertEqual(connected.call_count, 5)
+        self.assertEqual(connected.call_count, len(ROOT_PATH_PROBES))
         self.assertEqual(summarize_root_path(observed, {})["status"],
                          "STATIC_PREREQUISITES_OBSERVED")
         for index, key in enumerate(ROOT_PATH_PROBES):
