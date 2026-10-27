@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inventory two FIXED Watch3 FOTA directories over authenticated SDB sync LIST.
+"""Inventory fixed, allowlisted Watch3 FOTA directories via read-only SDB sync LIST.
 
 READ ONLY: No SDB shell, SEND, push, process launch, FOTA request, reboot,
 partition access, arbitrary remote path, or writes to the watch. Report is
@@ -42,6 +42,13 @@ DBUS_DIRECTORIES = {
     "dbus_session_vendor": b"/usr/share/dbus-1/services",
 }
 DBUS_ACTIVATION_FILENAME = "fota.consumer.service"
+# The owner's actual fota-service ELF pins the package's bin directory;
+# Samsung's published Tizen package layout places the manifest in the root.
+# The RECV of this exact manifest returned FAIL on the physical watch.
+# One direct parent LIST is more informative than guessing alternative paths.
+PACKAGE_ROOT_DIRECTORY = b"/usr/apps/com.samsung.fota-consumer"
+PACKAGE_ROOT_SCOPE = "fota_package_root"
+PACKAGE_MANIFEST_FILENAME = "tizen-manifest.xml"
 CANDIDATE_NAME = re.compile(r"(?:fota|update)[a-z0-9._-]{0,63}\Z")
 EXACT_BIN_NAMES = frozenset((
     "fota-service", "fota-consumer", "fota_consumer",
@@ -135,6 +142,12 @@ class DirectoryDecoder:
                         "executable_by_someone_dac": bool(mode & 0o111),
                         "bytes": size if size <= 8 * 1024 * 1024 else "OVER_8_MIB",
                     }
+            elif scope == PACKAGE_ROOT_SCOPE and name == PACKAGE_MANIFEST_FILENAME:
+                self.candidates[name] = {
+                    "kind": mode_kind(mode),
+                    "bytes": size if size <= 64 * 1024 else "OVER_64_KIB",
+                    "readable_by_someone_dac": bool(mode & 0o444),
+                }
             elif scope in DBUS_DIRECTORIES and name == DBUS_ACTIVATION_FILENAME:
                 self.candidates[name] = {
                     "kind": mode_kind(mode),
@@ -160,6 +173,18 @@ class DirectoryDecoder:
                 "meaning": ("Only names beginning fota/update are shown. "
                             "Missing candidate is not proof an updater is absent."),
             }
+        if scope == PACKAGE_ROOT_SCOPE:
+            return {
+                "status": "LIST_COMPLETE" if self.count else "EMPTY_OR_INACCESSIBLE",
+                "tizen_manifest": self.candidates.get(
+                    PACKAGE_MANIFEST_FILENAME, "NOT_SEEN_IN_LIST"),
+                "other_or_unreported_entries": max(0, self.count - len(self.candidates)),
+                "meaning": ("Only exact tizen-manifest.xml metadata is shown; "
+                            "LIST_COMPLETE without it means the filename was not seen "
+                            "at this one package root. An empty listing, failed LIST, "
+                            "or missing filename is not proof of absent package metadata "
+                            "elsewhere. DAC bits cannot prove access under Tizen SMACK."),
+            }
         if scope in DBUS_DIRECTORIES:
             return {
                 "status": "LIST_COMPLETE" if self.count else "EMPTY_OR_INACCESSIBLE",
@@ -181,9 +206,14 @@ class DirectoryDecoder:
 
 def list_one(sock, key_path: Path, scope: str) -> dict:
     """Issue exactly one fixed LIST on already-authorized SDB sync."""
-    if scope not in DIRECTORIES and scope not in DBUS_DIRECTORIES:
+    if scope == PACKAGE_ROOT_SCOPE:
+        path = PACKAGE_ROOT_DIRECTORY
+    elif scope in DIRECTORIES:
+        path = DIRECTORIES[scope]
+    elif scope in DBUS_DIRECTORIES:
+        path = DBUS_DIRECTORIES[scope]
+    else:
         raise InventoryError("SCOPE_NOT_ALLOWED")
-    path = (DIRECTORIES if scope in DIRECTORIES else DBUS_DIRECTORIES)[scope]
     conn = Connection(sock, key_path)
     conn.handshake()
     conn.send(b"OPEN", LOCAL_STREAM, 0, b"sync:\x00")
@@ -212,10 +242,15 @@ def list_one(sock, key_path: Path, scope: str) -> dict:
 
 
 def inventory(ip: str, key_path: Path, timeout: int = 12,
-              *, dbus_services_only: bool = False) -> dict:
+              *, dbus_services_only: bool = False,
+              fota_package_root_only: bool = False) -> dict:
+    if dbus_services_only and fota_package_root_only:
+        raise InventoryError("SCOPES_MUTUALLY_EXCLUSIVE")
     ip = private_watch_ip(ip)
     scopes = {}
-    for scope in (DBUS_DIRECTORIES if dbus_services_only else DIRECTORIES):
+    active_scopes = ([PACKAGE_ROOT_SCOPE] if fota_package_root_only else
+                     DBUS_DIRECTORIES if dbus_services_only else DIRECTORIES)
+    for scope in active_scopes:
         try:
             with socket.create_connection((ip, PORT), timeout=timeout) as sock:
                 sock.settimeout(timeout)
@@ -225,9 +260,12 @@ def inventory(ip: str, key_path: Path, timeout: int = 12,
         except (OSError, TimeoutError, ValueError):
             scopes[scope] = {"status": "SDB_UNAVAILABLE"}
     return {
-        "schema": ("uglyos-r840x-fota-dbus-activation-v1" if dbus_services_only
+        "schema": ("uglyos-r840x-fota-root-manifest-list-v1"
+                   if fota_package_root_only else
+                   "uglyos-r840x-fota-dbus-activation-v1" if dbus_services_only
                    else "uglyos-r840x-fota-consumer-inventory-v1"),
-        "status": ("READ_ONLY_FIXED_DBUS_DIRECTORY_INVENTORY" if dbus_services_only
+        "status": ("READ_ONLY_FIXED_PACKAGE_ROOT_LIST" if fota_package_root_only
+                   else "READ_ONLY_FIXED_DBUS_DIRECTORY_INVENTORY" if dbus_services_only
                    else "READ_ONLY_FIXED_DIRECTORY_INVENTORY"),
         "directory_results": scopes,
         "known_fota_service_sha256":
@@ -246,8 +284,11 @@ def inventory(ip: str, key_path: Path, timeout: int = 12,
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--watch-ip", required=True)
-    parser.add_argument("--dbus-services-only", action="store_true",
-                        help="List only fixed standard D-Bus activation directories")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--dbus-services-only", action="store_true",
+                      help="List only fixed standard D-Bus activation directories")
+    mode.add_argument("--fota-package-root-only", action="store_true",
+                      help="LIST only the known FOTA package root for tizen-manifest.xml")
     parser.add_argument("--key-path", type=Path,
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     parser.add_argument("--report", type=Path,
@@ -255,11 +296,14 @@ def main() -> int:
     args = parser.parse_args()
     try:
         result = inventory(args.watch_ip, args.key_path,
-                           dbus_services_only=args.dbus_services_only)
+                           dbus_services_only=args.dbus_services_only,
+                           fota_package_root_only=args.fota_package_root_only)
         # Default report path remains unchanged for existing callers.
-        path = (Path.home() / "watch3-r840x-fota-dbus-services.json"
-                if args.dbus_services_only and args.report ==
-                   Path.home() / "watch3-r840x-fota-consumer-inventory.json"
+        default_report = Path.home() / "watch3-r840x-fota-consumer-inventory.json"
+        path = (Path.home() / "watch3-r840x-fota-root-manifest-list.json"
+                if args.fota_package_root_only and args.report == default_report else
+                Path.home() / "watch3-r840x-fota-dbus-services.json"
+                if args.dbus_services_only and args.report == default_report
                 else args.report.expanduser())
         payload = (json.dumps(result, indent=2) + "\n").encode("utf-8")
         if not path.parent.is_dir():
@@ -280,7 +324,8 @@ def main() -> int:
         reason = str(exc) if isinstance(exc, InventoryError) else "LOCAL_FILE_ERROR"
         print("INVENTORY_ERROR: " + reason, file=sys.stderr)
         return 1
-    print(("READ_ONLY_DBUS_ACTIVATION_INVENTORY: " if args.dbus_services_only
+    print(("READ_ONLY_FOTA_PACKAGE_ROOT_LIST: " if args.fota_package_root_only
+           else "READ_ONLY_DBUS_ACTIVATION_INVENTORY: " if args.dbus_services_only
            else "READ_ONLY_FOTA_DIRECTORY_INVENTORY: ") + str(path))
     print("NO firmware writes, FOTA calls, root, exploit or custom boot attempted.")
     return 0
