@@ -54,9 +54,18 @@ or reset/change-CSC menus on a watch.
    prints only a three-character candidate CSC if found.
    The JSON contains no raw system log, SDB auth key, network IP
    or other file contents. The report is created mode 0600 and
-   refuses to overwrite an existing report; remove or rename
-   the *local* existing report only if you intentionally run a
-   second observation.
+   refuses to overwrite an existing report. If you intentionally
+   take a second observation, use a distinct `--output` filename
+   rather than deleting original evidence. The script checks this
+   *before* attempting a network connection.
+
+   If a prior result exists, preserve it and use for example:
+
+   ```sh
+   python tools/watch3_r840x_csc_readonly.py \\
+     --watch-ip WATCH_CURRENT_WIFI_IP \\
+     --output ~/watch3-r840x-csc-second-observation.json
+   ```
 
 4. Possible responses:
    - `ACTIVE_CSC_CANDIDATE_READ_FROM_EXACT_TIZEN_PATH` and
