@@ -2,7 +2,74 @@
 
 **Issue:** [#47](https://github.com/UglyGameFace/Galaxy-3/issues/47)
 **Installed build:** `R840XXXU1AUA2`.
-**Actual CSC:** **UNKNOWN** until owner-derived evidence is obtained.
+**Owner-observed active CSC (2026-10-27): `PAP`, read from the physical watch via fixed-path read-only SDB.**
+**Factory sales region / signed rescue firmware identity: still UNKNOWN.**
+
+## Owner's physical SM-R840X result, October 27, 2026
+
+**Evidence level: directly observed active CSC candidate on the actual
+working demo watch.** After PR #84 merged and both Ubuntu fake-SDB CI
+jobs passed, the owner ran the one-path Termux reader and supplied its
+privacy-filtered JSON and console output:
+
+- `CSC_STATE: ACTIVE_CSC_CANDIDATE_READ_FROM_EXACT_TIZEN_PATH`
+- `CSC_CANDIDATE: PAP`
+- `schema: uglyos-r840x-csc-fixed-sdb-read-v1`
+- `status: CSC_CANDIDATE_FROM_OWNER_WATCH_FIXED_PATH`
+- `model: SM-R840X`; `installed_build: R840XXXU1AUA2`
+- `remote_path: /opt/system/csc-default/output/csc-active-customer.log`
+- `observed_active_csc_candidate: PAP`
+- `watch_write_performed=false`; `odin_session_started=false`;
+  `pit_requested=false`; `firmware_written=false`;
+  `full_stock_recovery_proven=false`; `flash_allowed=false`.
+
+This confirms that **the actual SM-R840X exposes this same CSC file** and
+that it contained exactly **`PAP`** at the moment of observation.
+Our SDB tool called only `sync:RECV` (authenticated ordinary Tizen
+debugging), not FOTA launch, Odin, partition write or reboot. The saved
+report is on the owner's private Termux filesystem; **no original raw
+file, account identifiers, watch IP or auth key were uploaded to GitHub**.
+
+**External interpretation: suggestive, NOT same-model proof:**
+
+- A [2016 Android developer's firsthand report](
+  https://stackoverflow.com/questions/36836024/same-android-version-and-same-device-model-but-only-one-cannot-download-app)
+  records `PAP` on Samsung in-store demo Galaxy phones and explicitly
+  investigates whether the demonstration configuration affected app
+  availability. This supports the possibility of a Samsung **demo
+  configuration association**, not the semantics of the R840X
+  bootloader or watch CSC package.
+- A [2017 community Galaxy S8 LDU report](
+  https://4pda.to/forum/index.php?showtopic=824699&st=300)
+  identifies Live Demo Unit `G955XU` with `CARRIER: MDL` and
+  `CSC: PAP`. This is independently consistent with the owner's
+  R840X LDU observation, but is **another product generation**.
+- Multiple generic public [CSC mappings](
+  https://github.com/zerotet/samsung-csc-codes)
+  and [regional code lists](
+  https://technastic.com/samsung-csc-codes-list) call `PAP`
+  **"Europe (PAP)"**. This generic label is **NOT** authoritative
+  proof of the watch's country of manufacture, sales region or
+  which signed model-specific Samsung files it accepts.
+
+**Interpretation:** Record **active CSC: PAP** as measured.
+Record **CSC association with older Samsung demo configurations:
+plausible, independently corroborated**. Record **exact R840X-specific
+PAP meaning, factory region, firmware eligibility, bootloader
+signatures/rollback and physical restoration: UNKNOWN**. Never assume
+`PAP` means a retail European flash package is suitable. The older
+`R840XXXU1ATFA-(OXA)` third-party ZIP title is not evidence that this
+unit has `OXA` installed. The previously public FOTA probes for
+`SM-R840X/XAR` and `SM-R840X/KOO` returned HTTP 403, but those were
+hypothetical regions and did not establish the active CSC.
+
+**Next genuinely useful evidence:** If an authentic *free* and legally
+sourced **exact SM-R840X**, appropriate `PAP`/LDU firmware package
+exists, inspect its signatures, exact build and PIT **offline**, and
+validate stock rescue on an independent/sacrificial R840X before any
+owner-unit flashing. The active CSC measurement does not remove the
+hard `NO_GO` on loader commands, firmware changes or UgLy|OS
+custom boot.
 
 ## Why this test instead of assuming `OXA`, `XAR` or `KOO`
 
@@ -17,14 +84,12 @@ reports **that watch's** active CSC in exactly:
 
 `/opt/system/csc-default/output/csc-active-customer.log`
 
-**Important difference:** The researched device is LTE
-`SM-R805U`, while ours is a Bluetooth LDU `SM-R840X`.
-An LDU could have a different customization layout, an empty
-placeholder, absent CSC, or permission restrictions. None has
-been proven on our watch. A read result from the exact file
-would be *direct, relevant evidence* of an active code but
-still would **not** authenticate a full stock repair image or
-authorize a firmware-region change.
+**Important distinction:** The path was originally learned on LTE
+`SM-R805U`, but the owner's later **physical SM-R840X** observation
+above now independently confirms that this exact text record also
+exists and reports `PAP` on their Bluetooth LDU. That is an active
+code observation, **not** authenticated OEM rescue image or permission
+to flash another CSC.
 
 This is **not** the Android phone path `Settings > About phone >
 Service provider software version`. Nor is it the `*#1234#`
@@ -100,8 +165,10 @@ changes CSC or modifies partitions.
 
 ## What this will and won't resolve
 
-**Can resolve:** A plausible active CSC value from a real
-system log on this exact R840X, if the file exists and is readable.
+**Resolved for the current installed Tizen configuration:** The
+actual active CSC file on this R840X reported `PAP` on October 27.
+No reason to repeat the same one-file read unless the owner has a
+specific new configuration question; preserve the original report.
 
 **Cannot resolve alone:** The original factory CSC, the full
 regional firmware package identity, whether this LDU bootloader
