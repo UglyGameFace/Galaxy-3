@@ -125,7 +125,7 @@ class RootPrerequisiteTests(unittest.TestCase):
         self.assertIsNone(_root_path_output_error(
             "tar options\n --to-command=COMMAND\n"
             "some archives have files not found\n additional help"))
-        
+
     def test_fixed_allowlist_has_no_install_flash_or_injection(self):
         self.assertEqual(len(ROOT_PATH_PROBES), 4)
         for query in ROOT_PATH_PROBES.values():
