@@ -247,3 +247,46 @@ firmware machinery. If present, compare declared executables with the
 previous FOTA bin inventory. This is still static package metadata,
 **not proof of D-Bus ownership, unsigned custom kernel acceptance or
 stock recovery**. Record findings under Issue #47 only.
+
+
+## Physical manifest RECV failed: parent-directory evidence gate (October 27)
+
+After #65 merged (`ca11734`), the owner actually ran the fixed
+`/usr/apps/com.samsung.fota-consumer/tizen-manifest.xml` SDB RECV.
+The watch responded with a sync FAIL, redacted locally as
+`MANIFEST_MISSING_DENIED_OR_UNREADABLE`. **No JSON was created because
+the command did not acquire XML.** This is *not* a network transport error,
+proof of a permissions bypass, or demonstration that Tizen manifests
+do not exist. The current decoder purposely does not reveal raw error
+messages, so missing vs denied is not yet established.
+
+Samsung's Tizen documentation grounds that normal installed native
+packages have their manifest in the package root, but proprietary
+system packages and SMACK policy can differ. Primary reference:
+https://github.com/Samsung/tizen-docs/blob/master/docs/application/native/index.md .
+
+The previously acquired FOTA service executable proves the binary
+exists in `/usr/apps/com.samsung.fota-consumer/bin`. Before speculating
+about another file path, perform ONE fixed read-only SDB sync `LIST`
+on its literal parent `/usr/apps/com.samsung.fota-consumer`.
+The existing inventory now has `--fota-package-root-only`; this sends
+exactly one bounded LIST, reporting the existence, file kind,
+bounded size, and ordinary DAC read bits of only the **exact name**
+`tizen-manifest.xml`. All other directory names are filtered to a count.
+The parent metadata query cannot override a denied file RECV, Tizen
+SMACK, or establish where the D-Bus consumer runs.
+
+After PR CI passes and merges:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_fota_consumer_inventory.py \
+  --watch-ip 10.0.0.65 --fota-package-root-only
+cat ~/watch3-r840x-fota-root-manifest-list.json
+```
+
+Interpret `LIST_COMPLETE` + `NOT_SEEN_IN_LIST` as **specific
+manifest filename not listed in that one directory**; if it is listed,
+record DAC file metadata but retain the prior RECV failure as an open
+SMACK/access/transport question. No shell, file download, service
+launch, D-Bus invocation, firmware update, root or watch write.
