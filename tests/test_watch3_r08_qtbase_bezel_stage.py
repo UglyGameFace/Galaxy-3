@@ -89,7 +89,9 @@ class QtBaseBezelPrebuildTests(unittest.TestCase):
             (" file://0001-noblesse-r08-tizen-detent-wheel-only.patch", ""),
             ("linuxfb libinput", "linuxfb"),
             ("linuxfb libinput", "libinput"),
-            ("FILESPATH=\"", "FILESPATH=\"/wrong/location:"),
+            ('FILESPATH="' + str(self.root / "meta-noblesse/recipes-qt/qt6/qtbase") + ":" +
+             str(self.root / "meta-noblesse/recipes-qt/qt6/qtbase/noblesse-r08") + '"',
+             'FILESPATH="/wrong/location"'),
             ('PN="qtbase"', 'PN=qtbase'),
         )
         for a, b in mutations:
