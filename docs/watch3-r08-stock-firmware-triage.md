@@ -20,24 +20,43 @@ SDB `sync:RECV` path
 **currently active system CSC PAP**, not the original sales CSC,
 a verified factory bootloader region or any signed recovery archive.
 
-Public CSC references assign PAP to Europe/EU; public firmware
-catalogs list PAP on *other* X-suffixed Galaxy Watch models
-(`SM-R860X` and `SM-R890X`). These are useful model-comparison
-leads, **not evidence that their images would boot on SM-R840X**.
+Public CSC references assign PAP to Europe, but **several
+Samsung demo variants also show PAP**: public firmware catalogs list
+it on X-suffixed Galaxy Watch4 models `SM-R860X`, `SM-R870X`
+and `SM-R880X`, with `XXX` build prefixes. A historical
+Galaxy `SM-A920X` demo-unit community report also says its stock
+CSC was PAP. These are clues that PAP may serve demonstration-unit
+distribution, **not proof of a particular retail country, a
+universally reserved LDU CSC, or that their images would boot on
+SM-R840X**.
 Sources:
 - https://technastic.com/samsung-csc-codes-list/
 - https://samfrew.com/devices/galaxy-watch4/sm-r860x
-- https://samfrew.com/devices/galaxy-watch4-classic/sm-r890x
+- https://samfrew.com/devices/galaxy-watch4/sm-r870x
+- https://samfrew.com/devices/galaxy-watch4-classic/sm-r880x
+- https://4pda.to/forum/index.php?showtopic=921470&st=2300
 
 The earlier **XAR/KOO** R840X public FOTA checks were made
 *before* the owner's active CSC was known and returned 403.
 The [public manufacturer metadata audit](
-watch3-r840x-public-fota-version-recon.md) now offers a
-**single exact `SM-R840X/PAP`** HTTPS version-XML request that
-runs from GitHub Actions, without watch contact, an owner phone,
-private identifiers, FOTA update operations, file downloads
-or Odin commands. Even a returned version string cannot prove
-an authentic `R840XXXU1AUA2` full image or recoverability.
+watch3-r840x-public-fota-version-recon.md) has now **actually passed**
+for the exact `SM-R840X/PAP` query on Samsung's
+`fota-cloud-dn.ospserver.net` endpoint. Completed
+[GitHub Actions run #40567883134](
+https://github.com/UglyGameFace/Galaxy-3/actions/runs/40567883134)
+returned the exact **`R840XXXU1AUA2`** build token, and **no retail
+R840 builds**, from one public `version.xml` response. The physical
+watch's reported model, active CSC and installed firmware thus match
+Samsung's **public version metadata**.
+
+This does **not** mean Samsung FUS exposes a full flashable Watch3
+archive. `firmware_downloaded=false`,
+`exact_stock_recovery_archive_obtained=false`,
+`signed_stock_recovery_verified=false` and
+`flash_allowed=false`. Nothing contacted the owner's watch during
+the HTTPS check; no PIT/bootloader command or update operation was
+attempted. The actual `version.xml` response is a version-history
+catalog and cannot restore a device with corrupted boot partitions.
 
 **Physical CSC investigation complete. Stock recovery NO-GO unchanged.**
 Do not use `PAP` alone to select retail firmware or try NetOdin.
