@@ -97,6 +97,86 @@ class FixedHandoffPullTests(unittest.TestCase):
             handoff.receive_one(successful(b"data"), Path("/unused"),
                                 b"/private/serial")
 
+    def test_execstart_referenced_helper_paths_are_fixed_only(self):
+        self.assertEqual(handoff.REFERENCED_HELPER_FILES, {
+            "recovery-update.sh": (b"/usr/bin/recovery-update.sh", None),
+            "rw-update-systemd.sh": (b"/usr/bin/rw-update-systemd.sh", None),
+        })
+        for path, _ in handoff.REFERENCED_HELPER_FILES.values():
+            self.assertTrue(path.startswith(b"/usr/bin/"))
+            self.assertNotIn(b"..", path)
+            self.assertNotIn(b"/dev/", path)
+        with self.assertRaisesRegex(handoff.HandoffError, "REMOTE_PATH_NOT_ALLOWLISTED"):
+            handoff.receive_one(successful(b"SECRET"), Path("/unused"),
+                                b"/usr/bin/non-evidenced-helper.sh")
+
+    def test_only_two_evidenced_helpers_no_shell_execution_or_overwrite(self):
+        script_samples = {
+            "recovery-update.sh": b"#!/bin/sh\n# private token do not leak\necho never-execute\n",
+            "rw-update-systemd.sh": b"#!/bin/sh\n# content must remain local\nexit 0\n",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "helper-files"
+            sockets = [successful(script_samples[name])
+                       for name in handoff.REFERENCED_HELPER_FILES]
+            with patch("watch3_r08_fota_handoff_pull.socket.create_connection",
+                       side_effect=sockets), patch.object(
+                    sys, "argv", ["pull", "--watch-ip", "10.0.0.65",
+                                  "--observed-helpers-only",
+                                  "--output-dir", str(output)]):
+                self.assertEqual(handoff.main(), 0)
+            result_path = output / handoff.REPORT_NAME
+            report = json.loads(result_path.read_text())
+            self.assertEqual(report["schema"],
+                             "uglyos-r840x-referenced-fota-helper-recv-v1")
+            self.assertEqual(report["status"], "READ_ONLY_REFERENCED_FOTA_HELPER_RECV")
+            self.assertEqual(len(report["files"]), 2)
+            self.assertEqual(report["files"]["recovery-update.sh"]["status"], "FETCHED")
+            self.assertIsNone(
+                report["files"]["recovery-update.sh"]["size_matches_previous_list"])
+            self.assertIsNone(
+                report["files"]["recovery-update.sh"]["observed_list_bytes"])
+            self.assertEqual(report["files"]["recovery-update.sh"]["parse_status"],
+                             "SHELL_TEXT_RETAINED_NOT_EXECUTED")
+            self.assertFalse(report["watch_write_performed"])
+            self.assertNotIn("never-execute", json.dumps(report))
+            self.assertNotIn("private token", json.dumps(report))
+            self.assertEqual(output.stat().st_mode & 0o077, 0)
+            self.assertEqual(result_path.stat().st_mode & 0o077, 0)
+            for (name, (remote, _)), sock in zip(
+                    handoff.REFERENCED_HELPER_FILES.items(), sockets):
+                self.assertEqual((output / name).read_bytes(), script_samples[name])
+                self.assertEqual((output / name).stat().st_mode & 0o077, 0)
+                frames = calls(bytes(sock.sent))
+                self.assertEqual(frames[2][3], SYNC_HDR.pack(b"RECV", len(remote)) + remote)
+                self.assertEqual(sum(x[0] == b"WRTE" for x in frames), 1)
+                for forbidden in (b"SEND", b"shell:", b"exec:", b"dbus:",
+                                  b"FOTA", b"/dev/"):
+                    self.assertNotIn(forbidden, bytes(sock.sent))
+            previous = result_path.read_bytes()
+            with patch.object(sys, "argv", ["pull", "--watch-ip", "10.0.0.65",
+                                            "--observed-helpers-only",
+                                            "--output-dir", str(output)]):
+                self.assertEqual(handoff.main(), 1)
+            self.assertEqual(previous, result_path.read_bytes())
+
+    def test_helper_read_fail_is_independent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            p = denied()
+            q = successful(b"#!/bin/sh\nexit 0\n")
+            with patch("watch3_r08_fota_handoff_pull.socket.create_connection",
+                       side_effect=[p, q]):
+                result = handoff.collect(
+                    "10.0.0.65", Path("/unused"), folder,
+                    observed_helpers_only=True)
+            self.assertEqual(result["files"]["recovery-update.sh"]["status"],
+                             "REMOTE_MISSING_DENIED_OR_UNREADABLE")
+            self.assertEqual(result["files"]["rw-update-systemd.sh"]["status"],
+                             "FETCHED")
+            self.assertFalse((folder / "recovery-update.sh").exists())
+            self.assertTrue((folder / "rw-update-systemd.sh").exists())
+
     def test_exact_read_only_recv_wire_and_fragmented_stream(self):
         raw = examples()["fota-consumer.service"]
         sock = successful(raw)
