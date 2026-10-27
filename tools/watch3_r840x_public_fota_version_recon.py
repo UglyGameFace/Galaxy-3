@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""One-shot, bounded PUBLIC Samsung FOTA version-XML reconnaissance.
+
+Never contacts the watch, uses an IMEI/serial, downloads firmware or sends
+Odin/SDB commands. Only explicit --probe-public-metadata opens at most
+three fixed public HTTPS URLs, with no redirects, cookies or credentials.
+Read-only network to Samsung endpoint, NOT a watch recovery method.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import re
+import socket
+import ssl
+import sys
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPSHandler, HTTPRedirectHandler, Request, build_opener
+from xml.etree import ElementTree as ET
+
+FOTA_HOST = "fota-cloud-dn.ospserver.net"
+FOTA_BASE = "https://" + FOTA_HOST + "/firmware/"
+MAX_XML_BYTES = 128 * 1024
+PROBE_TIMEOUT = 7
+MODEL_R840X = "SM-R840X"
+MODEL_RETAIL = "SM-R840"
+# XAR and KOO come from documented *retail* region lists. The actual
+# SM-R840X region has NOT been verified and may not use either!
+PROBES = (
+    ("SM-R840X", "XAR", "XAR_IS_RETAIL_US_HYPOTHESIS_NOT_CONFIRMED_FOR_LDU"),
+    ("SM-R840X", "KOO", "KOO_IS_RETAIL_KOREA_HYPOTHESIS_NOT_CONFIRMED_FOR_LDU"),
+    ("SM-R840", "XAR", "RETAIL_CONTROL_DIFFERENT_MODEL_NOT_FLASHABLE_ON_R840X"),
+)
+BUILD_X = re.compile(r"(?<![A-Z0-9])R840XXXU[0-9][A-Z0-9]{4}(?![A-Z0-9])")
+BUILD_RETAIL = re.compile(r"(?<![A-Z0-9])R840XXU[0-9][A-Z0-9]{4}(?![A-Z0-9])")
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+def parse_version_xml(data: bytes, model: str) -> dict:
+    """Parse only firmware version tokens. Never include raw XML in reports."""
+    if len(data) > MAX_XML_BYTES:
+        return {"state": "PUBLIC_METADATA_OVERSIZED"}
+    if not data:
+        return {"state": "EMPTY_RESPONSE"}
+    # ElementTree doesn't resolve external entities; additionally reject
+    # doctypes and entities before parsing untrusted server text.
+    if b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
+        return {"state": "XML_DTD_OR_ENTITY_BLOCKED"}
+    try:
+        root = ET.fromstring(data)
+    except (ET.ParseError, ValueError):
+        return {"state": "NOT_VALID_VERSION_XML"}
+    if root.tag != "versioninfo":
+        return {"state": "NOT_VERSIONINFO_XML"}
+    # All parsed text stays local; only bounded, allowlisted build identifiers
+    # are included in the JSON report.
+    text = " ".join((el.text or "")[:4096] for el in root.iter())[:30000].upper()
+    x = sorted(set(BUILD_X.findall(text)))[:16]
+    retail = sorted(set(BUILD_RETAIL.findall(text)))[:16]
+    if model == MODEL_R840X and x:
+        state = "R840X_BUILD_TOKEN_FOUND_IN_PUBLIC_FOTA_XML"
+    elif model == MODEL_R840X and retail:
+        state = "RETAIL_BUILD_IN_X_LOOKUP_NOT_MODEL_ACCEPTANCE"
+    elif model == MODEL_RETAIL and retail:
+        state = "RETAIL_CONTROL_HAS_PUBLIC_FOTA_BUILD"
+    else:
+        state = "VALID_XML_NO_MATCHING_WATCH3_BUILD_TOKEN"
+    return {
+        "state": state,
+        "r840x_build_tokens": x,
+        "retail_build_tokens": retail,
+    }
+
+def public_probe(opener=None) -> list[dict]:
+    """At most 3 GETs to one fixed public host; no arbitrary URL or device IDs."""
+    if opener is None:
+        opener = build_opener(NoRedirect(),
+                              HTTPSHandler(context=ssl.create_default_context()))
+    out = []
+    for model, region, assumption in PROBES:
+        url = FOTA_BASE + region + "/" + model + "/version.xml"
+        result = {
+            "model": model,
+            "region": region,
+            "region_assumption": assumption,
+            "state": "NETWORK_NOT_ATTEMPTED",
+            "downloaded_firmware": False,
+            "device_contacted": False,
+        }
+        try:
+            req = Request(url, headers={"User-Agent": "UgLyOS-R840X-Public-Metadata-Audit/1.0",
+                                        "Accept": "application/xml, text/xml"},
+                          method="GET")
+            with opener.open(req, timeout=PROBE_TIMEOUT) as response:
+                body = response.read(MAX_XML_BYTES + 1)
+                result.update(parse_version_xml(body, model))
+        except HTTPError as error:
+            # 3xx when redirects disallowed, 403/404 when unavailable; never
+            # trust a failed endpoint as proof of firmware nonexistence.
+            result["state"] = ("HTTP_%d" % error.code) if 300 <= error.code <= 599 else "HTTP_ERROR"
+        except (URLError, OSError, TimeoutError, ValueError, socket.timeout):
+            result["state"] = "PUBLIC_ENDPOINT_UNREACHABLE_OR_BLOCKED"
+        out.append(result)
+    return out
+
+def report_for(probes: list[dict]) -> dict:
+    return {
+        "schema": "uglyos-r840x-public-fota-version-recon-v1",
+        "mode": "PUBLIC_SAMSUNG_VERSION_XML_ONLY",
+        "device": MODEL_R840X,
+        "installed_build": "R840XXXU1AUA2",
+        "probed_regions_are_unverified_for_owner_model": True,
+        "response_meaning": ("Public FOTA version metadata is not a full stock "
+                             "firmware download, model-signed rescue image, "
+                             "PIT, anti-rollback or authorized custom boot."),
+        "observations": probes,
+        "model_firmware_compatibility_proven": False,
+        "exact_stock_recovery_archive_obtained": False,
+        "signed_stock_recovery_verified": False,
+        "restoration_of_failed_boot_verified": False,
+        "odin_session_started": False,
+        "pit_requested": False,
+        "device_contacted": False,
+        "firmware_downloaded": False,
+        "firmware_written": False,
+        "custom_boot_verified": False,
+        "flash_allowed": False,
+        "result": "NO_GO",
+    }
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--probe-public-metadata", action="store_true",
+                    help="Explicitly fetch 3 fixed PUBLIC Samsung FOTA version.xml URLs")
+    ap.add_argument("--offline-sample", type=Path,
+                    help="Parse only an existing local XML fixture; no network access")
+    ap.add_argument("--output", type=Path,
+                    help="Optional JSON report. Never contains raw XML, IMEI, serial or IP")
+    args = ap.parse_args(argv)
+    if args.probe_public_metadata == bool(args.offline_sample):
+        ap.error("Choose exactly one of --probe-public-metadata or --offline-sample")
+    if args.offline_sample:
+        try:
+            if args.offline_sample.is_symlink() or args.offline_sample.stat().st_size > MAX_XML_BYTES:
+                raise OSError()
+            data = args.offline_sample.read_bytes()
+        except OSError:
+            print("FAIL: LOCAL_XML_UNREADABLE_OR_OVERSIZED", file=sys.stderr)
+            return 2
+        probes = [{"model": MODEL_R840X, "region": "LOCAL_FIXTURE",
+                   "state": "OFFLINE_SAMPLE_ONLY", "device_contacted": False,
+                   **parse_version_xml(data, MODEL_R840X)}]
+    else:
+        probes = public_probe()
+    report = json.dumps(report_for(probes), indent=2) + "\n"
+    if args.output:
+        try:
+            with args.output.open("x", encoding="utf-8") as file:
+                file.write(report)
+        except OSError:
+            print("FAIL: CANNOT_CREATE_EXCLUSIVE_REPORT", file=sys.stderr)
+            return 2
+        print("Wrote metadata-only report: " + str(args.output))
+    else:
+        print(report, end="")
+    print("NO_GO: no Watch3 connection, firmware download, Odin session or flash.")
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())
