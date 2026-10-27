@@ -34,3 +34,23 @@ On failure, NO_ARTIFACT means no readable binary was collected. A missing/unread
 - No exploit payloads, update-file substitutions, crafted FOTA requests, or firmware writes are in scope. The owner's only working watch has no proven rescue image or custom-boot support.
 
 After an authentic binary is retrieved, analyze its headers and service parsing logic OFFLINE, compare with an independently authenticated later version if available, and independently establish whether any execution primitive crosses root/kernel and bootloader signature boundaries. A retrieved file is research evidence, not a bootloader unlock.
+
+## Android/Termux local save compatibility
+
+On the owner's actual Termux Python runtime, `os.link` was unavailable, causing
+`AttributeError` **after** the bounded SDB transfer and ELF validation returned
+from `pull_fota()` but before the local binary was published. This is a
+phone-side artifact-save portability bug, NOT evidence of an SDB permission
+denial or an executed exploit.
+
+The implementation now uses standard `os.open(O_CREAT | O_EXCL, 0o600)`
+to reserve a new local destination exclusively, copies from the already
+validated temporary file, syncs it, checks its byte count, and deletes any
+partial destination on failure. This does **not** overwrite an existing
+file and never writes to the watch. Synthetic CI covers Android's missing
+`os.link` behavior, an existing destination, copy failures and size mismatch.
+
+After merging this fix, rerun the original one-command pull from the
+current Wi-Fi watch IP. Check the JSON evidence only after a success message.
+The filename ending in `.bin` refers to a **local ELF research artifact**;
+do not execute, upload or flash it.
