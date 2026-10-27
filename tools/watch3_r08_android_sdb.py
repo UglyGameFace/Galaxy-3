@@ -440,8 +440,8 @@ def main():
                         help="Read only Tizen /proc/meminfo and /proc/iomem; "
                              "save privacy-filtered RAM ranges; no bootloader commands")
     parser.add_argument("--root-path-only", action="store_true",
-                        help="Read fixed Samsung archive-launcher capabilities and runtime;
-                             no exploits, installs, writes or root elevation")
+                        help="Read fixed Samsung archive-launcher capabilities and runtime; "
+                             "no exploits, installs, writes or root elevation")
     parser.add_argument("--report", type=Path,
                         help="Optional local privacy-filtered JSON destination")
     parser.add_argument("--key-path", type=Path,
