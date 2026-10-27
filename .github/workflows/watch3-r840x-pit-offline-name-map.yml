@@ -1,0 +1,44 @@
+name: Watch3 R840X local PIT name map (NO WATCH)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/audit_watch3_r840x_pit_offline.py'
+      - 'tests/test_watch3_r840x_pit_offline.py'
+      - 'docs/watch3-r840x-pit-offline-name-map.md'
+      - '.github/workflows/watch3-r840x-pit-offline-name-map.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-only-pit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove only fake local bytes parsed and flash always NO_GO
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_watch3_r840x_pit_offline.py' -v
+          python3 -m py_compile tools/audit_watch3_r840x_pit_offline.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tools/audit_watch3_r840x_pit_offline.py').read_text()
+          assert 'HEIMDALL_PIN' in p and 'PIT_ENTRY' not in p or 'HEIMDALL_PIN' in p
+          assert 'ENTRY_BYTES = 132' in p
+          assert 'HEADER_BYTES = 28' in p
+          assert 'NO_STOCK_RECOVERY_OR_FLASH_AUTHORIZATION' in p
+          assert '"status": "NO_GO"' in p
+          assert 'socket.socket' not in p
+          assert 'subprocess' not in p
+          print('PASS: offline local PIT name-only risk contract')
+          PY
+          git diff --check
+          echo 'NO_GO: synthetic local filenames cannot authenticate R840X or permit flash.'
