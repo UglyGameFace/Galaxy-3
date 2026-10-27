@@ -31,6 +31,7 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(report["wlan_ipv4"], [{
             "interface": "wlan0", "ipv4": "192.168.1.20",
             "subnet": "192.168.1.0/24", "rfc1918_address": True,
+            "source": "DIRECT_WLAN_IOCTL_NO_NETWORK_PACKETS",
         }])
         self.assertFalse(report["wifi_ssid_verified"])
         self.assertFalse(report["watch_download_ap_verified"])
@@ -53,12 +54,43 @@ class PreflightTests(unittest.TestCase):
                 with self.subTest(ip=rejected), self.assertRaises(ValueError):
                     pre.subnet_for_bind_ip(rejected)
 
-    def test_android_interface_inaccessible_is_explicitly_inconclusive(self):
-        with patch.object(pre.socket, "if_nameindex", side_effect=OSError("Android denied")):
+    def test_android_netlink_denied_fixed_wlan0_ioctl_still_reads_real_local_mask(self):
+        # Identical to Android's blocked if_nameindex/netlink, but raw
+        # SIOCGIFADDR/SIOCGIFNETMASK on a literal WLAN name still works.
+        with patch.object(pre.socket, "if_nameindex",
+                          side_effect=OSError("Cannot bind netlink socket")), patch.object(
+            pre.socket, "socket") as sock, patch.object(pre, "read_ipv4_ioctl") as ioctl:
+            def fixed_wlan0(_sock, name, op):
+                if name != "wlan0":
+                    raise OSError("no such adapter")
+                return "10.0.0.98" if op == pre.SIOCGIFADDR else "255.255.255.0"
+            ioctl.side_effect = fixed_wlan0
+            report = pre.preflight_report()
+        self.assertEqual(report["status"], "WLAN_IPV4_OBSERVED")
+        self.assertEqual(report["wlan_ipv4"], [{
+            "interface": "wlan0", "ipv4": "10.0.0.98",
+            "subnet": "10.0.0.0/24", "rfc1918_address": True,
+            "source": "DIRECT_WLAN_IOCTL_NO_NETWORK_PACKETS",
+        }])
+        sock.assert_called_once_with(socket.AF_INET, socket.SOCK_DGRAM)
+        self.assertEqual(ioctl.call_count, 3)
+        for name in ("listen", "accept", "connect", "send", "sendto", "sendall"):
+            getattr(sock.return_value, name).assert_not_called()
+
+    def test_both_interface_enumeration_and_direct_ioctl_denied_remain_inconclusive(self):
+        with patch.object(pre.socket, "if_nameindex",
+                          side_effect=OSError("Android denied")), patch.object(
+            pre.socket, "socket") as sock, patch.object(
+            pre, "read_ipv4_ioctl",
+            side_effect=OSError("kernel denied")) as ioctl:
             report = pre.preflight_report()
         self.assertEqual(report["status"], "WLAN_IPV4_UNAVAILABLE_OR_ANDROID_RESTRICTED")
         self.assertEqual(report["wlan_ipv4"], [])
         self.assertFalse(report["watch_download_ap_verified"])
+        self.assertFalse(report["network_packets_sent"])
+        self.assertFalse(report["watch_contacted"])
+        self.assertEqual(ioctl.call_count, 2)
+        sock.assert_called_once_with(socket.AF_INET, socket.SOCK_DGRAM)
 
     def test_preflight_local_private_report_cannot_overwrite(self):
         with tempfile.TemporaryDirectory() as td:

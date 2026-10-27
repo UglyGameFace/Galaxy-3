@@ -97,6 +97,48 @@ Termux on Android 13+ has documented network interface restrictions
 result does not distinguish an unavailable WLAN adapter, interface
 enumeration restriction, or an IOCTL failure.
 
+#### Android netlink-permission fix: direct fixed-interface IOCTL
+
+The owner then ran `ip -4 route show` on their Galaxy S25 Ultra and
+observed exactly `Cannot bind netlink socket: Permission denied`.
+Termux's own [Android 13+ bug report](https://github.com/termux/termux-app/issues/2993)
+documents this class of sandbox restriction. That error is **from the
+phone** and is unrelated to Watch3 firmware access.
+
+The original Python probe first called `socket.if_nameindex()`, which
+can use the same denied netlink route and return no interfaces *before*
+attempting the already implemented local `SIOCGIFADDR` and
+`SIOCGIFNETMASK` calls. Other users have observed `ifconfig` show
+`wlan0` addresses and mask even when `ip` netlink fails. PR #77
+therefore always attempts read-only IOCTLs on exact **literal**
+`wlan0` and `wlan1`, with bounded, deduplicated discovered names
+when enumeration succeeds. It does **not** assume any IP, subnet,
+interface visibility or Android permission. Unavailable IOCTLs remain
+`WLAN_IPV4_UNAVAILABLE_OR_ANDROID_RESTRICTED`. No root, shell,
+network packets, socket listener, Wi-Fi changes or watch operations.
+
+The actual Samsung Settings screenshot already confirmed the
+**phone's** IPv4 address `10.0.0.98` on its currently connected
+2.4 GHz Wi-Fi. That screenshot did **not** show a netmask/prefix.
+A successful direct IOCTL report must derive the **actual prefix**
+from the returned mask and is *not* allowed to fill in guessed `/24`.
+
+**After merging, run the automatic preflight again without reusing
+its existing output path** (default prints JSON without writing):
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r840x_ap_network_preflight.py
+```
+
+If it returns `WLAN_IPV4_OBSERVED`, check that
+`wlan_ipv4[].ipv4` equals `10.0.0.98` **only while still connected
+to the same ordinary Wi-Fi**. A mismatch requires investigating
+network switch before using it. When the phone later connects to
+a separate Watch3 Download AP, it must derive/confirm an entirely
+**new** current local WLAN address and subnet before any optional
+live handshake. No new live watch experiment has been authorized.
+
 #### Phone-only manual fallback, no IP guesses
 
 While still on ordinary Wi-Fi with the watch in **normal Tizen**, open

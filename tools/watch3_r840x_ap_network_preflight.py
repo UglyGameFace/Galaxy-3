@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Observe Android/Termux WLAN IPv4 assignments with NO watch contact.
 
-Uses Linux SIOCGIFADDR/SIOCGIFNETMASK on locally enumerated WLAN devices.
+Uses Linux SIOCGIFADDR/SIOCGIFNETMASK on local WLAN devices, including\na fixed wlan0/wlan1 fallback when Android blocks interface enumeration.
 Never reads SSIDs, scans APs, connects to a peer, starts a server, invokes
 shell commands or changes networking. Output is local-only and optional.
 """
@@ -42,12 +42,24 @@ def read_ipv4_ioctl(sock, ifname: str, operation: int) -> str:
 
 
 def observe_wlan_ipv4() -> list[dict]:
-    """Local interface metadata only. Unavailable Android IOCTL is inconclusive."""
+    """Local-only WLAN IOCTLs, even if Android blocks netlink enumeration.
+
+    socket.if_nameindex() may itself require NETLINK_ROUTE, denied to
+    third-party apps on Android 13+. Use the fixed conventional WLAN
+    interface labels as a fallback. SIOCGIFADDR and SIOCGIFNETMASK only
+    read local kernel interface metadata; no network packets are sent.
+    An absent interface or denied IOCTL stays INCONCLUSIVE, not a
+    fabricated /24 or guessed subnet.
+    """
     try:
-        ifaces = sorted(name for _, name in socket.if_nameindex()
-                        if WLAN_NAME.fullmatch(name))
+        discovered = [name for _, name in socket.if_nameindex()
+                      if WLAN_NAME.fullmatch(name)]
     except (OSError, ValueError):
-        return []
+        discovered = []
+
+    # Literal, bounded names: no user-selected paths, netlink dump,
+    # network scanning, command execution, or guessed IP/netmask.
+    ifaces = list(dict.fromkeys(discovered[:6] + ["wlan0", "wlan1"]))
     result = []
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -60,11 +72,15 @@ def observe_wlan_ipv4() -> list[dict]:
                         (addr_text, mask_text), strict=False)
                 except (OSError, ValueError, ipaddress.AddressValueError):
                     continue
+                if not is_rfc1918(address) or address in (
+                        network.network_address, network.broadcast_address):
+                    continue
                 result.append({
                     "interface": name,
                     "ipv4": str(address),
                     "subnet": str(network),
-                    "rfc1918_address": is_rfc1918(address),
+                    "rfc1918_address": True,
+                    "source": "DIRECT_WLAN_IOCTL_NO_NETWORK_PACKETS",
                 })
     except OSError:
         return []
