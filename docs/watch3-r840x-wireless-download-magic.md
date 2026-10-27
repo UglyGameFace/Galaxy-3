@@ -108,3 +108,19 @@ would inspect PIT *read-only* on a sacrificial R840X and verify
 bootloader signature/rollback checks against lawful OEM binaries.
 A live Odin write, partition exploit, custom image boot or
 restoration trial on the only working watch is not authorized.
+
+## Separate read-only code-first root-path prerequisite check
+
+The 2026 [Bishop Fox SDB injection advisory](https://bishopfox.com/blog/samsung-tizen-os-version-through-9-0) and [open-source TV archive-launcher root research](https://github.com/chris-ritsen/samsung-tv-root/blob/master/src/samsung_tv_root/archive_root.py) identify a **specific** possible elevation chain. It was demonstrated on Tizen TVs, **not the SM-R840X Watch3**. The Watch3 already provides an unprivileged SDB shell, so SDB command execution alone would not grant root.
+
+The existing authenticated, read-only SDB client can check its *static* Watch3 prerequisites without running an exploit, installing an app, uploading an archive or modifying the watch:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r08_android_sdb.py --watch-ip WATCH_CURRENT_IP --root-path-only
+cat ~/watch3-r08-root-path-redacted.json
+```
+
+The four literal requests check file capabilities of `/usr/bin/dotnet` and `/usr/sbin/sdbd-tarlauncher`, installed .NET runtime versions, and whether the existing `/usr/bin/tar --help` advertises `--to-command`. The JSON output contains only categorical results; no raw process or network information. **STATIC_PREREQUISITES_OBSERVED** indicates this narrow route merits further engineering; it does not prove injected SDB commands are accepted, privilege elevation, unsigned code acceptance or recovery. **STATIC_PATH_NOT_SUPPORTED** requires an actual negative prerequisite observation. Failed/blocked reads yield **INCONCLUSIVE**, not a fabricated incompatibility. Tests use an in-memory fake SDB peer only. No device experimentation has happened.
+
+Do not use the TV-specific exploit binary, package-name payloads or kernel address assumptions on the only working watch.
