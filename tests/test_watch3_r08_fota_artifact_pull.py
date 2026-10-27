@@ -169,7 +169,7 @@ class FotaArtifactTests(unittest.TestCase):
         binary = elf32()
         sock = sdb_peer([SYNC_HDR.pack(b"DATA", len(binary)) + binary,
                          SYNC_HDR.pack(b"DATA", 0)])
-        with self.assertRaisesRegex(Exception, "closed"):
+        with self.assertRaisesRegex(ArtifactPullError, "SDB_SYNC_TRANSFER_PROTOCOL_OR_AUTH_FAILURE"):
             pull_fota(sock, Path("/unused"), io.BytesIO())
 
     def test_zero_byte_done_and_invalid_elf_are_rejected(self):
@@ -185,6 +185,50 @@ class FotaArtifactTests(unittest.TestCase):
         sock = sdb_peer([SYNC_HDR.pack(b"DATA", MAX_BINARY_BYTES + 1)])
         with self.assertRaisesRegex(ArtifactPullError, "UNBOUNDED_SYNC_MESSAGE"):
             pull_fota(sock, Path("/unused"), io.BytesIO())
+
+    def test_transport_failure_phases_are_distinct_and_redacted(self):
+        with tempfile.TemporaryDirectory() as td:
+            output = Path(td) / "updateclient.bin"
+            with patch("watch3_r08_fota_artifact_pull.socket.create_connection",
+                       side_effect=ConnectionRefusedError("watch-private-identity")):
+                with self.assertRaises(ArtifactPullError) as caught:
+                    capture("10.0.0.65", Path("/unused"), output,
+                            component="updateclient")
+            self.assertEqual(str(caught.exception), "SDB_TCP_CONNECT_IO_FAILURE")
+            self.assertFalse(output.exists())
+            self.assertEqual(list(Path(td).iterdir()), [])
+
+        # CNXN never returns, so handshake fails before a sync OPEN/RECV.
+        with self.assertRaises(ArtifactPullError) as caught:
+            pull_fota(FakeSocket(b""), Path("/unused"), io.BytesIO(),
+                      component="updateclient")
+        self.assertEqual(str(caught.exception),
+                         "SDB_HANDSHAKE_PROTOCOL_OR_AUTH_FAILURE")
+
+        # CNXN succeeds, but sync OPEN is never acknowledged.
+        cnxn = frame(b"CNXN", VERSION, 256 * 1024, b"device::\\x00")
+        with self.assertRaises(ArtifactPullError) as caught:
+            pull_fota(FakeSocket(cnxn), Path("/unused"), io.BytesIO(),
+                      component="updateclient")
+        self.assertEqual(str(caught.exception),
+                         "SDB_SYNC_OPEN_PROTOCOL_OR_AUTH_FAILURE")
+
+        # Sync OPEN succeeds, but the RECV transfer never returns a reply.
+        opening = cnxn + frame(b"OKAY", 42, LOCAL_STREAM)
+        with self.assertRaises(ArtifactPullError) as caught:
+            pull_fota(FakeSocket(opening), Path("/unused"), io.BytesIO(),
+                      component="updateclient")
+        self.assertEqual(str(caught.exception),
+                         "SDB_SYNC_TRANSFER_PROTOCOL_OR_AUTH_FAILURE")
+
+        # Timeout is different from a malformed or truncated protocol stream.
+        with patch("watch3_r08_fota_artifact_pull.receive",
+                   side_effect=TimeoutError("watch-private-identity")):
+            with self.assertRaises(ArtifactPullError) as caught:
+                pull_fota(FakeSocket(cnxn), Path("/unused"), io.BytesIO(),
+                          component="updateclient")
+        self.assertEqual(str(caught.exception), "SDB_SYNC_OPEN_TIMEOUT")
+        self.assertNotIn("watch-private-identity", str(caught.exception))
 
     def test_wrong_sdb_stream_fails_closed(self):
         sock = FakeSocket(
