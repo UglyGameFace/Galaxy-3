@@ -378,6 +378,22 @@ def diagnose(ip, key_path, timeout=4, output=print):
         ) from None
 
 
+def _root_path_output_error(value):
+    """Summarize short shell error output without retaining raw device data."""
+    if not value.strip():
+        return "EMPTY_SHELL_OUTPUT"
+    # Only short responses can be treated as diagnostics. Multi-line utility
+    # help may legitimately contain the words "not found" or "permission denied".
+    lines = [line.strip().lower() for line in value.splitlines() if line.strip()]
+    if len(lines) > 3 or any(len(line) > 280 for line in lines):
+        return None
+    if any("permission denied" in line or "access denied" in line for line in lines):
+        return "WATCH_REPORTED_ACCESS_DENIED"
+    if any("not found" in line or "no such file" in line for line in lines):
+        return "WATCH_REPORTED_COMMAND_OR_PATH_MISSING"
+    return None
+
+
 def collect(ip, key_path, timeout=8, probes=PROBES):
     ip = private_watch_ip(ip)
     observations, problems = {}, {}
@@ -403,7 +419,15 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
                         alt = Connection(second, key_path)
                         alt.handshake()
                         value = alt.shell(name, style="tizen-command")
-            if (not value.strip() or any(
+            if probes is ROOT_PATH_PROBES:
+                # Keep only fixed categorical evidence. Generic substring
+                # filtering masks why a real watch reports UNAVAILABLE.
+                reason = _root_path_output_error(value)
+                if reason is not None:
+                    problems[name] = reason
+                else:
+                    observations[name] = value
+            elif (not value.strip() or any(
                 warning in value.lower() for warning in (
                     "permission denied", "no such file", "not found", "access denied"
                 ))):
@@ -415,9 +439,17 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
                 "authorization", "authentication", "private key", "crypto", "rsa"
             )):
                 raise
-            problems[name] = "Read-only property unavailable over SDB"
+            if probes is ROOT_PATH_PROBES:
+                if isinstance(exc, ShellCloseError):
+                    problems[name] = ("SDB_SHELL_TIMEOUT" if "timed out" in str(exc)
+                                      else "SDB_SHELL_CLOSED_OR_REFUSED")
+                else:
+                    problems[name] = "SDB_PROTOCOL_OR_READ_FAILURE"
+            else:
+                problems[name] = "Read-only property unavailable over SDB"
         except (OSError, TimeoutError):
-            problems[name] = "Watch did not answer this SDB read"
+            problems[name] = ("SDB_TRANSPORT_UNREACHABLE" if probes is ROOT_PATH_PROBES
+                              else "Watch did not answer this SDB read")
     return observations, problems
 
 
