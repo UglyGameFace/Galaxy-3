@@ -49,6 +49,20 @@ R840 builds**, from one public `version.xml` response. The physical
 watch's reported model, active CSC and installed firmware thus match
 Samsung's **public version metadata**.
 
+The subsequent actual [PAP version XML structure run #40574278976](
+https://github.com/UglyGameFace/Galaxy-3/actions/runs/40574278976)
+also succeeded with a **623-byte valid XML** containing
+**19 unique element paths**, exactly **one HTTP-looking value**, but
+**zero archive-extension URLs**. Paths like `versioninfo/url` and
+`ActiveDeviceInfo/ServiceURL` belong to the update metadata tree;
+they are not authenticated stock rescue images. The complete safe
+interpretation is recorded in
+[the PAP FOTA research report](watch3-r840x-public-fota-version-recon.md).
+This closes the narrow question of whether this one publicly exposed
+version document directly advertises a recognized firmware archive:
+**no recognized ZIP/TAR/IMG link was observed**. It does not prove
+that no authorized Samsung service binary exists elsewhere.
+
 This does **not** mean Samsung FUS exposes a full flashable Watch3
 archive. `firmware_downloaded=false`,
 `exact_stock_recovery_archive_obtained=false`,
