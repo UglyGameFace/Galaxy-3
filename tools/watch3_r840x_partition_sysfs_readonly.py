@@ -15,10 +15,12 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import sys
 
 from watch3_r08_android_sdb import (
-    PARTITION_SYSFS_PROBES, PARTITION_SYSFS_FIXED_PROBES, SdbError, collect,
+    PARTITION_SYSFS_PROBES, PARTITION_SYSFS_FIXED_PROBES,
+    Connection, PORT, SdbError, collect, private_watch_ip,
 )
 
 SCHEMA = "uglyos-r840x-sysfs-partition-names-v1"
@@ -221,6 +223,54 @@ def inspect_fixed_sample(ip: str, key_path: Path) -> dict:
     return result
 
 
+def inspect_sdb_connection_only(ip: str, key_path: Path) -> dict:
+    """One port-26101 connect and authenticated SDB hello; NO shell or sysfs.
+
+    This intentionally avoids repeating 3 sysfs probes when the user supplied
+    a stale watch IP or SDB is not reachable. No raw socket exception, IP,
+    tokens, serial numbers or untrusted SDB payload enter the result.
+    """
+    result = _base_report()
+    result["probe_mode"] = "SINGLE_SDB_TCP_HANDSHAKE_NO_SHELL_OR_SYSFS"
+    result["source_path_expression"] = []
+    result["transport_diagnosis_only"] = True
+    result["tcp_connected"] = False
+    result["sdb_handshake_completed"] = False
+    result["remote_device_identity_verified"] = False
+    result["state"] = "CONNECT_NOT_ATTEMPTED"
+    address = private_watch_ip(ip)
+    try:
+        with socket.create_connection((address, PORT), timeout=4) as sock:
+            result["tcp_connected"] = True
+            sock.settimeout(8)
+            try:
+                Connection(sock, key_path).handshake()
+                result["sdb_handshake_completed"] = True
+                result["state"] = "SDB_HANDSHAKE_COMPLETE_NO_SYSFS_READ"
+            except (TimeoutError, socket.timeout):
+                result["state"] = "SDB_HANDSHAKE_TIMED_OUT"
+            except SdbError as exc:
+                # Categorize locally without writing arbitrary SDB exception
+                # text, which might reveal private file locations or tokens.
+                detail = str(exc).lower()
+                if any(term in detail for term in (
+                    "authorization", "authentication", "private key",
+                    "rsa", "crypto", "approve prompt"
+                )):
+                    result["state"] = "SDB_AUTHORIZATION_OR_LOCAL_KEY_UNAVAILABLE"
+                else:
+                    result["state"] = "SDB_HANDSHAKE_PROTOCOL_FAILED"
+            except OSError:
+                result["state"] = "SDB_HANDSHAKE_IO_FAILURE"
+    except ConnectionRefusedError:
+        result["state"] = "TCP_PORT_REFUSED"
+    except (TimeoutError, socket.timeout):
+        result["state"] = "TCP_CONNECT_TIMED_OUT"
+    except OSError:
+        result["state"] = "TCP_NETWORK_UNREACHABLE_OR_BLOCKED"
+    return result
+
+
 def _private_write(path: Path, body: dict) -> None:
     if not path.parent.is_dir():
         raise PartitionLabelsError("REPORT_DIRECTORY_MISSING")
@@ -245,14 +295,19 @@ def main(argv: list[str] | None = None) -> int:
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     parser.add_argument("--fixed-paths", action="store_true",
                         help="Use only three explicit sysfs text files: p1/p20/p21; no wildcard")
+    parser.add_argument("--connection-only", action="store_true",
+                        help="Single TCP/SDB handshake check, NO shell, sysfs or partition reads")
     parser.add_argument("--report", type=Path, default=None,
                         help="Private exclusive JSON output; use new name per observation")
     args = parser.parse_args(argv)
     try:
         if args.fixed_paths and args.offline_sample:
             raise PartitionLabelsError("FIXED_PATHS_AND_OFFLINE_SAMPLE_ARE_SEPARATE_MODES")
+        if args.connection_only and (args.offline_sample or args.fixed_paths):
+            raise PartitionLabelsError("CONNECTION_ONLY_IS_SEPARATE_FROM_SYSFS_MODES")
         path = (args.report or (Path.home() /
-                ("watch3-r840x-sysfs-fixed-three.json" if args.fixed_paths
+                ("watch3-r840x-sdb-connection-redacted.json" if args.connection_only
+                 else "watch3-r840x-sysfs-fixed-three.json" if args.fixed_paths
                  else "watch3-r840x-sysfs-partition-names.json"))).expanduser()
         # Avoid even the optional networked read when local evidence exists.
         if path.exists() or path.is_symlink():
@@ -267,6 +322,8 @@ def main(argv: list[str] | None = None) -> int:
             result = _base_report()
             result["report"] = parse_sysfs(raw)
             result["state"] = "OFFLINE_SAMPLE_ONLY_NOT_A_REAL_WATCH_OBSERVATION"
+        elif args.connection_only:
+            result = inspect_sdb_connection_only(args.watch_ip, args.key_path.expanduser())
         else:
             result = (inspect_fixed_sample(args.watch_ip, args.key_path.expanduser())
                       if args.fixed_paths else
