@@ -82,12 +82,56 @@ python tools/watch3_r840x_ap_network_preflight.py \
 cat ~/watch3-r840x-phone-wlan-preflight.json
 ```
 
-The result lists the current **phone-local** WLAN IPv4 and subnet,
-if Android makes them readable. It **cannot** identify the connected
-Wi-Fi SSID or verify a Watch3 AP, and is *not* a bootloader
-handshake. It is safe to run against the ordinary connected phone
-without changing anything on the watch. The report contains local
-Wi-Fi addresses; keep it private.
+The result lists the current **phone-local** WLAN IPv4 and subnet
+only if Android makes them readable. It **cannot** identify a Wi-Fi
+SSID or verify a Watch3 AP. It is not a bootloader handshake; no
+watch request occurs. The report contains local addresses, so keep
+it private.
+
+**Actual R840X owner's Android result, 2026-10-27:** the above program
+returned `WLAN_IPV4_UNAVAILABLE_OR_ANDROID_RESTRICTED` with empty
+`wlan_ipv4`. That is a local discovery limitation and **does not
+indicate any failed Watch3/Odin handshake**. No watch request was made.
+Termux on Android 13+ has documented network interface restrictions
+(see https://github.com/termux/termux-app/issues/2993), although this
+result does not distinguish an unavailable WLAN adapter, interface
+enumeration restriction, or an IOCTL failure.
+
+#### Phone-only manual fallback, no IP guesses
+
+While still on ordinary Wi-Fi with the watch in **normal Tizen**, open
+your Galaxy phone's **Settings > Connections > Wi-Fi**, tap the gear
+beside your **currently connected** network and scroll to the IP
+details (some One UI versions need `View more`). Record exactly the
+**phone's IPv4 address** and either the **subnet mask** or its CIDR
+prefix length shown for the same network. Do not use the external/public
+IP, router gateway, the watch's Tizen SDB address, or a remembered
+`192.168.1.20`. Do **not** change Wi-Fi to Static.
+
+If both values are shown in Settings, copy them into:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r840x_ap_network_preflight.py \
+  --manual-wifi-ip EXACT_PHONE_WIFI_IPV4 \
+  --manual-wifi-netmask EXACT_VISIBLE_NETMASK_OR_PREFIX \
+  --manual-wifi-settings-confirmed \
+  --report ~/watch3-r840x-phone-manual-wlan.json
+cat ~/watch3-r840x-phone-manual-wlan.json
+```
+
+Replace **both** placeholders with **actual currently displayed**
+values. The subnet mask can be dotted IPv4 such as
+`255.255.255.0` or the exact visible prefix such as `24`; those
+are format examples **not suggested actual values**. If the mask or
+prefix is not displayed, stop; do not assume `/24`. If the phone
+rejects local `bind(ip, 0)`, or mask is malformed, or subnet is
+too broad, the program fails safely. Binding ephemeral port 0 does
+**not** send packets, listen, contact the watch or authenticate an
+interface. Even a successful result means only that a private
+user-entered IP is locally bindable and the user claims it came from
+Android Wi-Fi settings. It **cannot independently prove that Wi-Fi
+owns that IP, confirm SSID, or identify a Samsung bootloader**.
 
 ### Step B: separate opt-in manual Watch3 Wireless Download observation
 
@@ -101,15 +145,22 @@ is comfortable with the risk of a boot-mode transition:
    available, connect Android Wi-Fi to that watch AP **not to a home,
    public or ordinary phone hotspot**. Android may report no internet.
    Do not choose Recovery / factory reset or start any update.
-3. Inspect the Android Wi-Fi screen and confirm the SSID matches the
-   temporary **watch** AP. Termux cannot verify that identity. Run the
-   same **phone-only preflight again with a NEW report filename** and
-   obtain the freshly assigned phone IPv4. If Android cannot reveal
-   that address/subnet, STOP rather than guessing historical
-   `192.168.1.20` or falling back to `0.0.0.0`.
-4. Only after manual AP confirmation, run one four-byte test using the
-   **actual observed** local Wi-Fi address as `PHONE_WLAN_IPV4`
-   (replace that token with the literal preflight result):
+3. Inspect the Android Wi-Fi screen and confirm the SSID
+   matches the temporary **watch** AP. Termux cannot verify that
+   identity. Run the phone-only preflight again with a **NEW report
+   filename**. If IOCTL discovery is still blocked, manually enter
+   the **new actual connected-watch-AP Wi-Fi IPv4 AND the actual mask
+   shown in Android Settings**, with
+   `--manual-wifi-settings-confirmed`, as above. Do not reuse the
+   address from ordinary home Wi-Fi; Wi-Fi networks can change the
+   assigned address. If Android does not show both values or if
+   the ephemeral local bind fails, STOP. Never guess historical
+   `192.168.1.20` or fall back to `0.0.0.0`.
+4. Only after manual AP confirmation, run one four-byte test using
+   the freshly observed local Wi-Fi address as `PHONE_WLAN_IPV4`
+   (replace that token with the literal preflight result). If
+   **manual mode** was required, include the two additional
+   confirmed-mask flags shown below:
 
 ```sh
 python tools/watch3_r840x_netodin_magic_only.py \
@@ -120,6 +171,25 @@ python tools/watch3_r840x_netodin_magic_only.py \
   --report ~/watch3-r840x-odin-magic-redacted.json
 cat ~/watch3-r840x-odin-magic-redacted.json
 ```
+
+If Termux could not read WLAN metadata and you used the **manual
+Settings fallback**, the optional live test would instead require:
+
+```sh
+python tools/watch3_r840x_netodin_magic_only.py \
+  --live-magic-only \
+  --watch-ap-confirmed \
+  --bind-ip PHONE_IPV4_FROM_CURRENT_WATCH_AP_SETTINGS \
+  --manual-wifi-netmask NETMASK_FROM_SAME_WATCH_AP_SETTINGS \
+  --manual-wifi-settings-confirmed \
+  --listen-seconds 60 \
+  --report ~/watch3-r840x-odin-magic-redacted.json
+```
+
+That command is **NOT** the immediate next task; run the
+phone-only preflight on normal Wi-Fi first. The live command requires
+a voluntary physical Watch3 boot-mode change. IPs and netmasks are
+NOT automatically detected or inherited from an earlier network.
 
 The listener binds only `PHONE_WLAN_IPV4:13579` and replies with
 exactly `ODIN` to one inbound same-subnet peer, expecting at most
