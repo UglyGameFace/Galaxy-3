@@ -33,6 +33,10 @@ OBSERVED_FILES = {
     "appcessoryservices.xml": (
         b"/usr/apps/com.samsung.fota-consumer/res/xml/appcessoryservices.xml", 2036),
 }
+# The R840X physically supplied this exact ExecStart path through the
+# already downloaded 238-byte recovery-update.service unit. It has not
+# yet established whether SDB RECV permits access to the script itself.
+EVIDENCED_RECOVERY_SCRIPT_PATH = b"/usr/bin/recovery-update.sh"
 MAX_FILE_BYTES = 8 * 1024
 REPORT_NAME = "fota-handoff-report.json"
 SCHEMA = "uglyos-r840x-exact-fota-handoff-recv-v1"
@@ -54,7 +58,9 @@ class CappedBytes(io.BytesIO):
 
 def receive_one(sock, key_path: Path, remote_path: bytes) -> bytes:
     """Exactly one SDB OPEN sync: plus read-only RECV for a fixed-path caller."""
-    if remote_path not in {item[0] for item in OBSERVED_FILES.values()}:
+    permitted = {item[0] for item in OBSERVED_FILES.values()}
+    permitted.add(EVIDENCED_RECOVERY_SCRIPT_PATH)
+    if remote_path not in permitted:
         raise HandoffError("REMOTE_PATH_NOT_ALLOWLISTED")
     conn = Connection(sock, key_path)
     try:
