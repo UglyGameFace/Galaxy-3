@@ -183,7 +183,7 @@ class FotaArtifactTests(unittest.TestCase):
                 capture("8.8.8.8", Path("/unused"), Path(td) / "x.bin")
         self.assertNotIn(b"/dev/mmc", FOTA_EXECUTABLE)
         self.assertNotIn(b"..", FOTA_EXECUTABLE)
-        self.assertEqual(FOTA_EXECUTABLE.count(b"/"), 5)
+        self.assertEqual(FOTA_EXECUTABLE.count(b"/"), 4)
 
 
 if __name__ == "__main__":
