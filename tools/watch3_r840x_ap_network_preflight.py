@@ -71,26 +71,89 @@ def observe_wlan_ipv4() -> list[dict]:
     return result
 
 
-def subnet_for_bind_ip(bind_ip: str) -> ipaddress.IPv4Network:
-    """Only a private IPv4 actually assigned to a local WLAN is permitted."""
+def validate_manual_wifi_details(
+    wifi_ip: str, wifi_netmask: str, *, settings_confirmed: bool,
+) -> ipaddress.IPv4Network:
+    """Check user-entered Android Wi-Fi details using LOCAL bind only.
+
+    Binding to an ephemeral IPv4 port without listen()/connect()/send()
+    verifies local assignment, NOT the adapter type or the watch identity.
+    The human must inspect the Wi-Fi settings screen and confirm the two
+    fields came from the same CURRENTLY CONNECTED Wi-Fi network.
+    """
+    if not settings_confirmed:
+        raise ValueError("ANDROID_WIFI_SETTINGS_CONFIRMATION_REQUIRED")
+    try:
+        addr = ipaddress.IPv4Address(wifi_ip)
+        network = ipaddress.IPv4Network((str(addr), wifi_netmask), strict=False)
+    except (ipaddress.AddressValueError, ipaddress.NetmaskValueError, ValueError):
+        raise ValueError("MANUAL_WIFI_ADDRESS_OR_MASK_INVALID") from None
+    if not is_rfc1918(addr):
+        raise ValueError("MANUAL_WIFI_IP_NOT_RFC1918")
+    # Only reasonably scoped WLAN subnets; never approve /8 or /16
+    # just because the IP looks private (would admit unrelated peers).
+    if not 20 <= network.prefixlen <= 30:
+        raise ValueError("MANUAL_WIFI_SUBNET_TOO_BROAD_OR_NARROW")
+    if addr in (network.network_address, network.broadcast_address):
+        raise ValueError("MANUAL_WIFI_IP_NOT_HOST_ADDRESS")
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind((str(addr), 0))
+            # Never call listen(), accept(), connect() or send().
+    except OSError:
+        raise ValueError("MANUAL_WIFI_IP_NOT_LOCALLY_BINDABLE") from None
+    return network
+
+
+def subnet_for_bind_ip(
+    bind_ip: str, *, manual_wifi_netmask: str | None = None,
+    manual_wifi_settings_confirmed: bool = False,
+) -> ipaddress.IPv4Network:
+    """Require either readable WLAN IOCTL, or locally-bound manual Wi-Fi details."""
     try:
         addr = ipaddress.IPv4Address(bind_ip)
     except ipaddress.AddressValueError:
         raise ValueError("BIND_IP_NOT_VALID_IPV4") from None
     if not is_rfc1918(addr):
         raise ValueError("BIND_IP_NOT_RFC1918")
+    if manual_wifi_netmask is not None:
+        return validate_manual_wifi_details(
+            bind_ip, manual_wifi_netmask,
+            settings_confirmed=manual_wifi_settings_confirmed)
     for observed in observe_wlan_ipv4():
         if observed["ipv4"] == str(addr) and observed["rfc1918_address"]:
             return ipaddress.IPv4Network(observed["subnet"], strict=False)
     raise ValueError("BIND_IP_NOT_OBSERVED_ON_WLAN")
 
 
-def preflight_report() -> dict:
-    addresses = observe_wlan_ipv4()
+def preflight_report(
+    *, manual_wifi_ip: str | None = None,
+    manual_wifi_netmask: str | None = None,
+    manual_wifi_settings_confirmed: bool = False,
+) -> dict:
+    # Manual mode is opt-in. There is no implicit guessed /24 prefix.
+    if manual_wifi_ip is not None or manual_wifi_netmask is not None:
+        if not manual_wifi_ip or not manual_wifi_netmask:
+            raise ValueError("MANUAL_WIFI_REQUIRES_IP_AND_NETMASK")
+        subnet = validate_manual_wifi_details(
+            manual_wifi_ip, manual_wifi_netmask,
+            settings_confirmed=manual_wifi_settings_confirmed)
+        addresses = [{
+            "interface": "ANDROID_WIFI_SETTINGS_MANUAL",
+            "ipv4": str(ipaddress.IPv4Address(manual_wifi_ip)),
+            "subnet": str(subnet),
+            "rfc1918_address": True,
+            "local_bind_verified": True,
+            "source": "ANDROID_WIFI_SETTINGS_USER_ENTERED",
+        }]
+        status = "MANUAL_WIFI_ADDRESS_LOCALLY_BINDABLE_NOT_SSID_VERIFIED"
+    else:
+        addresses = observe_wlan_ipv4()
+        status = ("WLAN_IPV4_OBSERVED" if addresses else
+                  "WLAN_IPV4_UNAVAILABLE_OR_ANDROID_RESTRICTED")
     return {
         "schema": SCHEMA,
-        "status": ("WLAN_IPV4_OBSERVED" if addresses else
-                   "WLAN_IPV4_UNAVAILABLE_OR_ANDROID_RESTRICTED"),
+        "status": status,
         "wlan_ipv4": addresses,
         "wifi_ssid_verified": False,
         "watch_download_ap_verified": False,
@@ -102,10 +165,12 @@ def preflight_report() -> dict:
         "bootloader_acceptance_proven": False,
         "stock_recovery_proven": False,
         "interpretation": (
-            "Phone-assigned WLAN IPv4/subnet only. The user must separately "
-            "confirm their Wi-Fi SSID is the watch's temporary Download AP "
-            "using Android Settings. An unlisted interface is inconclusive "
-            "on newer Android releases. This never contacts the watch."
+            "Phone-local Wi-Fi IPv4/subnet only. Manual mode proves ONLY that "
+            "the user-entered address is bindable locally; it does not "
+            "technically prove which interface owns the IP or verify SSID. "
+            "The user must separately confirm Android's current Wi-Fi "
+            "network is the watch's temporary Download AP before any "
+            "live experiment. No network packets are transmitted."
         ),
     }
 
@@ -113,8 +178,24 @@ def preflight_report() -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", type=Path, help="Optional private local JSON; no overwrite")
+    parser.add_argument("--manual-wifi-ip",
+                        help="Current IPv4 read in Android Settings > Connections > Wi-Fi")
+    parser.add_argument("--manual-wifi-netmask",
+                        help="Exact mask or prefix shown by Android Wi-Fi details, e.g. 255.255.255.0")
+    parser.add_argument("--manual-wifi-settings-confirmed", action="store_true",
+                        help="I checked BOTH values on the current Wi-Fi network details screen")
     args = parser.parse_args(argv)
-    report = preflight_report()
+    if args.manual_wifi_settings_confirmed and not args.manual_wifi_ip:
+        parser.error("Manual confirmation requires --manual-wifi-ip and --manual-wifi-netmask")
+    try:
+        report = preflight_report(
+            manual_wifi_ip=args.manual_wifi_ip,
+            manual_wifi_netmask=args.manual_wifi_netmask,
+            manual_wifi_settings_confirmed=args.manual_wifi_settings_confirmed,
+        )
+    except ValueError as exc:
+        print("LOCAL_WIFI_PREFLIGHT_FAILED: " + str(exc), file=sys.stderr)
+        return 2
     body = (json.dumps(report, indent=2) + "\n").encode()
     if args.report is not None:
         target = args.report.expanduser()

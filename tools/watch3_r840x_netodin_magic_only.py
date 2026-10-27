@@ -87,9 +87,19 @@ def perform_magic_once(listener: socket.socket, seconds: int = DEFAULT_WAIT,
     return result
 
 
-def run_live(seconds: int, bind_ip: str) -> dict:
-    # Validate before bind: no 0.0.0.0/public or arbitrary local addresses.
-    local_subnet = subnet_for_bind_ip(bind_ip)
+def run_live(
+    seconds: int, bind_ip: str, *, manual_wifi_netmask: str | None = None,
+    manual_wifi_settings_confirmed: bool = False,
+) -> dict:
+    # The local bind is checked before opening a listening TCP socket.
+    # Manual settings mode MUST carry explicit user confirmation, because
+    # Linux local bind cannot establish which Android interface owns the IP.
+    if manual_wifi_netmask is None:
+        local_subnet = subnet_for_bind_ip(bind_ip)
+    else:
+        local_subnet = subnet_for_bind_ip(
+            bind_ip, manual_wifi_netmask=manual_wifi_netmask,
+            manual_wifi_settings_confirmed=manual_wifi_settings_confirmed)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((bind_ip, PORT))
@@ -108,6 +118,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--listen-seconds", type=int, default=DEFAULT_WAIT)
     ap.add_argument("--bind-ip",
                     help="Required: exact RFC1918 IPv4 currently on the phone's WLAN")
+    ap.add_argument("--manual-wifi-netmask",
+                    help="Exact mask from Android's current Wi-Fi details if IOCTL discovery failed")
+    ap.add_argument("--manual-wifi-settings-confirmed", action="store_true",
+                    help="I verified the entered IP/mask in current Android Wi-Fi Settings")
     ap.add_argument("--report", type=Path)
     args = ap.parse_args(argv)
 
@@ -117,11 +131,19 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("--listen-seconds must be 5..180")
     if not args.bind_ip:
         ap.error("Live mode requires --bind-ip from local phone-only WLAN preflight")
+    if bool(args.manual_wifi_netmask) != args.manual_wifi_settings_confirmed:
+        ap.error("Manual mode requires BOTH --manual-wifi-netmask and --manual-wifi-settings-confirmed")
 
-    # This requires operator confirmation in Android Wi-Fi settings, not
-    # an automatically fabricated SSID or inferred watch identity.
+    # The explicit --watch-ap-confirmed opt-in remains separate. Manual mode
+    # cannot prove this watch's SSID or bootloader peer identity.
     try:
-        result = run_live(args.listen_seconds, args.bind_ip)
+        if args.manual_wifi_netmask is None:
+            result = run_live(args.listen_seconds, args.bind_ip)
+        else:
+            result = run_live(
+                args.listen_seconds, args.bind_ip,
+                manual_wifi_netmask=args.manual_wifi_netmask,
+                manual_wifi_settings_confirmed=args.manual_wifi_settings_confirmed)
     except ValueError as exc:
         print("LOCAL_WIFI_PREFLIGHT_FAILED: " + str(exc), file=sys.stderr)
         return 2
