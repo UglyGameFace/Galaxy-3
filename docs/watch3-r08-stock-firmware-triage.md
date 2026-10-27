@@ -5,6 +5,45 @@ The experimental port is for the actual `SM-R840X` (`NOBLESSE-LARGE-BT R08`)
 running `R840XXXU1AUA2`, not an ordinary `SM-R840`. Its ordinary Tizen
 SDB shell cannot back up privileged boot/recovery partitions.
 
+## Physical active CSC: PAP observed October 27, 2026
+
+The owner ran the merged Android/Termux
+`tools/watch3_r840x_csc_readonly.py` on their *actual*
+`SM-R840X` in ordinary booted Tizen. Their sanitized JSON reports
+`ACTIVE_CSC_CANDIDATE_READ_FROM_EXACT_TIZEN_PATH`,
+`observed_active_csc_candidate=PAP`, sourced from the one fixed
+SDB `sync:RECV` path
+`/opt/system/csc-default/output/csc-active-customer.log`.
+`watch_write_performed=false`, `odin_session_started=false`,
+`pit_requested=false`, `firmware_written=false` and
+`full_stock_recovery_proven=false`. This establishes the
+**currently active system CSC PAP**, not the original sales CSC,
+a verified factory bootloader region or any signed recovery archive.
+
+Public CSC references assign PAP to Europe/EU; public firmware
+catalogs list PAP on *other* X-suffixed Galaxy Watch models
+(`SM-R860X` and `SM-R890X`). These are useful model-comparison
+leads, **not evidence that their images would boot on SM-R840X**.
+Sources:
+- https://technastic.com/samsung-csc-codes-list/
+- https://samfrew.com/devices/galaxy-watch4/sm-r860x
+- https://samfrew.com/devices/galaxy-watch4-classic/sm-r890x
+
+The earlier **XAR/KOO** R840X public FOTA checks were made
+*before* the owner's active CSC was known and returned 403.
+The [public manufacturer metadata audit](
+watch3-r840x-public-fota-version-recon.md) now offers a
+**single exact `SM-R840X/PAP`** HTTPS version-XML request that
+runs from GitHub Actions, without watch contact, an owner phone,
+private identifiers, FOTA update operations, file downloads
+or Odin commands. Even a returned version string cannot prove
+an authentic `R840XXXU1AUA2` full image or recoverability.
+
+**Physical CSC investigation complete. Stock recovery NO-GO unchanged.**
+Do not use `PAP` alone to select retail firmware or try NetOdin.
+The older advertised `R840XXXU1ATFA-(OXA)` multi-CSC name does
+not establish compatibility with a running PAP-configured R840X.
+
 ## Candidate inventory, October 27, 2026
 
 | Candidate | What the public listing establishes | Blocker |
