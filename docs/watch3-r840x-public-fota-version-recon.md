@@ -22,20 +22,74 @@ This is an HTTPS web request from GitHub Actions **to Samsung public
 metadata**, not Samsung's Odin/NetOdin port, not Tizen SDB and
 not the owner's watch.
 
-## One-time lookups chosen (region is deliberately a hypothesis)
+## October 27: physical SM-R840X active CSC has now been observed
 
-The actual LDU **CSC/region is NOT independently established** by the
-public ATFA catalog's `(OXA)` multi-CSC suffix. OXA is not proof of
-a specific 3-letter sales CSC for the running watch. To keep the test
-small and avoid random-region enumeration, the workflow requests just:
+The owner ran the merged, **single fixed-path read-only SDB**
+`tools/watch3_r840x_csc_readonly.py` on the *actual* SM-R840X
+without any firmware write, Odin session, PIT request or CSC change.
+Their supplied privacy-filtered JSON reported:
+
+- `remote_path=/opt/system/csc-default/output/csc-active-customer.log`
+- `state=ACTIVE_CSC_CANDIDATE_READ_FROM_EXACT_TIZEN_PATH`
+- `observed_active_csc_candidate=PAP`
+- `model=SM-R840X`, installed `R840XXXU1AUA2`
+- `watch_write_performed=false`, `odin_session_started=false`,
+  `pit_requested=false`, `firmware_written=false`
+- `full_stock_recovery_proven=false`, `flash_allowed=false`.
+
+**This is direct, model-specific evidence of the watch's *currently
+active* CSC PAP**, not merely the `(OXA)` tag on an old seller
+listing. Whether PAP describes the original factory/sales CSC, LDU
+distribution region, ROM package CSC or a bootloader acceptance policy
+is **not established**. The file is mutable system configuration, not
+Samsung's signed hardware identity or authentic PIT.
+
+Public CSC lists label PAP as a European code:
+https://technastic.com/samsung-csc-codes-list/ .
+Also, *other* X-suffixed Galaxy Watch variants SM-R860X and
+SM-R890X have PAP listed in public firmware catalog *metadata*:
+https://samfrew.com/devices/galaxy-watch4/sm-r860x
+https://samfrew.com/devices/galaxy-watch4-classic/sm-r890x .
+These are corroborating catalog references, **not signed LDU
+firmware bytes or a universal PAP flash compatibility rule**.
+
+### New one-request manufacturer metadata check
+
+Rather than repeat the unrelated, historically guessed XAR/KOO
+regions, `--probe-owner-active-csc` contacts only this **one
+public model/region endpoint** from GitHub Actions, no watch:
+
+`https://fota-cloud-dn.ospserver.net/firmware/PAP/SM-R840X/version.xml`
+
+As before, this is capped, verified HTTPS **version metadata only**:
+one GET, no redirect following, no IMEI, serial, token, owner IP,
+firmware image, Odin command or any access to the physical watch.
+Even a valid XML version list **cannot** provide boot/recovery image
+bytes, trusted vendor signatures or a return-to-stock guarantee.
+403/404/no answer may reflect publication policy and are
+**inconclusive about firmware existence**.
+
+The old, unrelated public lookups and their real HTTP 403/retail
+control results are retained *below as historical evidence*, but
+the current CI job now requests only `SM-R840X/PAP`.
+
+## Historical October 27 lookups before PAP was known (hypotheses only)
+
+When the original lookup ran, the actual LDU **CSC/region was not yet known**;
+it has subsequently been observed as active **PAP** from the watch's exact
+Tizen CSC file. The earlier guess was not validated by
+the public ATFA catalog's `(OXA)` multi-CSC suffix. OXA is not proof of
+a specific 3-letter sales CSC for the running watch. To keep that initial test small and avoid random-region enumeration, the
+original workflow requested just:
 
 1. `SM-R840X / XAR` (retail US region used only as a hypothesis);
 2. `SM-R840X / KOO` (retail Korea region used only as a hypothesis);
 3. `SM-R840 / XAR` (public **retail** control; never an R840X firmware
    replacement).
 
-The code hardcodes all three URL paths and uses at most three HTTPS
-GETs, a 7-second timeout, at most 128 KiB of response per request,
+The **historical** `--probe-public-metadata` mode still hardcodes those
+three URL paths and uses at most three HTTPS GETs; the new 
+`--probe-owner-active-csc` sends only one fixed PAP request, a 7-second timeout, at most 128 KiB of response per request,
 TLS certificate verification and **no redirect following**. It sends
 **no** IMEI, serial, auth token, cookie, device model probe, SDB
 connection, Odin handshake, PIT command, firmware installer or personal
@@ -56,16 +110,15 @@ signed restoration archive, partition map or flash authorization.
 ## Local use
 
 GitHub Actions runs the test automatically on PR, after two
-synthetic-only parser jobs succeed. The optional Android command
-is **networked but contacts only the three public URLs**, and does
-**not** interact with the Watch3:
+synthetic-only parser jobs succeed. The optional Android command is **networked but contacts only the
+public Samsung PAP metadata URL**, and does **not** interact with the Watch3:
 
 ```sh
 cd ~/Galaxy-3 && git pull --ff-only
 python tools/watch3_r840x_public_fota_version_recon.py \
-  --probe-public-metadata \
-  --output ~/watch3-r840x-fota-public-metadata.json
-cat ~/watch3-r840x-fota-public-metadata.json
+  --probe-owner-active-csc \
+  --output ~/watch3-r840x-pap-public-metadata.json
+cat ~/watch3-r840x-pap-public-metadata.json
 ```
 
 No reason to repeat on the phone if GitHub Actions has produced

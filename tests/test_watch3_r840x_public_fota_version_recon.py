@@ -96,6 +96,56 @@ class PublicFotaTests(unittest.TestCase):
         self.assertTrue(all(x["downloaded_firmware"] is False for x in outputs))
         self.assertEqual(recon.report_for(outputs)["result"], "NO_GO")
 
+    def test_owner_pap_one_public_request_and_strict_no_go(self):
+        # PAP was observed physically in the watch's exact Tizen active CSC file.
+        self.assertEqual(recon.OBSERVED_ACTIVE_CSC, (
+            ("SM-R840X", "PAP", "OWNER_SDB_ACTIVE_CSC_PAP_CONFIRMED_2026_10_27"),
+        ))
+        fake = FakeOpener([xml("R840XXXU1AUA2")])
+        results = recon.public_probe(opener=fake, observed_csc_only=True)
+        self.assertEqual(fake.urls, [
+            "https://fota-cloud-dn.ospserver.net/firmware/PAP/SM-R840X/version.xml",
+        ])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["state"], "R840X_BUILD_TOKEN_FOUND_IN_PUBLIC_FOTA_XML")
+        report = recon.report_for(results, observed_csc_only=True)
+        self.assertFalse(report["probed_regions_are_unverified_for_owner_model"])
+        self.assertEqual(report["physical_active_csc_observed"], "PAP")
+        self.assertTrue(report["physical_csc_does_not_authenticate_stock_image"])
+        for key in ("model_firmware_compatibility_proven", "exact_stock_recovery_archive_obtained",
+                    "signed_stock_recovery_verified", "restoration_of_failed_boot_verified",
+                    "odin_session_started", "pit_requested", "device_contacted",
+                    "firmware_downloaded", "firmware_written", "custom_boot_verified",
+                    "flash_allowed"):
+            self.assertFalse(report[key], key)
+        self.assertEqual(report["result"], "NO_GO")
+
+    def test_owner_pap_403_is_not_negative_stock_firmware_proof(self):
+        url = "https://fota-cloud-dn.ospserver.net/firmware/PAP/SM-R840X/version.xml"
+        fake = FakeOpener([HTTPError(url, 403, "Forbidden", None, None)])
+        results = recon.public_probe(opener=fake, observed_csc_only=True)
+        self.assertEqual(fake.urls, [url])
+        self.assertEqual(results[0]["state"], "HTTP_403")
+        report = recon.report_for(results, observed_csc_only=True)
+        self.assertEqual(report["physical_active_csc_observed"], "PAP")
+        self.assertFalse(report["exact_stock_recovery_archive_obtained"])
+        self.assertEqual(report["result"], "NO_GO")
+
+    def test_owner_pap_cli_uses_only_new_optional_single_public_mode(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "pap.json"
+            stub = [{"model": "SM-R840X", "region": "PAP", "state": "HTTP_403",
+                     "device_contacted": False, "downloaded_firmware": False}]
+            with patch.object(recon, "public_probe", return_value=stub) as called:
+                self.assertEqual(
+                    recon.main(["--probe-owner-active-csc", "--output", str(out)]), 0)
+            called.assert_called_once_with(observed_csc_only=True)
+            report = json.loads(out.read_text())
+            self.assertEqual(report["physical_active_csc_observed"], "PAP")
+            self.assertFalse(report["flash_allowed"])
+            self.assertFalse(report["firmware_downloaded"])
+            self.assertEqual(len(report["observations"]), 1)
+
     def test_network_failure_cannot_claim_missing_watch_firmware(self):
         fake = FakeOpener([TimeoutError("timeout")] * len(recon.PROBES))
         outputs = recon.public_probe(opener=fake)

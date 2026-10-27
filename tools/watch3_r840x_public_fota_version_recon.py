@@ -2,8 +2,11 @@
 """One-shot, bounded PUBLIC Samsung FOTA version-XML reconnaissance.
 
 Never contacts the watch, uses an IMEI/serial, downloads firmware or sends
-Odin/SDB commands. Only explicit --probe-public-metadata opens at most
-three fixed public HTTPS URLs, with no redirects, cookies or credentials.
+Odin/SDB commands. Explicit legacy --probe-public-metadata opens only
+three historical public HTTPS model-region URLs. The newer
+--probe-owner-active-csc sends exactly one public SM-R840X/PAP request,
+based on the owner's verified read-only SDB CSC observation; neither
+mode uses redirects, cookies, personal identifiers or credentials.
 Read-only network to Samsung endpoint, NOT a watch recovery method.
 """
 from __future__ import annotations
@@ -25,12 +28,18 @@ MAX_XML_BYTES = 128 * 1024
 PROBE_TIMEOUT = 7
 MODEL_R840X = "SM-R840X"
 MODEL_RETAIL = "SM-R840"
-# XAR and KOO come from documented *retail* region lists. The actual
-# SM-R840X region has NOT been verified and may not use either!
+# Historical pre-CSC research tested unverified XAR/KOO hypotheses.
+# On 2026-10-27 owner supplied sanitized result from the physically
+# running SM-R840X exact SDB CSC file confirming active PAP.
+# That does NOT establish original sales region, firmware acceptance,
+# bootloader signing, or a freely downloadable recovery archive.
 PROBES = (
     ("SM-R840X", "XAR", "XAR_IS_RETAIL_US_HYPOTHESIS_NOT_CONFIRMED_FOR_LDU"),
     ("SM-R840X", "KOO", "KOO_IS_RETAIL_KOREA_HYPOTHESIS_NOT_CONFIRMED_FOR_LDU"),
     ("SM-R840", "XAR", "RETAIL_CONTROL_DIFFERENT_MODEL_NOT_FLASHABLE_ON_R840X"),
+)
+OBSERVED_ACTIVE_CSC = (
+    ("SM-R840X", "PAP", "OWNER_SDB_ACTIVE_CSC_PAP_CONFIRMED_2026_10_27"),
 )
 BUILD_X = re.compile(r"(?<![A-Z0-9])R840XXXU[0-9][A-Z0-9]{4}(?![A-Z0-9])")
 BUILD_RETAIL = re.compile(r"(?<![A-Z0-9])R840XXU[0-9][A-Z0-9]{4}(?![A-Z0-9])")
@@ -74,13 +83,14 @@ def parse_version_xml(data: bytes, model: str) -> dict:
         "retail_build_tokens": retail,
     }
 
-def public_probe(opener=None) -> list[dict]:
-    """At most 3 GETs to one fixed public host; no arbitrary URL or device IDs."""
+def public_probe(opener=None, *, observed_csc_only: bool = False) -> list[dict]:
+    """Fixed host, 3 historical OR 1 owner-confirmed PAP GET, no device IDs."""
     if opener is None:
         opener = build_opener(NoRedirect(),
                               HTTPSHandler(context=ssl.create_default_context()))
     out = []
-    for model, region, assumption in PROBES:
+    probes = OBSERVED_ACTIVE_CSC if observed_csc_only else PROBES
+    for model, region, assumption in probes:
         url = FOTA_BASE + region + "/" + model + "/version.xml"
         result = {
             "model": model,
@@ -106,13 +116,19 @@ def public_probe(opener=None) -> list[dict]:
         out.append(result)
     return out
 
-def report_for(probes: list[dict]) -> dict:
+def report_for(probes: list[dict], *, observed_csc_only: bool = False) -> dict:
     return {
         "schema": "uglyos-r840x-public-fota-version-recon-v1",
         "mode": "PUBLIC_SAMSUNG_VERSION_XML_ONLY",
         "device": MODEL_R840X,
         "installed_build": "R840XXXU1AUA2",
-        "probed_regions_are_unverified_for_owner_model": True,
+        "probed_regions_are_unverified_for_owner_model": not observed_csc_only,
+        "physical_active_csc_observed": "PAP" if observed_csc_only else None,
+        "physical_csc_evidence": (
+            "OWNER_READ_ONLY_SDB_EXACT_ACTIVE_CUSTOMER_LOG"
+            if observed_csc_only else "NOT_USED_HISTORICAL_REGION_HYPOTHESES"
+        ),
+        "physical_csc_does_not_authenticate_stock_image": True,
         "response_meaning": ("Public FOTA version metadata is not a full stock "
                              "firmware download, model-signed rescue image, "
                              "PIT, anti-rollback or authorized custom boot."),
@@ -134,14 +150,19 @@ def report_for(probes: list[dict]) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--probe-public-metadata", action="store_true",
-                    help="Explicitly fetch 3 fixed PUBLIC Samsung FOTA version.xml URLs")
+                    help="Explicitly fetch 3 historical PUBLIC FOTA version.xml URLs")
+    ap.add_argument("--probe-owner-active-csc", action="store_true",
+                    help="Only one fixed PUBLIC SM-R840X/PAP version.xml metadata request")
     ap.add_argument("--offline-sample", type=Path,
                     help="Parse only an existing local XML fixture; no network access")
     ap.add_argument("--output", type=Path,
                     help="Optional JSON report. Never contains raw XML, IMEI, serial or IP")
     args = ap.parse_args(argv)
-    if args.probe_public_metadata == bool(args.offline_sample):
-        ap.error("Choose exactly one of --probe-public-metadata or --offline-sample")
+    if sum(bool(x) for x in (args.probe_public_metadata,
+                             args.probe_owner_active_csc,
+                             args.offline_sample)) != 1:
+        ap.error("Choose exactly one of --probe-public-metadata, "
+                 "--probe-owner-active-csc or --offline-sample")
     if args.offline_sample:
         try:
             if args.offline_sample.is_symlink() or args.offline_sample.stat().st_size > MAX_XML_BYTES:
@@ -154,8 +175,9 @@ def main(argv: list[str] | None = None) -> int:
                    "state": "OFFLINE_SAMPLE_ONLY", "device_contacted": False,
                    **parse_version_xml(data, MODEL_R840X)}]
     else:
-        probes = public_probe()
-    report = json.dumps(report_for(probes), indent=2) + "\n"
+        probes = public_probe(observed_csc_only=args.probe_owner_active_csc)
+    report = (json.dumps(report_for(probes, observed_csc_only=args.probe_owner_active_csc),
+                         indent=2) + "\n")
     if args.output:
         try:
             with args.output.open("x", encoding="utf-8") as file:
