@@ -168,13 +168,13 @@ class FixedFotaDirectoryInventoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             out = Path(td) / "result.json"
             with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
-                       side_effect=[binary, save]), patch(
+                       side_effect=[binary, save]), patch.object(
                            sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
                                          "--report", str(out)]):
                 self.assertEqual(main(), 0)
             self.assertEqual(out.stat().st_mode & 0o077, 0)
             old = out.read_bytes()
-            with patch(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+            with patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
                                       "--report", str(out)]):
                 self.assertEqual(main(), 1)
             self.assertEqual(out.read_bytes(), old)
