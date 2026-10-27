@@ -117,14 +117,14 @@ class RootPrerequisiteTests(unittest.TestCase):
         self.assertNotIn("cap_sys_admin=", report)
 
     def test_tiny_shell_errors_are_classified_without_false_tar_help_hits(self):
-        self.assertEqual(_root_path_output_error("sh: getcap: not found\\n"),
+        self.assertEqual(_root_path_output_error("sh: getcap: not found\n"),
                          "WATCH_REPORTED_COMMAND_OR_PATH_MISSING")
         self.assertEqual(_root_path_output_error("getcap: Permission denied"),
                          "WATCH_REPORTED_ACCESS_DENIED")
         self.assertEqual(_root_path_output_error("   "), "EMPTY_SHELL_OUTPUT")
         self.assertIsNone(_root_path_output_error(
-            "tar options\\n --to-command=COMMAND\\n"
-            "some archives have files not found\\n additional help"))
+            "tar options\n --to-command=COMMAND\n"
+            "some archives have files not found\n additional help"))
         
     def test_fixed_allowlist_has_no_install_flash_or_injection(self):
         self.assertEqual(len(ROOT_PATH_PROBES), 4)
@@ -134,7 +134,7 @@ class RootPrerequisiteTests(unittest.TestCase):
                 self.assertNotIn(forbidden, query)
 
     def test_sdb_closed_shell_exposes_category_not_device_exception(self):
-        peers = [FakeSocket(frame(b"CNXN", VERSION, 262144, b"device::\\x00")
+        peers = [FakeSocket(frame(b"CNXN", VERSION, 262144, b"device::\x00")
                             + frame(b"CLSE", 0, 2)) for _ in range(8)]
         with patch("watch3_r08_android_sdb.socket.create_connection",
                    side_effect=peers):
@@ -147,7 +147,7 @@ class RootPrerequisiteTests(unittest.TestCase):
         self.assertNotIn("10.54.86.131", serialized)
 
     def test_short_missing_tool_reply_preserves_exact_reason_category(self):
-        outputs = ["sh: getcap: not found\\n"] * 4
+        outputs = ["sh: getcap: not found\n"] * 4
         peers = [FakeSocket(peer(output)) for output in outputs]
         with patch("watch3_r08_android_sdb.socket.create_connection",
                    side_effect=peers):
