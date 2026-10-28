@@ -762,3 +762,68 @@ bootloader, PIT, recovery archive, demonstrated stock restore
 or custom-kernel acceptance. The owner's single working watch
 remains untouched: `NO_GO` for firmware writes, recovery
 activation, FOTA triggers, Odin commands or exploit tests.
+
+
+## Original R840X FOTA ELF: SYSTEM bus provenance is now verified offline (October 28, 2026)
+
+**This corrects a remaining transport ambiguity without a new watch read.**
+Re-disassembled the **actual previously owner-extracted** `fota-service`
+ELF32 (87,036 bytes, SHA-256
+`008c67e782eb3d97b0ddb7abc7606b86dc493576c24de476a2110d6e5a681757`)
+with `llvm-objdump --triple=thumbv7-linux-gnueabi`. Cross-checked
+the PLT stub target *against its actual `R_ARM_JUMP_SLOT` relocation*;
+do not infer function names from approximate PLT index calculations:
+this binary has PLT alignment/interworking padding.
+
+**Direct code evidence in Thumb function `launch_fota_consumer` at
+ELF address `0xa764`:**
+
+- `0xa7c4: movs r0,#1`, `0xa7c6` stores the already-resolved object-path argument,
+  and `0xa7ca: blx 0x4ce4`: this PLT stub resolves through
+  GOT `0x2437c` to **`g_dbus_proxy_new_for_bus_sync`**.
+  GLib defines bus enum `1=G_BUS_TYPE_SYSTEM` (the system bus),
+  **not** `G_BUS_TYPE_SESSION` (enum `2`).
+- `r1=0` and `r2=0` at the proxy call. Decoded PC-relative
+  `r3` points to the *literal name* **`fota.consumer`**
+  at `.rodata 0x1077c`; stack argument 0 is
+  **`/fota/consumer`** at `0x1078c`; stack argument 1 is
+  the **`fota.consumer`** interface string again.
+- `0xa7e0: blx 0x4b5c` maps to **`g_variant_new`**
+  using the literal format **`(is)`** (integer/string tuple).
+  Caller argument meanings/validation are not fully established;
+  a format string does **not** prove access to methods by third parties.
+- `0xa7f8: blx 0x4c10` maps via GOT `0x24338` to
+  **`g_dbus_proxy_call_sync`**. The method name is passed in from
+  the original distinct callers (previously evidenced `Launch` and
+  `DeleteTempFile`). Its timeout stack argument is `-1`
+  (the **proxy default**, typically 25 seconds, **not infinite**;
+  `G_MAXINT` would mean infinite).
+  **This call was never made from the owner's phone or on the watch
+  during this research.**
+- The proxy is an **outbound client** attempting to reach the
+  `fota.consumer` system-bus name. The existence of this call
+  does **not** establish that the name currently has an owner or that
+  the owner is a particular executable, package, user or SMACK label.
+
+This sharpens our previous negative directory-listing result:
+the owner's authenticated passive SDB inventory did **not list**
+`fota.consumer.service` in the fixed system D-Bus activation
+directory. A process can own a D-Bus system-bus name without a
+matching auto-activation file; the earlier missing filename therefore
+**does not prove an absent service or successful caller authorization**.
+It also does not make the unreadable `fota-consumer.service`
+systemd unit equivalent to a D-Bus registration.
+
+Independent API references:
+- [GLib `GDBusProxy.new_for_bus_sync` signature](https://docs.gtk.org/gio/ctor.DBusProxy.new_for_bus_sync.html)
+- [GLib `GBusType` enum with SYSTEM=1 and SESSION=2](https://gnome.pages.gitlab.gnome.org/gtk/gio/enum.BusType.html)
+- [GLib call_sync timeout: -1 means default, G_MAXINT means infinite](https://docs.gtk.org/gio/method.DBusProxy.call_sync.html)
+
+**Remaining exact-model evidence gate:** the actual owner/implementation
+of `fota.consumer` and its credential, update-agent/signature and
+bootloader trust policies, plus authenticated complete same-model
+Samsung stock restore bytes and verified return path. No attempted
+`Launch`, `DeleteTempFile`, dynamic D-Bus introspection,
+service activation, `delta.ua` submission, Odin/PIT or firmware
+writes. The owner's only working watch remains on stock Tizen:
+`NO_GO` for custom boot or recovery writes.
