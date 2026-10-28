@@ -140,8 +140,9 @@ hardcoded `cat /sys/class/block/mmcblk0p10/{start,size}` commands.
 It does not reread the disk, boot or recovery fields, request PIT,
 try root, or run a shell command supplied by the user.
 
-After its GitHub CI passes **and the change is merged**, the optional
-owner-operated Android/Termux diagnostic is:
+**Historical reproduction only:** PR #101 passed CI, merged, and the
+owner has **already executed** the follow-up on October 27. The command
+below is retained for provenance, **not** a request to repeat it:
 
 ```sh
 cd ~/Galaxy-3 && git switch main && git pull --ff-only
@@ -166,3 +167,63 @@ obtained it reports a **p10 kernel sector candidate** from a
 *different snapshot*: do not silently combine it with the earlier
 disk/boot/recovery readings as one atomic measurement. No authentic
 PIT/signing/stock rescue/custom boot is established, so `NO_GO` remains.
+
+
+## Completed owner's physical p10 follow-up (October 27, 2026)
+
+**This is an actual physical watch observation, not a synthetic CI
+fixture.** After merging
+[PR #101](https://github.com/UglyGameFace/Galaxy-3/pull/101)
+(`main=89aaf2d3ca274d312a5e862729da21fb0be39761`), the owner
+ran the existing `--param-only` mode once using authenticated normal
+Tizen SDB. The actual owner-supplied privacy-filtered JSON was saved on
+the Android phone at
+`~/watch3-r840x-param-geometry-diagnostic-redacted.json`:
+
+- `schema=uglyos-r840x-param-sysfs-diagnostic-v1`
+- `source_mode=PHYSICAL_SDB_FIXED_PARAM_SCALAR_PROBE`
+- `state=TWO_PARAM_KERNEL_SCALARS_OBSERVED`
+- Both `critical_p10_start` and `critical_p10_size` were
+  `KERNEL_NUMERIC_FIELD_OBSERVED`.
+- `mmcblk0p10=param`: **147,456** start sectors, **4,096**
+  sectors (2 MiB) in size, end-exclusive **151,552**.
+- `independent_disk_capacity_verified_in_this_probe=false` and
+  `combined_with_previous_snapshot=false`. The two p10 sysfs
+  fields were acquired in a later run than the disk/p13/p14 fields.
+
+### Comparing the two owner-provided reports without inventing a PIT
+
+| Kernel metadata source | Partition | Sector range [start, end) | Size |
+| --- | --- | --- | --- |
+| Later **two-scalar** report | p10 `param` | `[147456,151552)` | 2 MiB |
+| Earlier **seven-scalar** report | p13 `boot` | `[169984,206848)` | 18 MiB |
+| Earlier **seven-scalar** report | p14 `recovery` | `[206848,243712)` | 18 MiB |
+
+The three *owner-observed* ranges **would not overlap** when considered
+together; `boot` and `recovery` are adjacent. The **18,432-sector
+(9 MiB) separation** between the end of p10 and start of p13 **does
+not mean free/unallocated space**: other partitions (including numbered
+p11 and p12) or other structures may occupy it. All these candidates
+are within the earlier reported `mmcblk0` capacity of **15,269,888**
+512-byte sectors, but they are **two non-atomic kernel observations**,
+not an independently verified PIT or manufacturer partition map.
+
+**What is now answered:** a transiently unavailable p10 geometry
+read was later obtainable using the original two fixed sysfs scalar
+commands, without an arbitrary path, root access or any write. There
+is **no reason to repeat** either probe. The original partial report
+and later successful report are both preserved; neither should be
+deleted or overwritten.
+
+**What remains blocked:** authentic Samsung SM-R840X `PAP` stock
+recovery archive and matching PIT/rollback provenance, validated
+recovery on a sacrificial matching device, and actual bootloader
+acceptance of a reversible custom-kernel handoff. The updated
+p10 result still says `authentic_samsung_pit_obtained=false`,
+`signed_stock_images_obtained=false`,
+`stock_recovery_proven=false`, `custom_boot_accepted=false`,
+`flash_allowed=false`, `result=NO_GO`. The Watch3 remains
+stock and no write, PIT request or Odin session happened.
+
+Primary owner result provenance:
+[Issue #47 physical p10 observation](https://github.com/UglyGameFace/Galaxy-3/issues/47#issuecomment-6460198142).

@@ -214,6 +214,31 @@ on R840X*, preserving every stock partition. Otherwise stay off-device.
 storage, then framebuffer, touch, bezel, radios, power, and eventually
 audio. An ext4 integrity pass alone is not boot success.
 
+## October 27 physical geometry: three critical names and ranges now observed
+
+The owner successfully completed the normal-Tizen **read-only** SDB
+`p10` follow-up after an earlier seven-scalar partial report.
+The earlier run established `mmcblk0` disk capacity of
+**15,269,888** Linux 512-byte sectors, `p13 boot=[169984,206848)`
+(18 MiB) and `p14 recovery=[206848,243712)` (18 MiB).
+The later separate two-scalar report established
+`p10 param=[147456,151552)` (2 MiB), with both numeric fields
+observed. The observed ranges do not overlap, and boot/recovery
+are adjacent. Other partitions may occupy the **9 MiB**
+distance from the p10 end to p13 start.
+
+Both reports were obtained on the physical owner's stock R840X but
+were **not atomic** and cannot be merged into an OEM-authenticated
+PIT, an exact boot image, a recovery mechanism or signature/rollback
+proof. All 21 sysfs PARTNAME *text fields* were already reconciled
+separately; twelve actual labels were privacy-filtered. Do not run
+further sysfs batches to re-prove observed values.
+
+See [the completed physical metadata record](watch3-r840x-critical-sysfs-geometry.md#completed-owners-physical-p10-follow-up-october-27-2026)
+and the [Issue #47 owner evidence](https://github.com/UglyGameFace/Galaxy-3/issues/47#issuecomment-6460198142).
+**The critical obstacle is now model-authenticated signed stock
+restoration and bootloader acceptance, not the p10 numeric label.**
+
 ## Explicit STOP conditions
 
 - No verified restorable stock firmware + actual recovery transport.
