@@ -325,7 +325,7 @@ class FixedSysfsLabelsTests(unittest.TestCase):
             "partition_p8_uevent": record(8, "KERNEL"),
             "partition_p9_uevent": record(18, "RECOVERY"),
             "partition_p10_uevent": record(10, "USER").replace(
-                "PARTNAME=USER\\n", ""),
+                "PARTNAME=USER" + chr(10), ""),
             "partition_p11_uevent": record(11, "ROOTFS") + record(12, "USER"),
         }
         errors = {"partition_p12_uevent": "SDB_TRANSPORT_UNREACHABLE",
@@ -377,7 +377,7 @@ class FixedSysfsLabelsTests(unittest.TestCase):
         for index in range(2, 8):
             payload = record(index, "KERNEL", "SECRET_UUID_ABC").encode()
             peers.append(FakePeer(
-                frame(b"CNXN", VERSION, 262144, b"device::\\0") +
+                frame(b"CNXN", VERSION, 262144, b"device::" + bytes([0])) +
                 frame(b"OKAY", 44, 2) +
                 frame(b"WRTE", 44, 2, payload) +
                 frame(b"CLSE", 44, 2)))
@@ -394,7 +394,7 @@ class FixedSysfsLabelsTests(unittest.TestCase):
             while parser.incoming:
                 sent.append(receive(parser))
             self.assertEqual([part[3] for part in sent if part[0] == b"OPEN"],
-                             [(b"shell:" + group[key].encode() + b"\\0")])
+                             [(b"shell:" + group[key].encode() + bytes([0]))])
             self.assertNotIn(b"/dev/", peer.sent)
             self.assertNotIn(b"ODIN", peer.sent)
             self.assertNotIn(b"SEND", peer.sent)
