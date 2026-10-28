@@ -44,6 +44,21 @@ jobs:
           assert 'cat /sys/class/block/mmcblk0p20/uevent' in sdb
           assert 'cat /sys/class/block/mmcblk0p21/uevent' in sdb
           assert 'PARTITION_SYSFS_FIXED_PROBES' in script
+          assert 'PARTITION_SYSFS_REMAINING_BATCH_PROBES' in sdb
+          assert 'inspect_remaining_batch' in script
+          assert '--remaining-batch' in script
+          from sys import path as import_path
+          import_path.insert(0, 'tools')
+          from watch3_r08_android_sdb import PARTITION_SYSFS_REMAINING_BATCH_PROBES
+          remaining = [cmd for batch in PARTITION_SYSFS_REMAINING_BATCH_PROBES
+                       for cmd in batch.values()]
+          assert len(remaining) == 18 and len(set(remaining)) == 18
+          assert remaining == [
+              f'cat /sys/class/block/mmcblk0p{index}/uevent'
+              for index in range(2, 20)
+          ]
+          assert all('/dev/' not in cmd and '*' not in cmd
+                     and '>' not in cmd and ';' not in cmd for cmd in remaining)
           assert 'SINGLE_SDB_TCP_HANDSHAKE_NO_SHELL_OR_SYSFS' in script
           assert 'SDB_HANDSHAKE_COMPLETE_NO_SYSFS_READ' in script
           assert 'TCP_PORT_REFUSED' in script
@@ -61,7 +76,7 @@ jobs:
           assert 'b"ODIN"' not in script
           assert 'b"SEND"' not in script
           assert '"result": "NO_GO"' in script
-          print('PASS: original probe preserved plus 3 no-glob sysfs-only diagnostic paths; no raw block access')
+          print('PASS: 3 original owner-proven paths preserved and 18 explicit sysfs text paths in 3 fake-only batches')
           PY
           git diff --check
           echo 'NO WATCH CONTACT OR FIRMWARE WRITES. All tests synthetic.'

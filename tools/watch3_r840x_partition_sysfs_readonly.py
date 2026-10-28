@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Read only kernel-exported Watch3 partition LABELS, never partition bytes.
 
-Uses exactly one opt-in fixed Tizen SDB shell operation to read text
-/sys/class/block/mmcblk0p[0-9]*/uevent. No PIT/Odin/raw-block access,
-factory reset, firmware modification or write authorization.
-
-This is a hypothesis: the shell glob and PARTNAME fields might not be
-available to the owner's unprivileged SM-R840X Tizen shell.
+Owner already verified three explicit /sys/class/block/mmcblk0pN/uevent
+reads (p1/p20/p21) on their SM-R840X. An opt-in follow-up uses a
+separate hardcoded six-file group for p2..p19, one group per run.
+The older wildcard probe remains available but is not automatically used.
+No PIT/Odin/raw-block access, reset, firmware modification or write approval.
 """
 from __future__ import annotations
 
@@ -21,6 +20,7 @@ import sys
 
 from watch3_r08_android_sdb import (
     PARTITION_SYSFS_PROBES, PARTITION_SYSFS_FIXED_PROBES,
+    PARTITION_SYSFS_REMAINING_BATCH_PROBES,
     Connection, PORT, SdbError, collect, private_watch_ip,
 )
 
@@ -162,39 +162,45 @@ def inspect_live(ip: str, key_path: Path) -> dict:
     return result
 
 
-def inspect_fixed_sample(ip: str, key_path: Path) -> dict:
-    """Three explicit sysfs files only; no shell wildcard or partition dump.
+def _inspect_literal_sysfs_group(
+    ip: str, key_path: Path, *, probes: dict[str, str],
+    indices: tuple[int, ...], mode: str,
+) -> dict:
+    """Only the exact source-code allowlisted sysfs pseudo-files.
 
-    A successful uevent read establishes at most *that file's* metadata,
-    NOT the missing 18 entries nor a PIT/stock restoration.
+    Mismatched / unexpectedly long data or missing PARTNAME remain unknown.
+    The independently read records are NEVER authenticated as a Samsung PIT.
     """
+    if len(probes) != len(indices) or len(set(indices)) != len(indices):
+        raise PartitionLabelsError("INTERNAL_FIXED_PROBE_SET_MISMATCH")
+    if tuple(probes) != tuple(f"partition_p{i}_uevent" for i in indices):
+        raise PartitionLabelsError("INTERNAL_FIXED_PROBE_ORDER_MISMATCH")
     result = _base_report()
-    result["source_path_expression"] = list(PARTITION_SYSFS_FIXED_PROBES.values())
-    result["probe_mode"] = "THREE_EXPLICIT_TEXT_PATHS_NO_WILDCARD"
-    values, errors = collect(ip, key_path, probes=PARTITION_SYSFS_FIXED_PROBES)
+    result["source_path_expression"] = list(probes.values())
+    result["probe_mode"] = mode
+    values, errors = collect(ip, key_path, probes=probes)
     observations = []
     witnessed = 0
     name_fields = 0
-    for key, expected in (("partition_p1_uevent", 1),
-                          ("partition_p20_uevent", 20),
-                          ("partition_p21_uevent", 21)):
+    # Only static error classes; never put raw sysfs text or credentials
+    # in the report even when the watch returns unrecognized content.
+    allowed_errors = {
+        "SDB_SHELL_TIMED_OUT", "SDB_SHELL_CLOSED_OR_REFUSED",
+        "SDB_PROTOCOL_OR_READ_FAILURE", "SDB_TRANSPORT_UNREACHABLE",
+        "SYSFS_EMPTY_SHELL_OUTPUT", "SYSFS_ACCESS_DENIED",
+        "SYSFS_PATH_OR_COMMAND_NOT_FOUND",
+    }
+    for key, expected in zip(probes, indices):
         item = {"partition_index": expected, "status": "NOT_READ"}
         if key in errors:
-            # These are fixed internal categories only; never raw shell text.
-            code = errors[key]
-            allowed = {
-                "SDB_SHELL_TIMED_OUT", "SDB_SHELL_CLOSED_OR_REFUSED",
-                "SDB_PROTOCOL_OR_READ_FAILURE", "SDB_TRANSPORT_UNREACHABLE",
-                "SYSFS_EMPTY_SHELL_OUTPUT", "SYSFS_ACCESS_DENIED",
-                "SYSFS_PATH_OR_COMMAND_NOT_FOUND",
-            }
-            item["status"] = code if code in allowed else "OTHER_UNAVAILABLE"
+            item["status"] = (errors[key] if errors[key] in allowed_errors
+                              else "OTHER_UNAVAILABLE")
         elif key in values:
             try:
                 parsed = parse_sysfs(values[key])
                 fields = parsed["partition_name_records"]
-                # Refuse unrelated device output or multiple records from a
-                # command that should have opened ONE literal sysfs file.
+                # Reject a concatenated/wrong-index response from what was
+                # supposed to be ONE literally selected sysfs file.
                 if len(fields) != 1 or fields[0]["index"] != expected:
                     item["status"] = "NO_MATCHING_SINGLE_SYSFS_RECORD"
                 else:
@@ -208,19 +214,45 @@ def inspect_fixed_sample(ip: str, key_path: Path) -> dict:
                 item["status"] = "MALFORMED_OR_CONFLICTING_SYSFS_RECORD"
         observations.append(item)
     result["probe_summary"] = {
-        "tested_partition_indices": [1, 20, 21],
+        "tested_partition_indices": list(indices),
         "readable_uevent_files": witnessed,
         "partname_fields_observed": name_fields,
         "probes": observations,
         "remaining_partition_indices_not_tested": [
-            i for i in range(1, EXPECTED_PARTITIONS + 1) if i not in (1, 20, 21)
+            i for i in range(1, EXPECTED_PARTITIONS + 1) if i not in indices
         ],
+        # Single report is never an authenticated full partition layout.
         "full_partition_layout_proven": False,
     }
     result["owner_watch_sysfs_observed"] = witnessed > 0
     result["state"] = ("FIXED_SYSFS_PARTNAME_FIELDS_OBSERVED" if name_fields else
                        "FIXED_SYSFS_UEVENT_READABLE_WITHOUT_NAMES" if witnessed else
                        "FIXED_SYSFS_NO_VALID_TEXT_OBSERVATIONS")
+    return result
+
+
+def inspect_fixed_sample(ip: str, key_path: Path) -> dict:
+    """Owner-proven p1/p20/p21 behavior, unchanged by follow-up batches."""
+    return _inspect_literal_sysfs_group(
+        ip, key_path, probes=PARTITION_SYSFS_FIXED_PROBES,
+        indices=(1, 20, 21), mode="THREE_EXPLICIT_TEXT_PATHS_NO_WILDCARD",
+    )
+
+
+def inspect_remaining_batch(ip: str, key_path: Path, batch: int) -> dict:
+    """Six fixed paths in one selected batch, never all partitions/any /dev."""
+    if type(batch) is not int or batch not in (1, 2, 3):
+        raise PartitionLabelsError("INVALID_REMAINING_FIXED_BATCH")
+    indices = tuple(range(2 + (batch - 1) * 6, 8 + (batch - 1) * 6))
+    result = _inspect_literal_sysfs_group(
+        ip, key_path,
+        probes=PARTITION_SYSFS_REMAINING_BATCH_PROBES[batch - 1],
+        indices=indices,
+        mode=f"SIX_EXPLICIT_TEXT_PATHS_BATCH_{batch}_NO_WILDCARD",
+    )
+    result["remaining_batch_number"] = batch
+    result["prior_owner_observations_not_repeated"] = [1, 20, 21]
+    result["prior_owner_rootfs_p20_and_user_p21_not_reverified"] = True
     return result
 
 
@@ -322,6 +354,8 @@ def main(argv: list[str] | None = None) -> int:
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     parser.add_argument("--fixed-paths", action="store_true",
                         help="Use only three explicit sysfs text files: p1/p20/p21; no wildcard")
+    parser.add_argument("--remaining-batch", type=int, choices=(1, 2, 3),
+                        help="Exactly six read-only sysfs text paths: batch 1=p2..7, 2=p8..13, 3=p14..19")
     parser.add_argument("--connection-only", action="store_true",
                         help="Single TCP/SDB handshake check, NO shell, sysfs or partition reads")
     parser.add_argument("--report", type=Path, default=None,
@@ -330,11 +364,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.fixed_paths and args.offline_sample:
             raise PartitionLabelsError("FIXED_PATHS_AND_OFFLINE_SAMPLE_ARE_SEPARATE_MODES")
+        if args.remaining_batch is not None and (args.fixed_paths or
+                                                   args.connection_only or args.offline_sample):
+            raise PartitionLabelsError("REMAINING_BATCH_IS_A_SEPARATE_OPT_IN_MODE")
         if args.connection_only and (args.offline_sample or args.fixed_paths):
             raise PartitionLabelsError("CONNECTION_ONLY_IS_SEPARATE_FROM_SYSFS_MODES")
         path = (args.report or (Path.home() /
                 ("watch3-r840x-sdb-connection-redacted.json" if args.connection_only
                  else "watch3-r840x-sysfs-fixed-three.json" if args.fixed_paths
+                 else f"watch3-r840x-sysfs-remaining-batch-{args.remaining_batch}.json"
+                      if args.remaining_batch is not None
                  else "watch3-r840x-sysfs-partition-names.json"))).expanduser()
         # Avoid even the optional networked read when local evidence exists.
         if path.exists() or path.is_symlink():
@@ -354,6 +393,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             result = (inspect_fixed_sample(args.watch_ip, args.key_path.expanduser())
                       if args.fixed_paths else
+                      inspect_remaining_batch(args.watch_ip, args.key_path.expanduser(),
+                                              args.remaining_batch)
+                      if args.remaining_batch is not None else
                       inspect_live(args.watch_ip, args.key_path.expanduser()))
         _private_write(path, result)
     except (PartitionLabelsError, SdbError, OSError, UnicodeError) as exc:
