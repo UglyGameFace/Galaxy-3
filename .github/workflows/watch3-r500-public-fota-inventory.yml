@@ -492,6 +492,78 @@ jobs:
               'flash_allowed':False
           },indent=2))
           PY
+      - name: Localize executable-pattern changes and partition-string offsets in both sboot references
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import tarfile
+
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          old=root/'reference-tar'/'R500XXU1BSD3-FOTA.tar'
+          newfiles=list((root/'reference-new-tar').glob('*.tar'))
+          if len(newfiles)!=1:
+              raise SystemExit('POST_PATCH_ARCHIVE_UNAVAILABLE')
+          def read_boot(p):
+              with tarfile.open(p,'r:') as tf:
+                  m=tf.getmember('sboot.bin')
+                  if not m.isfile() or m.size!=1921296:
+                      raise SystemExit('DIFFERENT_SBOOT_IMAGE_LENGTH')
+                  return tf.extractfile(m).read()
+          pre=read_boot(old)
+          post=read_boot(newfiles[0])
+          if (hashlib.sha256(pre).hexdigest() != '4715861156eeceb949899d355ccc37eefb57062888aadc76aa9f93f9eaf5966e'
+                  or hashlib.sha256(post).hexdigest() != 'c96813f283e2f98d3f33a30c6215fa25b06b756b93adf55ecf8d59fc4d9211a9'):
+              raise SystemExit('WRONG_BOOTLOADER_REFERENCE_BYTES')
+          needles=('ODIN','LOKE','PIT','param','recovery','EXYNOS','SM-R500','SECURE','DOWNLOAD','BOOTLOADER')
+          def locations(blob,word):
+              target=word.encode()
+              res=[]
+              frompos=0
+              while len(res)<64:
+                  pos=blob.find(target,frompos)
+                  if pos<0: break
+                  res.append(pos)
+                  frompos=pos+len(target)
+              return res
+          changes=[]
+          for start in range(0,len(pre),4096):
+              if pre[start:start+4096]!=post[start:start+4096]:
+                  if changes and changes[-1][1]==start:
+                      changes[-1][1]=min(start+4096,len(pre))
+                  else:
+                      changes.append([start,min(start+4096,len(pre))])
+          patterns={'aarch64_ret':bytes.fromhex('c0035fd6'),
+                    'arm32_bx_lr':bytes.fromhex('1eff2fe1'),
+                    'thumb16_bx_lr':bytes.fromhex('7047')}
+          def count_4_aligned(blob,pat):
+              return sum(blob[i:i+4]==pat for i in range(0,len(blob)-3,4))
+          markers={x:{'older_offsets':locations(pre,x),'newer_offsets':locations(post,x),
+                      'same_offset_sets':locations(pre,x)==locations(post,x)}
+                   for x in needles}
+          print('SBOOT_INSTRUCTION_PATTERN_AND_STRING_DELTA')
+          print(json.dumps({
+              'model':'SM-R500 sibling ONLY',
+              'older_build':'R500XXU1BSD3',
+              'newer_build':'R500XXU1GUJ2',
+              'aligned_opcode_pattern_counts_not_proof_of_cpu_mode':{
+                  name:{'before':count_4_aligned(pre,pat),'after':count_4_aligned(post,pat)}
+                  for name,pat in patterns.items()},
+              'differing_bytes_at_same_offsets':sum(x!=y for x,y in zip(pre,post)),
+              'change_regions_4k_merged_count':len(changes),
+              'largest_change_regions':sorted(changes,key=lambda a:a[1]-a[0],reverse=True)[:20],
+              'marker_positions':markers,
+              'code_region_verified':False,
+              'cve_patch_identified':False,
+              'same_model_sboot_code_accepted_on_r840x':False,
+              'physical_watch_contacted':False,
+              'bootloader_executed':False,
+          },indent=2))
+          PY
       - name: Record research limitation
         run: |
           echo 'Source models compared offline; no flashable Watch3 image, PIT or recovery was produced.'
