@@ -99,7 +99,9 @@ def handshake(sock: socket.socket) -> tuple[int,int]:
     if auth != 1:
         raise RfbError("RFB_UNEXPECTED_AUTHENTICATION")
     sock.sendall(b"\x01")  # Shared desktop, no destructive user interaction.
-    data = exactly(sock, 24)
+    # RFB ServerInit: width+height (4), pixel format (16), then name_len (4).
+    # Read the fixed geometry+pixel format only, not name_len twice.
+    data = exactly(sock, 20)
     width, height = struct.unpack(">HH", data[:4])
     if (width, height) != SIZE:
         raise RfbError("WRONG_GUEST_FB_DIMENSIONS:" + str((width,height)))
