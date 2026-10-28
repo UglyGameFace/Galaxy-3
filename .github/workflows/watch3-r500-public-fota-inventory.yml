@@ -416,9 +416,6 @@ jobs:
           print(json.dumps(summary,indent=2))
           PY
 
-        run: |
-          echo 'Downloaded one public SM-R500 archive and unpacked only its containing TAR to ephemeral runner disk for header inspection. No watch communication, firmware execution or flashing.'
-          echo 'Sibling SM-R500 filenames alone do NOT authenticate R840X stock rescue, signed images, PIT or custom boot.'
       - name: Record research limitation
         run: |
           echo 'Source models compared offline; no flashable Watch3 image, PIT or recovery was produced.'
