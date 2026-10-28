@@ -645,6 +645,95 @@ jobs:
           print('AARCH64_PC_RELATIVE_XREF_CANDIDATES')
           print(json.dumps(result,indent=2))
           PY
+      - name: Locate candidate AArch64 PC-relative references into verified S-BOOT marker strings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import tarfile
+
+          root=Path(os.environ['RUNNER_TEMP'])
+          paths=[root/'reference-tar'/'R500XXU1BSD3-FOTA.tar']
+          posts=list((root/'reference-new-tar').glob('*.tar'))
+          if len(posts)!=1: raise SystemExit('MISSING_POST_COMPARISON')
+          paths+=posts
+          markers=(b'ODIN',b'LOKE',b'PIT',b'param',b'recovery')
+          def sext(x,n): return x-(1<<n) if x & (1<<(n-1)) else x
+          def xrefs(blob):
+              found=[]
+              # AArch64 ADRP+ADD and ADR materialization; speculative while image mapping is not proven.
+              for pc in range(0,min(len(blob)-8,650000),4):
+                  word=int.from_bytes(blob[pc:pc+4],'little')
+                  imm=(((word>>5)&0x7ffff)<<2)|((word>>29)&3)
+                  if word & 0x9f000000 == 0x90000000:  # ADRP
+                      reg=word & 31
+                      page=(pc&~4095)+(sext(imm,21)<<12)
+                      for d in (4,8,12,16,20,24):
+                          if pc+d+4>len(blob): continue
+                          nex=int.from_bytes(blob[pc+d:pc+d+4],'little')
+                          if (nex & 0xff000000)!=0x91000000: continue  # ADD Xd, Xn, #imm
+                          if ((nex>>5)&31)!=reg:continue
+                          shift=(nex>>22)&3
+                          if shift not in (0,1):continue
+                          target=page+(((nex>>10)&4095)<<(12 if shift else 0))
+                          if 0<=target<len(blob):
+                              found.append((pc,pc+d,target,'ADRP_ADD'))
+                  elif word & 0x9f000000 == 0x10000000:  # ADR
+                      target=pc+sext(imm,21)
+                      if 0<=target<len(blob):
+                          found.append((pc,pc,target,'ADR'))
+              return found
+          report={}
+          for p,label,expected in zip(paths,('R500XXU1BSD3','R500XXU1GUJ2'),(
+              '4715861156eeceb949899d355ccc37eefb57062888aadc76aa9f93f9eaf5966e',
+              'c96813f283e2f98d3f33a30c6215fa25b06b756b93adf55ecf8d59fc4d9211a9')):
+              with tarfile.open(p,'r:') as tf:
+                  m=tf.getmember('sboot.bin')
+                  blob=tf.extractfile(m).read()
+              if hashlib.sha256(blob).hexdigest()!=expected:
+                  raise SystemExit('UNPINNED_REFERENCE_BOOTLOADER')
+              refs=xrefs(blob)
+              matched={}
+              for m in markers:
+                  candidates=[]
+                  start=0
+                  occurrences=[]
+                  while True:
+                      off=blob.find(m,start)
+                      if off<0:break
+                      occurrences.append(off)
+                      start=off+len(m)
+                  for pc,nextpc,target,kind in refs:
+                      near=[off for off in occurrences if off-64<=target<=off]
+                      if near:
+                          candidates.append({
+                              'instruction_file_offset':pc,
+                              'followup_file_offset':nextpc,
+                              'target_file_offset':target,
+                              'marker_near_offset':near[0],
+                              'candidate_mode':kind,
+                          })
+                  matched[m.decode()]={'marker_count':len(occurrences),
+                                       'candidate_instruction_refs':candidates[:15],
+                                       'candidate_refs_truncated':len(candidates)>15}
+              report[label]={'bootloader_sha256':expected,
+                             'pc_relative_pairs_with_any_in_range_target':len(refs),
+                             'string_reference_hypotheses':matched}
+          print('SBOOT_AARCH64_ADRP_STRING_REFERENCE_HYPOTHESES')
+          print(json.dumps({
+              'device':'SM-R500 reference only',
+              'note':'File offset assumed to track image relative runtime address; candidate instruction pairs are NOT validated function xrefs until mapped by disassembler.',
+              'models_not_interchangeable':True,
+              'references':report,
+              'bootloader_code_executed':False,
+              'CVE_root_cause_proven':False,
+              'watch_contacted':False
+          },indent=2))
+          PY
       - name: Record research limitation
         run: |
           echo 'Source models compared offline; no flashable Watch3 image, PIT or recovery was produced.'
