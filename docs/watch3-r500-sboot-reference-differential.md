@@ -100,6 +100,31 @@ through [Issue #47 sibling archive audit workflow](
 [verified run #40634785980](
 https://github.com/UglyGameFace/Galaxy-3/actions/runs/40634785980).
 
+
+## Bounded PC-relative bootloader string-reference study
+
+The `watch3_sboot_xref_map.py` analyzer reads **only** the two already
+SHA-256-pinned original SM-R500 S-BOOT files from the existing offline
+Actions workflow. It looks for **consecutive** AArch64 `ADRP + ADD Xn,Xn`
+sequences in the previously identified *candidate* image interval
+`0x40000..0x115000`, then requires a bounded literal match for
+`PIT`, `param`, `recovery`, `ODIN`, or `LOKE`. It distinguishes
+NUL-terminated literals from merely separator-terminated prefixes.
+
+This is **not** a generic string-count scan: the report ties the referenced
+literal to the candidate source instruction's raw file offset, requires
+consistent destination registers, handles signed ADRP pages, rejects
+32-bit ADD substitutions and nonconsecutive pairs, bounds the output, and
+tests altered-operand/unsafe-input negative cases. The original archived
+bootloader binaries, not synthetic stand-ins, are processed by CI; synthetic
+fixtures are used solely for unit tests.
+
+A code reference to `param` or `recovery` is **not** proof of the
+wireless-download command handler, its reachability, input control, a
+bootloader vulnerability, a signature bypass, or an unlock. The real physical
+`SM-R840X / R840XXXU1AUA2` S-BOOT bytes are still missing. The scan
+does not contact the watch, execute boot code, or modify partitions.
+
 ## What the evidence actually changes
 
 **Established:** one authentic-to-public-repository pre/post
