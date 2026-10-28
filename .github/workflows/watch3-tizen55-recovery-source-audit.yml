@@ -105,13 +105,13 @@ jobs:
           root = Path("/tmp/watch3-tizen55-public-source")
           targets = {
               "initrd-fota-1.1.3-0": [
-                  ("scripts/fota-init.sh", [(142, 198)])],
+                  ("scripts/fota-init.sh", [(10, 55), (115, 140), (142, 198)])],
               "initrd-recovery-0.3.0-0": [
                   ("src/initrd-recovery/init", [(57, 100)])],
               "system-rw-update-1.2.4-0": [
                   ("", [])],
               "system-recovery-0.3.0-0": [
-                  ("", [])],
+                  ("src/system-recovery/recovery-init.in", [(1, 125)])],
           }
           for package, requested in targets.items():
               archive = next((root / package).glob("*.tar.*"))
