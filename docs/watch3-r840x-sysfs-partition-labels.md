@@ -316,6 +316,74 @@ documented *separate* text-only `--fixed-paths` sysfs probe,
 with a new output path. Stock recovery and bootloader GO
 remain **UNPROVEN** regardless of network outcome.
 
+## Physical recheck: TCP and SDB handshake recovered (October 27)
+
+The owner ran a separate **connection-only** diagnostic from Android/Termux
+against the watch-side hotspot address `10.54.86.131`, while in normal Tizen.
+The sanitized owner-provided file
+
+`~/watch3-r840x-sdb-connect-after-network-check.json`
+
+establishes:
+
+- `state=SDB_HANDSHAKE_COMPLETE_NO_SYSFS_READ`
+- `tcp_connected=true` and `sdb_handshake_completed=true`
+- `transport_diagnosis_only=true`,
+  `probe_mode=SINGLE_SDB_TCP_HANDSHAKE_NO_SHELL_OR_SYSFS`
+- `remote_device_identity_verified=false`,
+  `owner_watch_sysfs_observed=false`,
+  `source_path_expression=[]`, `report=null`
+- `raw_partition_bytes_read=false`, `pit_requested=false`,
+  `odin_session_started=false`, `watch_write_performed=false`,
+  `stock_recovery_proven=false`, `flash_allowed=false`.
+
+**Critical sequencing detail:** the user then tried to run that **same
+connection-only check with the same `--report` path** and received
+`PARTITION_PROBE_ERROR: REPORT_ALREADY_EXISTS`. The subsequent
+`cat` printed the pre-existing **successful** JSON. The error came
+from the tool's *local exclusive-output preflight*, **before any new
+SDB connection**. It is **not** a watch failure, new handshake failure,
+or proof that partition labels were collected by that second command.
+
+The prior `TCP_NETWORK_UNREACHABLE_OR_BLOCKED` diagnostic described an
+**earlier network state**. That failure and the newly proven successful
+SDB handshake are separate dated observations, **not conflicting
+outcomes of the same attempt**. The IP still does not cryptographically
+establish the remote watch's identity, although the owner's normal
+Tizen/hotspot observation makes it the intended target.
+
+### Only meaningful next observation: the existing three literal sysfs reads
+
+There is **no reason to repeat the handshake-only probe**, debug
+the old network failure, delete an existing report, add new protocol
+variants or send Odin commands. The already merged
+`--fixed-paths` implementation can now be exercised exactly once:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+out="$HOME/watch3-r840x-sysfs-fixed-$(date +%Y%m%d-%H%M%S)-$.json"
+python tools/watch3_r840x_partition_sysfs_readonly.py \\
+  --watch-ip 10.54.86.131 --fixed-paths --report "$out"
+cat "$out"
+```
+
+**Only use `10.54.86.131` if it is still the current watch-side
+IP** on the trusted network. Use a distinct local file name for each
+observation. The script reads exactly three ordinary kernel sysfs
+`uevent` text pseudo-files for **p1, p20, p21**; no PIT dump,
+partition contents, stock image or flashing. It can still fail at the
+*shell service* stage even after a successful SDB handshake.
+Read-only sysfs availability has **not** yet been physically proven.
+
+A useful result will be a categorical per-path status:
+`PARTNAME_FIELD_OBSERVED`, `UEVENT_READABLE_BUT_PARTNAME_ABSENT`,
+`SDB_SHELL_CLOSED_OR_REFUSED`, `SDB_SHELL_TIMED_OUT`,
+`SYSFS_PATH_OR_COMMAND_NOT_FOUND`, or other fail-closed status.
+**Do not infer physical roles for p1/p20/p21**, or declare the
+remaining 18 partition names known from a three-file sample.
+A successful sysfs metadata sample remains `NO_GO` for all
+firmware modifications and alternate boot.
+
 ## Interpreting results without inventing recovery
 
 - `SYSFS_PARTITION_LABELS_OBSERVED`: a consistent subset of
