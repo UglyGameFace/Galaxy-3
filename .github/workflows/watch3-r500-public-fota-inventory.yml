@@ -416,6 +416,82 @@ jobs:
           print(json.dumps(summary,indent=2))
           PY
 
+      - name: Locate actual S-BOOT protocol and partition markers in raw sibling bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import tarfile
+          from collections import Counter
+
+          tar = pathlib.Path(os.environ['RUNNER_TEMP']) / 'reference-tar' / 'R500XXU1BSD3-FOTA.tar'
+          with tarfile.open(tar, 'r:') as a:
+              m = a.getmember('sboot.bin')
+              if not m.isfile() or m.size != 1921296:
+                  raise SystemExit('REFERENCE_SBOOT_NOT_EXPECTED_ORIGINAL')
+              data = a.extractfile(m).read(m.size+1)
+          if len(data) != 1921296:
+              raise SystemExit('SBOOT_LENGTH_CHANGED')
+          digest = hashlib.sha256(data).hexdigest()
+          if digest != '4715861156eeceb949899d355ccc37eefb57062888aadc76aa9f93f9eaf5966e':
+              raise SystemExit('SBOOT_BYTES_CHANGED')
+          labels = ['ODIN','LOKE','PIT','param','recovery','RECOVERY','BOOTLOADER','SM-R500',
+                    'exynos','EXYNOS','sboot']
+          offsets = {}
+          for name in labels:
+              needle=name.encode('ascii')
+              positions=[]
+              start=0
+              while True:
+                  k=data.find(needle,start)
+                  if k<0: break
+                  if len(positions)<36: positions.append(hex(k))
+                  start=k+len(needle)
+              offsets[name]=positions
+          # 32-bit ARM/AArch64 branch and return opcodes are heuristics, NOT
+          # proof of the active instruction state or a validated memory map.
+          a64_ret=b'\xc0\x03\x5f\xd6'
+          a32_bx_lr=b'\x1e\xff\x2f\xe1'
+          thumb_bx_lr=b'\x70\x47'
+          instr={
+              'aarch64_RET_aligned_4':sum(1 for i in range(0,len(data)-3,4)
+                  if data[i:i+4]==a64_ret),
+              'arm32_BX_LR_aligned_4':sum(1 for i in range(0,len(data)-3,4)
+                  if data[i:i+4]==a32_bx_lr),
+              'thumb_BX_LR_aligned_2':sum(1 for i in range(0,len(data)-1,2)
+                  if data[i:i+2]==thumb_bx_lr),
+          }
+          # Observe bounded textual context in 1KB windows around each
+          # protocol constant, avoiding unbounded dump/ROM extraction.
+          contexts=[]
+          for key in ('ODIN','LOKE'):
+              for hexoff in offsets[key][:8]:
+                  p=int(hexoff,16)
+                  low=max(0,p-256)
+                  high=min(len(data),p+256)
+                  names=re.findall(rb'[ -~]{8,90}',data[low:high])
+                  contexts.append({'constant':key,'offset':hexoff,
+                      'neighbor_ascii':[
+                          x.decode('ascii','replace') for x in names[:16]]})
+          print(json.dumps({
+              'model':'SM-R500 only; not evidence of exact R840X loader',
+              'verified_reference_sboot_sha256':digest,
+              'first_64_bytes_hex':data[:64].hex(),
+              'protocol_partition_string_offsets':offsets,
+              'local_heuristic_instruction_counts':instr,
+              'protocol_marker_local_context':contexts[:15],
+              'possible_loader_segments_decoded':False,
+              'symbolic_address_map_proven':False,
+              'real_sboot_code_executed':False,
+              'watch_contacted':False,
+              'flash_allowed':False
+          },indent=2))
+          PY
       - name: Record research limitation
         run: |
           echo 'Source models compared offline; no flashable Watch3 image, PIT or recovery was produced.'
