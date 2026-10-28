@@ -1,0 +1,110 @@
+name: Issue 47 S-BOOT PIT semantic diff (no device)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/watch3_sboot_pit_semantic_diff.py'
+      - 'tests/test_watch3_sboot_pit_semantic_diff.py'
+      - '.github/workflows/watch3-sboot-pit-semantic-diff.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-original-reference-pit-code:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run synthetic decoder, safety and mutation regressions
+        run: python3 -m unittest discover -s tests -p 'test_watch3_sboot_pit_semantic_diff.py' -v
+      - name: Fetch pinned historical R500 FOTA archives (NOT R840X)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq p7zip-full
+          mkdir -p "$RUNNER_TEMP/older" "$RUNNER_TEMP/newer"
+          curl -fL --retry 2 --connect-timeout 10 --max-time 140 --max-filesize 40000000 \
+            'https://raw.githubusercontent.com/lapinclown/SM-R500-TizenFOTA-pkgs/main/R500XXU1BSD3/R500XXU1BSD3-FOTA.7z' \
+            -o "$RUNNER_TEMP/older/reference.7z"
+          curl -fL --retry 2 --connect-timeout 10 --max-time 140 --max-filesize 60000000 \
+            'https://raw.githubusercontent.com/lapinclown/SM-R500-TizenFOTA-pkgs/main/R500XXU1GUJ2/R500XXU1GUJ2-FOTA.7z' \
+            -o "$RUNNER_TEMP/newer/reference.7z"
+          python3 - <<'PY'
+          import hashlib,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          pairs=(('older','6d104d87d934af6908fd182a589662b72d06e4ad79445896b15355fd77f97586',None),
+                 ('newer',None,'3f7fb436056ad43a58a735ae026b5ac603ea1ae8'))
+          for side,sha256,gitsha in pairs:
+              p=root/side/'reference.7z'
+              size=p.stat().st_size
+              if not 1_000_000<=size<=60_000_000:raise SystemExit('ARCHIVE_LENGTH_UNEXPECTED:'+side)
+              blob=p.read_bytes()
+              if sha256 and hashlib.sha256(blob).hexdigest()!=sha256:
+                  raise SystemExit('ARCHIVE_SHA256_MISMATCH:'+side)
+              if gitsha and hashlib.sha1(b'blob '+str(size).encode()+b'\0'+blob).hexdigest()!=gitsha:
+                  raise SystemExit('GIT_BLOB_SHA1_MISMATCH:'+side)
+          PY
+      - name: Extract only reference TAR for offline reading; check S-BOOT hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          7z e -bd -y "$RUNNER_TEMP/older/reference.7z" "-o$RUNNER_TEMP/older" >/dev/null
+          7z e -bd -y "$RUNNER_TEMP/newer/reference.7z" "-o$RUNNER_TEMP/newer" >/dev/null
+          python3 - <<'PY'
+          import hashlib,os,pathlib,tarfile
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          for side,build,sha in (
+             ('older','R500XXU1BSD3','4715861156eeceb949899d355ccc37eefb57062888aadc76aa9f93f9eaf5966e'),
+             ('newer','R500XXU1GUJ2','c96813f283e2f98d3f33a30c6215fa25b06b756b93adf55ecf8d59fc4d9211a9')):
+              folder=root/side
+              matches=list(folder.glob('*.tar'))
+              if len(matches)!=1 or matches[0].name!=build+'-FOTA.tar' or matches[0].stat().st_size>150_000_000:
+                  raise SystemExit('UNEXPECTED_TAR:'+side)
+              with tarfile.open(matches[0],'r:') as tf:
+                  found=[m for m in tf.getmembers() if m.name=='sboot.bin']
+                  if len(found)!=1 or not found[0].isfile() or found[0].size!=1_921_296:
+                      raise SystemExit('UNEXPECTED_SBOOT_MEMBER:'+side)
+                  fd=tf.extractfile(found[0]); assert fd is not None
+                  blob=fd.read(1_921_297)
+              if len(blob)!=1_921_296 or hashlib.sha256(blob).hexdigest()!=sha:
+                  raise SystemExit('SBOOT_SHA256_MISMATCH:'+side)
+              (folder/'reference-sboot.bin').write_bytes(blob)
+          PY
+      - name: Run semantic comparison against actual pinned original instruction bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/watch3_sboot_pit_semantic_diff.py \
+            --older "$RUNNER_TEMP/older/reference-sboot.bin" \
+            --newer "$RUNNER_TEMP/newer/reference-sboot.bin" \
+            --output "$RUNNER_TEMP/semantic-diff.json"
+          python3 - <<'PY'
+          import json,os,pathlib
+          result=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'semantic-diff.json').read_text())
+          assert result['decision']=='NO_GO' and result['watch_contacted'] is False
+          print(json.dumps({
+             'model': result['source_model'],
+             '2019_PIT_xref':result['older']['pit_string_reference'],
+             '2021_PIT_xref':result['newer']['pit_string_reference'],
+             '2019_length_check':result['older']['compare_0x2000'],
+             '2021_length_check':result['newer']['compare_0x2000'],
+             '2019_magic':result['older']['construct_0x12349876'],
+             '2021_magic':result['newer']['construct_0x12349876'],
+             'same_instruction_class_window':result['same_opcode_class_sequence_in_bounded_window'],
+             'cve_patch_identified':False,'watch_contacted':False,'flash_allowed':False,
+          },indent=2))
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as out:
+              out.write('## SM-R500 sibling PIT-check study (off-device only)\n')
+              for name in ('both_have_raw_offset_pit_xref','both_compare_0x2000',
+                           'both_construct_0x12349876','same_opcode_class_sequence_in_bounded_window'):
+                  out.write(f'- {name}: **{result[name]}**\n')
+              out.write('- Not an R840X vulnerability demonstration, recovery image or boot method. **NO_GO**.\n')
+          PY
+      - name: Verify repository left unchanged and firmware not committed
+        run: git diff --exit-code && git status --short
