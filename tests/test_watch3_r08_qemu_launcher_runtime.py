@@ -129,6 +129,16 @@ class RuntimeAnalysisTests(unittest.TestCase):
                                returncode=-11, timed_out=False, elapsed=2.0)
         self.assertEqual(result["status"], "LAUNCHER_RUNTIME_NOT_PROVEN")
 
+    def test_svg_runtime_decode_error_is_not_silently_accepted(self):
+        error = ('qrc:/qt-project.org/imports/QtQuick/VirtualKeyboard/'
+                 'Styles/Builtin/default/style.qml: QML Image: Error decoding: '
+                 'image.svg: Unsupported image format\n')
+        result = probe.analyze(trace() + error,
+                               platform="offscreen", returncode=0,
+                               timed_out=False, elapsed=18)
+        self.assertEqual(result["status"], "LAUNCHER_RUNTIME_NOT_PROVEN")
+        self.assertIn("unsupported image format", result["fatal_messages_seen"])
+
     def test_short_timeout_cannot_be_accepted(self):
         result = probe.analyze(trace(), platform="offscreen",
                                returncode=-9, timed_out=True, elapsed=0.2)
@@ -240,6 +250,7 @@ class RealPluginSelectionTests(unittest.TestCase):
         self.assertEqual(env["QT_QPA_PLATFORM"], "offscreen")
         self.assertEqual(env["QT_QUICK_BACKEND"], "software")
         self.assertEqual(env["QT_PLUGIN_PATH"], str(self.plugin_dir.parent))
+        self.assertEqual(env["QT_DEBUG_PLUGINS"], "0")
         self.assertNotIn("GITHUB_TOKEN", env)
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
         self.assertFalse(result["watch_contacted"])
