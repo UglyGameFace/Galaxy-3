@@ -9,9 +9,11 @@ on:
       - 'tools/watch3_r08_qemu_userland_smoke.py'
       - 'tools/watch3_r08_qemu_launcher_closure.py'
       - 'tools/watch3_r08_qml_module_closure.py'
+      - 'tools/watch3_r08_qemu_launcher_runtime.py'
       - 'tests/test_watch3_r08_qemu_userland_smoke.py'
       - 'tests/test_watch3_r08_qemu_launcher_closure.py'
       - 'tests/test_watch3_r08_qml_module_closure.py'
+      - 'tests/test_watch3_r08_qemu_launcher_runtime.py'
   workflow_dispatch:
 
 permissions:
@@ -33,6 +35,7 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_userland_smoke.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_launcher_closure.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qml_module_closure.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_launcher_runtime.py' -v
           python3 -m py_compile tools/watch3_r08_select_derived_artifact.py tools/watch3_r08_qemu_userland_smoke.py
 
       - name: Find verified main-commit legacy ext4 artifact, not an unrelated run
@@ -213,6 +216,29 @@ jobs:
                   f.write("- "+item["module"]+": "+item["qmldir_path_in_guest"]+
                           ", target AArch64 plugins inspected where declared.\n")
               f.write("- Runtime QML import, GUI startup, framebuffer, device boot: NOT PROVEN.\n")
+          PY
+
+      - name: Start real ARM64 Asteroid compositor offscreen with bounded QML import trace
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/watch3_r08_qemu_launcher_runtime.py \
+            --extracted-rootfs extracted \
+            --report reports/real-arm64-launcher-qml-runtime.json
+          python3 - <<'PY'
+          import json,os
+          p=json.load(open("reports/real-arm64-launcher-qml-runtime.json"))
+          assert p["status"]=="QPA_AND_COMPOSITOR_QML_IMPORT_OBSERVED_OFF_DEVICE"
+          assert p["actual_qpa_plugin_loaded_in_qemu_trace"]
+          assert p["actual_compositor_qrc_qml_import_trace_seen"]
+          assert not p["compositor_pixel_output_proven"]
+          assert not p["watch_contacted"] and not p["flashable"]
+          print("REAL_BUILT_ARM64_COMPOSITOR_QML_STARTUP_TRACE_PROVED")
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
+              f.write("\n## Real target ARM64 launcher offscreen initialization\n")
+              f.write("- QPA plugin: "+p["selected_actual_aarch64_qpa_plugin"]+"\n")
+              f.write("- Embedded compositor.qml import observed under QEMU.\n")
+              f.write("- No real Watch3 frame, Wayland client, stock rescue or boot proven.\n")
           PY
 
       - name: Publish ONLY small reports, no firmware or whole filesystem
