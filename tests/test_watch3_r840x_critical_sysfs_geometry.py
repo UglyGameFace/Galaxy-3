@@ -140,5 +140,104 @@ class GeometrySafetyTests(unittest.TestCase):
                             probes={"forged": "cat /dev/mmcblk0p10"})
 
 
+    def test_param_followup_reuses_exact_existing_two_commands(self):
+        subset = sdb.CRITICAL_PARAM_GEOMETRY_PROBES
+        self.assertEqual(subset, {
+            "critical_p10_start": sdb.CRITICAL_GEOMETRY_PROBES["critical_p10_start"],
+            "critical_p10_size": sdb.CRITICAL_GEOMETRY_PROBES["critical_p10_size"],
+        })
+        self.assertEqual(len(subset), 2)
+        self.assertTrue(all(sdb.ALLOWED_PROBES[k] == v for k, v in subset.items()))
+        self.assertIn(subset, sdb.SYSFS_PROBE_SETS)
+        self.assertNotIn("critical_disk_sectors", subset)
+        self.assertNotIn("critical_p13_start", subset)
+        self.assertNotIn("critical_p14_size", subset)
+
+    def test_param_followup_diagnoses_individual_categorical_failures(self):
+        vals = {"critical_p10_size": "2048\\n"}
+        errors = {"critical_p10_start": "SYSFS_ACCESS_DENIED"}
+        report = geometry.summarize_param(vals, errors, owner_watch=True)
+        self.assertEqual(report["state"], "PARAM_FIELD_PARTIAL_OR_UNAVAILABLE")
+        self.assertEqual(report["field_diagnostics"]["critical_p10_start"],
+                         "SYSFS_ACCESS_DENIED")
+        self.assertEqual(report["field_diagnostics"]["critical_p10_size"],
+                         "KERNEL_NUMERIC_FIELD_OBSERVED")
+        self.assertFalse(report["param_geometry_observed_on_watch"])
+        self.assertFalse(report["flash_allowed"])
+        self.assertFalse(report["combined_with_previous_snapshot"])
+        self.assertFalse(report["stock_recovery_proven"])
+        self.assertNotIn("raw_stdout", report)
+
+        for reason in geometry.PARAM_ERROR_CATEGORIES:
+            with self.subTest(reason=reason):
+                report = geometry.summarize_param(
+                    vals, {"critical_p10_start": reason}, owner_watch=True)
+                self.assertEqual(report["field_diagnostics"]["critical_p10_start"],
+                                 reason)
+        unknown = geometry.summarize_param({}, {"critical_p10_start": "private watch output"})
+        self.assertEqual(unknown["field_diagnostics"]["critical_p10_start"],
+                         "SDB_OR_SYSFS_FIELD_UNAVAILABLE")
+        self.assertNotIn("private watch output", json.dumps(unknown))
+        missing = geometry.summarize_param({}, {})
+        self.assertEqual(missing["field_diagnostics"]["critical_p10_start"],
+                         "FIELD_NOT_RETURNED")
+        malformed = geometry.summarize_param({"critical_p10_start": "uid=private"})
+        self.assertEqual(malformed["field_diagnostics"]["critical_p10_start"],
+                         "MALFORMED_NUMERIC_SYSFS_FIELD")
+        self.assertNotIn("uid=private", json.dumps(malformed))
+
+    def test_param_followup_numeric_range_cannot_prove_pit_or_disk_bounds(self):
+        result = geometry.summarize_param(
+            {"critical_p10_start": "10240\\n", "critical_p10_size": "256\\n"},
+            owner_watch=True)
+        self.assertEqual(result["state"], "TWO_PARAM_KERNEL_SCALARS_OBSERVED")
+        self.assertEqual(result["param_sector_candidate"],
+                         {"start_sector": 10240, "sector_count": 256,
+                          "end_exclusive_sector": 10496})
+        self.assertTrue(result["param_geometry_observed_on_watch"])
+        self.assertFalse(result["independent_disk_capacity_verified_in_this_probe"])
+        self.assertFalse(result["authentic_samsung_pit_obtained"])
+        self.assertFalse(result["flash_allowed"])
+        for bad in ("0\\n", "-10", "0x100", "PRIVATE", "9999999999999999"):
+            with self.subTest(bad=bad):
+                result = geometry.summarize_param(
+                    {"critical_p10_start": "10240", "critical_p10_size": bad},
+                    owner_watch=True)
+                self.assertFalse(result["param_geometry_observed_on_watch"])
+                self.assertFalse(result["flash_allowed"])
+        with self.assertRaisesRegex(geometry.GeometryError, "UNEXPECTED_COLLECTOR_PATH"):
+            geometry.summarize_param({"critical_p13_size": "2048"})
+        with self.assertRaisesRegex(geometry.GeometryError, "UNEXPECTED_COLLECTOR_PATH"):
+            geometry.summarize_param({}, {"critical_p14_start": "error"})
+
+    def test_param_only_cli_does_not_revisit_successful_reads_or_clobber(self):
+        with tempfile.TemporaryDirectory() as td:
+            old = Path(td) / "prior-critical-geometry.json"
+            old.write_text("ORIGINAL EVIDENCE", encoding="utf-8")
+            new = Path(td) / "param-followup.json"
+            called = []
+            def fake_collect(ip, key_path, probes):
+                self.assertIs(probes, sdb.CRITICAL_PARAM_GEOMETRY_PROBES)
+                called.append(1)
+                return ({"critical_p10_size": "2048\\n"},
+                        {"critical_p10_start": "SYSFS_PATH_OR_COMMAND_NOT_FOUND"})
+            with patch.object(geometry, "collect", side_effect=fake_collect):
+                self.assertEqual(geometry.main([
+                    "--watch-ip", "10.0.0.65", "--param-only",
+                    "--output", str(new)]), 0)
+                self.assertEqual(geometry.main([
+                    "--watch-ip", "10.0.0.65", "--param-only",
+                    "--output", str(new)]), 1)
+            self.assertEqual(called, [1])
+            self.assertEqual(old.read_text(), "ORIGINAL EVIDENCE")
+            self.assertEqual(new.stat().st_mode & 0o077, 0)
+            report = json.loads(new.read_text())
+            self.assertEqual(len(report["source_paths_fixed_no_raw_partition_devices"]), 2)
+            self.assertEqual(report["field_diagnostics"]["critical_p10_start"],
+                             "SYSFS_PATH_OR_COMMAND_NOT_FOUND")
+            self.assertNotIn("10.0.0.65", new.read_text())
+            self.assertEqual(report["result"], "NO_GO")
+
+
 if __name__ == "__main__":
     unittest.main()
