@@ -106,3 +106,63 @@ signed successor; a trustworthy PIT/partition image comparison,
 bootloader signing/rollback evidence; and verified restore on
 sacrificial matching hardware. The measured numeric sectors, even
 if complete, are *not* enough to justify a flash or retail cross-flash.
+
+
+## Owner's physical seven-scalar result and p10-only follow-up (October 27, 2026)
+
+The owner ran the original tool on a normally booted **SM-R840X** and
+provided the redacted JSON, saved **locally** as
+`~/watch3-r840x-critical-geometry-redacted.json`:
+
+- The whole `mmcblk0` device reported **15,269,888** Linux 512-byte
+  sectors. This is kernel metadata, not an authenticated Samsung PIT.
+- `mmcblk0p13` (`boot`): start **169,984**, size **36,864** sectors,
+  exclusive end **206,848** (18 MiB).
+- `mmcblk0p14` (`recovery`): start **206,848**, size **36,864**
+  sectors, exclusive end **243,712** (18 MiB). These two observed
+  ranges are adjacent, not overlapping.
+- `mmcblk0p10` (`param`): **REPORTED_FIELD_UNAVAILABLE**. This
+  original summary collapses the two input keys and discards their
+  categorical transport/sysfs errors. It cannot establish whether
+  `start`, `size`, or both failed. It does **not** mean the partition
+  is absent: the earlier actual 21/21 `uevent` report observed
+  `p10=param`.
+- Original report: `PARTIAL_OR_UNAVAILABLE_KERNEL_SECTOR_FIELDS`,
+  `result=NO_GO`; no PIT/Odin/raw block/write. A partial report
+  deliberately cannot assert the three-partition non-overlap result
+  because the p10 sector range is unknown.
+
+The existing shared `collect()` already maps SDB and sysfs failures
+into **private-safe categorical errors**, but the original geometry
+report didn't retain those categories. The small **`--param-only`**
+mode reuses that collector and asks for **exactly two** existing
+hardcoded `cat /sys/class/block/mmcblk0p10/{start,size}` commands.
+It does not reread the disk, boot or recovery fields, request PIT,
+try root, or run a shell command supplied by the user.
+
+After its GitHub CI passes **and the change is merged**, the optional
+owner-operated Android/Termux diagnostic is:
+
+```sh
+cd ~/Galaxy-3 && git switch main && git pull --ff-only
+python tools/watch3_r840x_critical_sysfs_geometry.py \
+  --watch-ip WATCH_CURRENT_WIFI_IP --param-only
+cat ~/watch3-r840x-param-geometry-diagnostic-redacted.json
+```
+
+Use the **currently displayed** watch Wi-Fi IP on the same trusted
+network, with existing authorized SDB. The tool will fail safely if
+the separate diagnostic report already exists, before contacting
+the watch. Never delete or overwrite the original seven-scalar JSON
+just to rerun it. If SDB is unavailable, stop; no fallback to Odin,
+`dd`, privilege escalation, alternate paths or repeated retries.
+
+The follow-up JSON contains a bounded category **per p10 field**
+(e.g. `SYSFS_ACCESS_DENIED`, `SYSFS_PATH_OR_COMMAND_NOT_FOUND`,
+`SDB_TRANSPORT_UNREACHABLE`, `SDB_PROTOCOL_OR_READ_FAILURE`,
+`SDB_SHELL_CLOSED_OR_REFUSED`, or an observed numeric value).
+It never saves raw shell output or a private IP. If both numbers are
+obtained it reports a **p10 kernel sector candidate** from a
+*different snapshot*: do not silently combine it with the earlier
+disk/boot/recovery readings as one atomic measurement. No authentic
+PIT/signing/stock rescue/custom boot is established, so `NO_GO` remains.

@@ -100,9 +100,15 @@ CRITICAL_GEOMETRY_PROBES = {
     "critical_p14_start": "cat /sys/class/block/mmcblk0p14/start",
     "critical_p14_size": "cat /sys/class/block/mmcblk0p14/size",
 }
+# Retry only the two previously unavailable p10 scalars, never the five
+# successfully observed disk/boot/recovery fields.
+CRITICAL_PARAM_GEOMETRY_PROBES = {
+    key: CRITICAL_GEOMETRY_PROBES[key]
+    for key in ("critical_p10_start", "critical_p10_size")
+}
 SYSFS_PROBE_SETS = (PARTITION_SYSFS_PROBES, PARTITION_SYSFS_FIXED_PROBES,
                     *PARTITION_SYSFS_REMAINING_BATCH_PROBES,
-                    CRITICAL_GEOMETRY_PROBES)
+                    CRITICAL_GEOMETRY_PROBES, CRITICAL_PARAM_GEOMETRY_PROBES)
 
 # Explicit, fixed, read-only operations; storage and battery probe sets run
 # only when expressly requested. Normal boot collection stays unchanged.
@@ -473,6 +479,7 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
             probes is not FOTA_PATH_PROBES and probes is not PARTITION_SYSFS_PROBES and
             probes is not PARTITION_SYSFS_FIXED_PROBES and
             probes is not CRITICAL_GEOMETRY_PROBES and
+            probes is not CRITICAL_PARAM_GEOMETRY_PROBES and
             not any(probes is batch for batch in PARTITION_SYSFS_REMAINING_BATCH_PROBES)):
         raise SdbError("Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed (plus the fixed root-path set)")
     for name in probes:
@@ -555,6 +562,8 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
                               probes is ROOT_PATH_PROBES or probes is FOTA_PATH_PROBES or
                               probes is PARTITION_SYSFS_PROBES or
                               probes is PARTITION_SYSFS_FIXED_PROBES or
+                              probes is CRITICAL_GEOMETRY_PROBES or
+                              probes is CRITICAL_PARAM_GEOMETRY_PROBES or
                               any(probes is batch for batch in PARTITION_SYSFS_REMAINING_BATCH_PROBES)
                               else "Watch did not answer this SDB read")
     return observations, problems
