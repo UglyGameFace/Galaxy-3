@@ -1,0 +1,156 @@
+name: Issue 47 real AsteroidOS legacy-ext4 derivative (NO DEVICE)
+
+# Real preserved image in CI, no 8040-task BitBake rebuild, no watch contacts.
+# Upload new image only once after this workflow is merged to main.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-original-legacy-derivative.yml'
+      - 'tools/derive_watch3_r08_original_legacy_ext4.py'
+      - 'tests/test_watch3_r08_original_legacy_derivative.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-original-legacy-derivative.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: galaxy3-r08-real-ext4-compatibility
+  cancel-in-progress: false
+
+jobs:
+  convert-verified-original-off-device:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run six immutable-source and copy-only regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_original_legacy_derivative.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_legacy_ext4.py' -v
+
+      - name: Retrieve only the already preserved real ARM64 rootfs
+        uses: actions/download-artifact@v4
+        with:
+          name: galaxy3-r08-PRESERVED-OFFLINE-NOT-FLASHABLE-image-40530865234
+          run-id: 40530865234
+          repository: UglyGameFace/Galaxy-3
+          github-token: ${{ github.token }}
+          path: original
+
+      - name: Verify pinned original identity BEFORE copying or changing anything
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports converted
+          python3 tools/verify_watch3_original_artifact_preservation.py \
+            --image-dir original --output reports/immutable-original.json
+          sha256sum original/asteroid-image-noblesse-r08.rootfs-20261024125252.ext4
+
+      - name: Convert a separate 755MB copy, verify modern read-only fsck and unchanged source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/derive_watch3_r08_original_legacy_ext4.py \
+            --original original/asteroid-image-noblesse-r08.rootfs-20261024125252.ext4 \
+            --derived converted/asteroid-image-noblesse-r08.rootfs-20261024125252.legacy-ext4-OFFLINE-NOT-FLASHABLE.ext4 \
+            --report reports/legacy-derivative.json
+          python3 tools/verify_watch3_original_artifact_preservation.py \
+            --image-dir original --output reports/immutable-original-after.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          a=json.loads(Path('reports/legacy-derivative.json').read_text())
+          assert a['status']=='OFF_DEVICE_DERIVED_EXT4_VALIDATED'
+          assert a['source_original_unchanged'] and a['orphan_file_absent']
+          assert a['source_sha256']!=a['derived_sha256']
+          assert a['modern_e2fsck_passed_readonly'] and not a['flashable']
+          assert not a['watch_contacted'] and not a['stock_r840x_recovery_verified']
+          print('REAL_ORIGINAL_DERIVATIVE_MODERN_VALIDATION_PASSED',a['derived_sha256'])
+          PY
+
+      - name: Require actual Ubuntu 22.04 e2fsprogs to validate derived image read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          # ubuntu:22.04 ships e2fsprogs 1.46.5, older than orphan_file.
+          # Docker bind mount is READ ONLY; fsck uses -n and cannot mutate.
+          docker run --rm \
+            -v "$PWD/converted:/offline:ro" \
+            ubuntu:22.04 sh -euc '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq >/dev/null
+              apt-get install -y -qq e2fsprogs >/dev/null
+              e2fsck -V 2>&1 | grep -E "1\\.46\\."
+              dumpe2fs -h "/offline/asteroid-image-noblesse-r08.rootfs-20261024125252.legacy-ext4-OFFLINE-NOT-FLASHABLE.ext4" 2>/dev/null |
+                grep "^Filesystem features:" | tee /tmp/legacy-features.txt
+              if grep -Eq "orphan_file|FEATURE_C12" /tmp/legacy-features.txt; then
+                echo "OLD_E2FSPROGS_UNKNOWN_FEATURE"; exit 1
+              fi
+              e2fsck -f -n "/offline/asteroid-image-noblesse-r08.rootfs-20261024125252.legacy-ext4-OFFLINE-NOT-FLASHABLE.ext4"
+              echo "LEGACY_1_46_READONLY_E2FSCK_PASSED"
+            '
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('reports/legacy-derivative.json')
+          a=json.loads(p.read_text())
+          assert not a['older_e2fsprogs_checked']
+          a['older_e2fsprogs_checked']=True
+          a['older_e2fsprogs_readonly_check']='Ubuntu 22.04 e2fsprogs 1.46.5 e2fsck -f -n success'
+          a['linux_4_9_mount_tested']=False
+          a['flashable']=False
+          p.write_text(json.dumps(a,indent=2)+'\n')
+          print('PROVEN: old e2fsprogs accepts actual derived image; no real watch boot')
+          PY
+
+      - name: Record actual derived SHA256 and original source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          original=json.loads(Path('reports/immutable-original-after.json').read_text())
+          derived=json.loads(Path('reports/legacy-derivative.json').read_text())
+          assert original['original_ext4_sha256']==derived['source_sha256']
+          assert derived['older_e2fsprogs_checked']
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write('## Verified real Watch3 rootfs legacy compatibility, OFF DEVICE\n\n')
+              f.write('- Original source image SHA256: '+derived['source_sha256']+'\n')
+              f.write('- Distinct derived image SHA256: '+derived['derived_sha256']+'\n')
+              f.write('- Actual modern and Ubuntu 22.04/1.46.5 old e2fsck read-only checks: PASS\n')
+              f.write('- Older-kernel filesystem mount, bootloader acceptance, '
+                      'full SM-R840X stock restore: NOT TESTED. **NO FLASHING**.\n')
+          PY
+
+      - name: Publish the separately validated offline ext4 only on main
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-DERIVED-LEGACY-EXT4-NOT-FLASHABLE-${{ github.run_id }}
+          path: converted/*.ext4
+          retention-days: 90
+          compression-level: 6
+          if-no-files-found: error
+
+      - name: Preserve small provenance proof (PR and main)
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-legacy-ext4-proof-${{ github.run_id }}
+          path: reports/*.json
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Verify source tree still unchanged
+        run: git diff --exit-code && git status --short
