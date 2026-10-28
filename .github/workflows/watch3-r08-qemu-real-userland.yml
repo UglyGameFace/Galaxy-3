@@ -10,10 +10,12 @@ on:
       - 'tools/watch3_r08_qemu_launcher_closure.py'
       - 'tools/watch3_r08_qml_module_closure.py'
       - 'tools/watch3_r08_qemu_launcher_runtime.py'
+      - 'tools/watch3_r08_qemu_minimal_png_capture.py'
       - 'tests/test_watch3_r08_qemu_userland_smoke.py'
       - 'tests/test_watch3_r08_qemu_launcher_closure.py'
       - 'tests/test_watch3_r08_qml_module_closure.py'
       - 'tests/test_watch3_r08_qemu_launcher_runtime.py'
+      - 'tests/test_watch3_r08_qemu_minimal_png_capture.py'
   workflow_dispatch:
 
 permissions:
@@ -29,6 +31,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install offline PNG validator for actual Qt software screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3-pil
+          python3 -c 'from PIL import Image; print("PIL_READY")'
+
       - name: Run deterministic provenance and emulation regression tests
         run: |
           set -euo pipefail
@@ -36,6 +46,7 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_launcher_closure.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qml_module_closure.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_launcher_runtime.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_minimal_png_capture.py' -v
           python3 -m py_compile tools/watch3_r08_select_derived_artifact.py tools/watch3_r08_qemu_userland_smoke.py
 
       - name: Find verified main-commit legacy ext4 artifact, not an unrelated run
@@ -251,6 +262,47 @@ jobs:
               f.write("- Actual displayed pixels, Watch3 frame, Wayland client, stock rescue "
                       "and boot remain unproven.\n")
           PY
+
+      - name: Capture real ARM64 Asteroid launcher Qt minimal backing-store pixels
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p visual
+          python3 tools/watch3_r08_qemu_minimal_png_capture.py \
+            --extracted-rootfs extracted \
+            --report reports/real-arm64-minimal-qt-pixel-capture.json \
+            --frame-output visual/real-arm64-asteroid-backingstore.png
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          result=json.loads(Path("reports/real-arm64-minimal-qt-pixel-capture.json").read_text())
+          assert result["status"]=="REAL_ARM64_QT_BACKINGSTORE_NONBLANK_PNG_CAPTURED"
+          assert result["qt_minimal_backingstore_flush_logged"]
+          assert result["qt_created_output_png_count"]>0
+          assert result["frame"]["nontrivial_pixel_variation"]
+          assert result["frame"]["rgb_max_channel_range"]>=12
+          assert not result["physical_watch_contacted"] and not result["flashable"]
+          assert not result["wayland_compositor_pixels_proven"]
+          frame=Path("visual/real-arm64-asteroid-backingstore.png")
+          assert hashlib.sha256(frame.read_bytes()).hexdigest()==result["frame"]["png_sha256"]
+          print("REAL_GUEST_ARM64_QT_BACKINGSTORE_IMAGE_PASSED", result["frame"]["png_sha256"])
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
+              f.write("\n## First actual Qt backing-store PNG from the saved ARM64 launcher\n")
+              f.write("- Software Qt ARM64 minimal QPA, image bytes from the real guest process.\n")
+              f.write("- SHA256: "+result["frame"]["png_sha256"]+"\n")
+              f.write("- Dimensions: "+str(result["frame"]["width"])+"x"+str(result["frame"]["height"])+"\n")
+              f.write("- Real UI pixel capture, not proof of the full Wayland compositor "
+                      "or original Watch3 screen output. Physical flash remains NO_GO.\n")
+          PY
+
+      - name: Publish only verified real ARM64 Qt capture PNG
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-real-ARM64-Qt-pixels-${{ github.run_id }}
+          path: visual/*.png
+          retention-days: 30
+          if-no-files-found: error
 
       - name: Publish ONLY small reports, no firmware or whole filesystem
         if: always()
