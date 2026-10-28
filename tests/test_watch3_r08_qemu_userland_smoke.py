@@ -120,6 +120,19 @@ class QemuRealArm64Tests(unittest.TestCase):
             with self.assertRaisesRegex(smoke.SmokeFailure, "DID_NOT_EXECUTE"):
                 smoke.validate(self.root)
 
+    def test_prefers_actual_systemd_elf_when_env_is_only_a_busybox_link(self):
+        (self.root / "usr/bin/systemctl").write_bytes(synthetic_elf())
+        envbin = self.root / "usr/bin/env"
+        envbin.unlink()
+        envbin.symlink_to("busybox")
+        fake = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="systemd 256 (256.4)\n", stderr="")
+        with patch.object(smoke.shutil, "which", return_value="/usr/bin/qemu-aarch64"), \
+             patch.object(smoke, "_run", return_value=fake):
+            result = smoke.validate(self.root)
+        self.assertEqual(result["executed_guest_binary"], "/usr/bin/systemctl")
+        self.assertFalse(result["real_display_or_wayland_tested"])
+
     def test_outbound_utility_symlink_is_never_executed(self):
         elf = self.root / "usr/bin/env"
         elf.unlink()
