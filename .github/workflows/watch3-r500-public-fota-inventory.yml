@@ -181,13 +181,14 @@ jobs:
           # Selectively inspect 5 known entries by exact name; no execution.
           import struct
           import subprocess
-          selected = ['delta.ua','delta.boot','delta.recovery','delta.upparam','cm.bin']
+          selected = ['delta.ua','delta.boot','delta.recovery','delta.upparam','cm.bin',
+                      'sboot.bin','update.cfg','unpack.sh']
           fingerprints = {}
           top_level = [m.name for m in members if '/' not in m.name]
           with tarfile.open(p,'r:') as archive:
               for name in selected:
                   matches = [m for m in archive.getmembers() if m.name == name and m.isfile()]
-                  if len(matches) != 1 or matches[0].size > 3_000_000:
+                  if len(matches) != 1 or matches[0].size > 16_000_000:
                       raise SystemExit('EXPECTED_SELECTED_REFERENCE_COMPONENT_MISSING')
                   content = archive.extractfile(matches[0]).read()
                   if len(content) != matches[0].size:
@@ -197,6 +198,16 @@ jobs:
                       'sha256':hashlib.sha256(content).hexdigest(),
                       'elf_magic':content[:4] == bytes((127,69,76,70)),
                   }
+                  if name in ('sboot.bin','update.cfg','unpack.sh'):
+                      item['header_16_bytes_hex'] = content[:16].hex()
+                  if name == 'sboot.bin':
+                      # Exact whitelist of comparison indicators, not arbitrary firmware strings.
+                      words = ('SM-R500','SM-R840','ODIN','LOKE','EXYNOS','exynos',
+                               'sboot','SBOOT','PIT','param','recovery','RECOVERY',
+                               'BOOTLOADER','SECURE BOOT','ATF')
+                      item['static_marker_occurrences'] = {
+                          w:content.count(w.encode('ascii')) for w in words if w.encode('ascii') in content
+                      }
                   if item['elf_magic'] and len(content) >= 20:
                       item['elf_class'] = content[4]
                       item['elf_endian'] = content[5]
