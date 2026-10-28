@@ -81,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq p7zip-full
+          sudo apt-get install -y -qq p7zip-full binutils-aarch64-linux-gnu
           curl --fail --location --silent --show-error --retry 2 \
             --connect-timeout 10 --max-time 100 --max-filesize 37000000 \
             -H 'User-Agent: UglyOS-public-firmware-reference' \
@@ -732,6 +732,76 @@ jobs:
               'bootloader_code_executed':False,
               'CVE_root_cause_proven':False,
               'watch_contacted':False
+          },indent=2))
+          PY
+      - name: Disassemble bounded S-BOOT ODIN/PIT/recovery cross-reference windows (never execute)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import tarfile
+
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          def load(path):
+              with tarfile.open(path,'r:') as tf:
+                  m=tf.getmember('sboot.bin')
+                  if not m.isfile() or m.size!=1921296: raise SystemExit('UNEXPECTED_REFERENCE_SBOOT')
+                  return tf.extractfile(m).read()
+          pre=load(root/'reference-tar'/'R500XXU1BSD3-FOTA.tar')
+          postfiles=list((root/'reference-new-tar').glob('*.tar'))
+          if len(postfiles)!=1: raise SystemExit('POST_TAR_MISSING')
+          post=load(postfiles[0])
+          hashes={
+              'pre':'4715861156eeceb949899d355ccc37eefb57062888aadc76aa9f93f9eaf5966e',
+              'post':'c96813f283e2f98d3f33a30c6215fa25b06b756b93adf55ecf8d59fc4d9211a9'
+          }
+          if hashlib.sha256(pre).hexdigest()!=hashes['pre'] or hashlib.sha256(post).hexdigest()!=hashes['post']:
+              raise SystemExit('REFERENCE_HASH_MISMATCH')
+          pairs={
+              'PIT':(0x58bb0,0x58e60),
+              'ODIN':(0x5ce70,0x5d1b4),
+              'recovery':(0x6e274,0x6e758),
+          }
+          results={}
+          for label,(older,newer) in pairs.items():
+              by_build={}
+              for build,blob,off in (('pre',pre,older),('post',post,newer)):
+                  start=(off-52)&~3
+                  end=(off+76+3)&~3
+                  if end>len(blob): raise SystemExit('XREF_OUT_OF_RANGE')
+                  file=root/('sboot_'+build+'_'+label+'_raw_bytes.bin')
+                  file.write_bytes(blob[start:end])
+                  try:
+                      cmd=['aarch64-linux-gnu-objdump','-D','-b','binary','-m','aarch64',
+                           '--no-show-raw-insn','--adjust-vma='+hex(start),str(file)]
+                      run=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                                         text=True,timeout=12,check=True)
+                      asm=[line.strip() for line in run.stdout.splitlines()
+                           if re.match(r'^\\s*[0-9a-f]+:\\s',line)]
+                  finally:
+                      file.unlink(missing_ok=True)
+                  if len(asm)<15: raise SystemExit('EXPECTED_DISASSEMBLY_MISSING')
+                  by_build[build]={'raw_file_xref_offset':hex(off),
+                                   'window_start':hex(start),
+                                   'disassembly':asm[:40]}
+              results[label]=by_build
+          print('SBOOT_BOUNDED_AARCH64_DISASSEMBLY')
+          print(json.dumps({
+              'model':'SM-R500 only; NOT R840X',
+              'code_architecture_disassembly_assumption':'AArch64 raw bytes, base=raw file offset',
+              'verified_runtime_load_address':False,
+              'verified_function_boundaries':False,
+              'CVE_patch_proven':False,
+              'disassembly_windows':results,
+              'reference_bootloader_executed':False,
+              'physical_watch_contacted':False,
+              'flash_allowed':False
           },indent=2))
           PY
       - name: Record research limitation
