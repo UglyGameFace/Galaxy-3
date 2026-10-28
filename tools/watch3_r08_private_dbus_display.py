@@ -60,7 +60,7 @@ def private_system_bus(run_dir: Path):
     with log.open("wb") as stderr:
         process = subprocess.Popen(
             ["dbus-daemon", "--session", "--nofork", "--nopidfile",
-             "--address=" + address],
+             "--bus=" + address],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stderr,
             cwd=run_dir, start_new_session=True,
             env={"PATH": "/usr/bin:/bin", "HOME": str(run_dir)},
@@ -98,7 +98,7 @@ def send_display_update(address: str, value: bool) -> bool:
     if not address.startswith("unix:path=/tmp/uglyos-") or "\n" in address:
         raise PrivateBusError("UNSAFE_OR_NONLOCAL_TEST_DBUS_ADDRESS")
     command = [
-        "dbus-send", "--address=" + address, "--type=method_call",
+        "dbus-send", "--bus=" + address, "--type=method_call",
         "--print-reply", "--reply-timeout=1200",
         "--dest=" + INTERFACE, OBJECT_PATH,
         INTERFACE + ".setUpdatesEnabled",
