@@ -43,7 +43,11 @@ class LauncherClosureTests(unittest.TestCase):
                          "/lib/ld-linux-aarch64.so.1")
 
     def test_missing_pt_interp_is_not_guessed(self):
-        (self.root/"usr/bin/asteroid-launcher").write_bytes(fake_elf())
+        data=bytearray(fake_elf())
+        struct.pack_into("<Q",data,32,64)
+        struct.pack_into("<HH",data,54,56,1)
+        struct.pack_into("<I",data,64,0)  # valid table; no PT_INTERP
+        (self.root/"usr/bin/asteroid-launcher").write_bytes(data)
         with self.assertRaisesRegex(tool.ClosureError,"MISSING_OR_DUPLICATE"):
             tool.guest_interpreter(self.root/"usr/bin/asteroid-launcher")
 
