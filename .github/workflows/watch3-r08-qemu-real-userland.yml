@@ -11,11 +11,14 @@ on:
       - 'tools/watch3_r08_qml_module_closure.py'
       - 'tools/watch3_r08_qemu_launcher_runtime.py'
       - 'tools/watch3_r08_qemu_minimal_png_capture.py'
+      - 'tools/watch3_r08_qemu_vnc_capture.py'
+      - 'tools/watch3-r08-qemu-visual-offline.Dockerfile'
       - 'tests/test_watch3_r08_qemu_userland_smoke.py'
       - 'tests/test_watch3_r08_qemu_launcher_closure.py'
       - 'tests/test_watch3_r08_qml_module_closure.py'
       - 'tests/test_watch3_r08_qemu_launcher_runtime.py'
       - 'tests/test_watch3_r08_qemu_minimal_png_capture.py'
+      - 'tests/test_watch3_r08_qemu_vnc_capture.py'
   workflow_dispatch:
 
 permissions:
@@ -47,6 +50,7 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qml_module_closure.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_launcher_runtime.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_minimal_png_capture.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_vnc_capture.py' -v
           python3 -m py_compile tools/watch3_r08_select_derived_artifact.py tools/watch3_r08_qemu_userland_smoke.py
 
       - name: Find verified main-commit legacy ext4 artifact, not an unrelated run
@@ -264,6 +268,8 @@ jobs:
           PY
 
       - name: Capture real ARM64 Asteroid launcher Qt minimal backing-store pixels
+        id: minimal
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -295,12 +301,93 @@ jobs:
                       "or original Watch3 screen output. Physical flash remains NO_GO.\n")
           PY
 
-      - name: Publish only verified real ARM64 Qt capture PNG
-        if: success()
+      - name: Publish only verified real ARM64 Qt minimal capture PNG
+        if: steps.minimal.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: galaxy3-r08-real-ARM64-Qt-pixels-${{ github.run_id }}
           path: visual/*.png
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Require authentic ARM64 Qt VNC display plugin before building any container
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=tools python3 - <<'PY'
+          from pathlib import Path
+          from watch3_r08_qemu_vnc_capture import find_arm64_qvnc
+          from watch3_r08_qemu_launcher_runtime import PLATFORM_ROOTS
+          root=Path("extracted")
+          names={}
+          for prefix in PLATFORM_ROOTS:
+              parent=root/prefix
+              if parent.is_dir():
+                  names[prefix]=sorted(p.name for p in parent.glob("libq*.so"))
+          print("REAL_QT_ARM64_PLATFORM_PLUGIN_INVENTORY",names)
+          target=find_arm64_qvnc(root)
+          print("REAL_AARCH64_QVNC_PLUGIN_FOUND",target)
+          PY
+
+      - name: Build standalone reproducible QEMU visual client image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -q -f tools/watch3-r08-qemu-visual-offline.Dockerfile \
+            -t uglyos-r08-qemu-visual:ci .
+
+      - name: Run Qt VNC raw capture INSIDE Docker --network none ONLY
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p visual reports
+          docker run --rm \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 96 \
+            --memory 2g \
+            --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
+            --user "$(id -u):$(id -g)" \
+            -v "$PWD/extracted:/guest:ro" \
+            -v "$PWD/tools:/tools:ro" \
+            -v "$PWD/reports:/reports:rw" \
+            -v "$PWD/visual:/visual:rw" \
+            uglyos-r08-qemu-visual:ci \
+            python3 /tools/watch3_r08_qemu_vnc_capture.py \
+              --extracted-rootfs /guest \
+              --report /reports/real-arm64-vnc-no-network-raw-frame.json \
+              --frame-output /visual/real-arm64-asteroid-vnc-frame.png
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          report=json.loads(Path("reports/real-arm64-vnc-no-network-raw-frame.json").read_text())
+          assert report["status"]=="REAL_ARM64_QT_VNC_NONBLANK_PIXEL_FRAME_CAPTURED"
+          assert report["isolated_network_interfaces"]==["lo"]
+          assert report["rfb_protocol_3_3_handshake_verified"]
+          assert report["raw_fb_rect_updates_received"]>0
+          assert report["frame"]["nonuniform_real_pixels"]
+          assert not report["flashable"] and not report["watch_contacted"]
+          frame=Path("visual/real-arm64-asteroid-vnc-frame.png")
+          digest=hashlib.sha256(frame.read_bytes()).hexdigest()
+          assert digest==report["frame"]["png_sha256"]
+          print("REAL_AARCH64_COMPOSITOR_QT_FRAME_PIXELS",digest)
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
+              f.write("\n## OFF-DEVICE real ARM64 Qt VNC frame capture\n")
+              f.write("- Isolated Docker network namespace with loopback-only VNC.\n")
+              f.write("- Exact raw RFB 3.3 frame generated by real guest Qt compositor QPA.\n")
+              f.write("- Image SHA256: "+digest+"\n")
+              f.write("- Dimensions: 360x360 virtual pixels; not Watch3 LCD proof.\n")
+              f.write("- Actual screenshot in Actions PNG artifact. Watch never contacted.\n")
+          PY
+
+      - name: Publish verified real ARM64 360x360 Qt VNC pixel proof
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-ACTUAL-ARM64-visual-frame-${{ github.run_id }}
+          path: visual/real-arm64-asteroid-vnc-frame.png
           retention-days: 30
           if-no-files-found: error
 
