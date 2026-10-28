@@ -65,6 +65,7 @@ jobs:
               'git_tree_sha': obj['sha'],
               'git_objects_in_tree': len(rows),
               'blob_count': len(files),
+              'blob_manifest': sorted(files, key=lambda x: x['path'])[:50],
               'top_level_blob_bytes': dict(sorted(totals.items())),
               'candidate_paths': candidates[:80],
               'all_candidate_paths_reported': len(candidates) <= 80,
