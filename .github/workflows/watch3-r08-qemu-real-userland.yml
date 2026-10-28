@@ -41,6 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           docker build -q -f tools/watch3-r08-qemu-visual-offline.Dockerfile \
+            --build-arg OFFLINE_UID="$(id -u)" --build-arg OFFLINE_GID="$(id -g)" \
             -t uglyos-r08-qemu-visual:ci .
           docker run --rm -i \
             --network none \
