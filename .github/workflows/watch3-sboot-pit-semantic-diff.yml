@@ -159,17 +159,13 @@ jobs:
               f.write('- Raw file-offset graph only. No runtime mapping, sender reachability, '
                       'CVE root cause, SM-R840X custom boot or full stock rescue proven. **NO_GO**.\n')
           PY
-      - name: Analyze real sibling PIT direct inbound control transfers without claiming loader reachability
+      - name: Verify real donor PIT dispatcher arguments and distinguish the adjacent routine
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/watch3_sboot_pit_control_flow.py \
-            --older "$RUNNER_TEMP/older/reference-sboot.bin" \
-            --newer "$RUNNER_TEMP/newer/reference-sboot.bin" \
-            --output "$RUNNER_TEMP/pit-inbound-edges.json"
           python3 - <<'PY'
           import json,os,pathlib
-          result=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"pit-inbound-edges.json").read_text())
+          result=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"branch-graph.json").read_text())
           assert result["decision"]=="NO_GO" and not result["watch_contacted"]
           for build, section in result["inbound_candidate_edges"].items():
               edges=section["incoming_direct_edges"]
@@ -178,16 +174,28 @@ jobs:
               assert section["call_chain_to_wireless_protocol_verified"] is False
               assert section["candidate_direct_call_count"]+section["candidate_direct_branch_count"]==len(edges)
               assert all(x["verified_external_wireless_caller"] is False for x in edges)
-              print(build, "inbound BL", section["candidate_direct_call_count"],
-                    "inbound B", section["candidate_direct_branch_count"],
-                    "sample file offsets", [hex(x["source_file_offset"]) for x in edges[:10]])
+              assert section["candidate_direct_call_count"]==2
+              assert section["candidate_direct_calls_to_pit_frame_entry"]==1, (
+                  "PIT_VALIDATOR_AND_ADJACENT_ROUTINE_CONFLATED:"+build)
+              context=result["donor_dispatch_context"][build]
+              assert context["observed_slice_matches"], context["checks"]
+              assert context["path_classification"]=="PIT_UPLOAD_FINALIZATION_CANDIDATE"
+              assert (context["command_value"],context["subcommand_value"],
+                      context["required_state_value"])==(0x65,3,0)
+              assert context["validator_buffer_object_offset"]==0x30
+              assert context["validator_length_object_offset"]==0x58
+              assert context["wireless_transport_proven"] is False
+              assert context["owner_R840X_equivalence_proven"] is False
+              assert context["safe_read_only_device_operation_proven"] is False
+              print(build, json.dumps({"incoming_edges":edges,"dispatch_context":context},indent=2))
           with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
-              f.write("\n## Direct inbound branch candidates in historical SM-R500 firmware\n")
+              f.write("\n## Original SM-R500 PIT dispatch operand provenance\n")
               for name, r in result["inbound_candidate_edges"].items():
-                  f.write(f"- {name}: {r['candidate_direct_call_count']} candidate BL and "
-                          f"{r['candidate_direct_branch_count']} candidate B edges into PIT-vicinity window.\n")
-              f.write("- Potential code-reference evidence only; no verified caller, "
-                      "exact R840X bytes, wireless input reachability, unlock or stock rescue. **NO_GO**.\n")
+                  f.write(f"- {name}: two nearby call targets, "
+                          f"{r['candidate_direct_calls_to_pit_frame_entry']} to the PIT entry candidate. "
+                          "Command 0x65 / subcommand 3 / state 0; buffer +0x30, length +0x58.\n")
+              f.write("- Upload-finalization candidate, not a proven read-only probe. "
+                      "No exact R840X bytes, wireless reachability, unlock or stock rescue. **NO_GO**.\n")
           PY
       - name: Map bounded S-BOOT stage header candidates from two original reference firmware files
         shell: bash

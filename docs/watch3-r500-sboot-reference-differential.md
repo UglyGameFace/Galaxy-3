@@ -143,6 +143,66 @@ and the original memory mapping is unverified. Zero direct matches would not
 rule out indirect callers. Static code observations never authorize a live
 `param`/`recovery` write or a flash.
 
+## Donor dispatcher trace: the two nearby calls have different roles
+
+The next analysis read the same SHA-256-pinned original files locally and
+independently inspected their AArch64 instructions with Capstone 5.0.9.
+The existing analyzer now checks the reviewed operands and branch conditions
+against the real files in CI. No new firmware source or payload is involved.
+
+| Raw-file observation | 2019 `R500XXU1BSD3` | 2021 `R500XXU1GUJ2` |
+| --- | --- | --- |
+| Command dispatcher frame setup | `0x57430` | `0x575B0` |
+| `CMP W19,#0x65` / `B.EQ` to PIT case | `0x57480` / `0x57484` | `0x57600` / `0x57604` |
+| PIT subcommand case | `0x57A3C` | `0x57BBC` |
+| Load length `W1,[X20,#0x58]` | `0x57E14` | `0x57F94` |
+| Load buffer `X0,[X20,#0x30]` | `0x57E18` | `0x57F98` |
+| Call to PIT frame entry candidate | `0x57E1C` → `0x58BA0` | `0x57F9C` → `0x58E50` |
+| Test return `W0` bit 31 / error branch | `0x57E20` | `0x57FA0` |
+| Following call to a **separate** frame | `0x57E24` → `0x58D10` | `0x57FA4` → `0x58FC8` |
+| Receive-side candidate call to dispatcher | `0x7CCD0` | `0x7D258` |
+
+**Correction to the broad vicinity scan:** it found two direct `BL` targets
+near the PIT literal. Only **one** targets the PIT validator frame candidate;
+the second targets a new frame after the validator's returns. They must not be
+described as two calls to the same validator or two independent entry routes.
+
+Under the existing raw-file mapping hypothesis, the reviewed path is:
+
+1. The dispatcher prepares a `0x400`-byte input copy to frame offset `0x50`.
+   It loads the command word from `+0x50`; `0x65` selects the PIT case.
+2. The case loads the subcommand from `+0x54`. Subcommand **3** reaches a
+   state check; state **0** branches to the two argument loads above.
+3. It calls the PIT frame candidate with the saved buffer and 32-bit length.
+   If return bit 31 is set, it branches away before the adjacent call.
+4. Only the other fallthrough calls the next routine. That routine starts a
+   new stack frame and reads/parses PIT-related data; it is not the same call.
+
+The association with **upload finalization** is an **inference**, supported by
+the two command words and state selection, the separately inspected following
+routine, and the [original Ragnarök Odin protocol notes at pinned commit
+`35718d1`](https://github.com/AsteroidOS/ragnaroek/blob/35718d135080e3e8839a9e7a2f4ec56f3cf17446/PROTOCOL.md).
+It is **not** a reason to try this command on the watch: the protocol includes
+state-changing PIT transfers. No command packet was constructed or sent.
+
+The receive-side candidate waits on a `0x3FF` comparison before the dispatcher
+call, consistent with the dispatcher's 1024-byte command-copy arguments. The
+surrounding code uses indirect transport callbacks. Static calls and an
+`ODIN`/`LOKE` string table do **not** establish a wireless network handler,
+mode-specific reachability, valid runtime map or equivalence to R840X.
+
+The validator itself calls a preceding check before examining the PIT header
+and length. This work has **not** proved that check's cryptographic policy,
+identified the July 2021 fix, or demonstrated a signature bypass. Both reference
+versions retain the reviewed dispatch shape. A two-year donor comparison is
+insufficient to assign the observed behavior to either CVE.
+
+Validation requires the known original file hashes **and** every reviewed
+operand/branch check. Mutation tests independently break command, subcommand,
+state slot, pointer width, length width, call target, error bit, frame setup and
+receive-buffer checks. A failed slice is explicitly `UNRESOLVED_REFERENCE_SLICE`;
+it never becomes an unlock, wireless or read-safety claim.
+
 ## Exact-model original firmware remains missing
 
 Samsung's [official SM-R840X support page](
