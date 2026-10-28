@@ -773,7 +773,7 @@ jobs:
               by_build={}
               for build,blob,off in (('pre',pre,older),('post',post,newer)):
                   start=(off-52)&~3
-                  end=(off+76+3)&~3
+                  end=(off+180+3)&~3
                   if end>len(blob): raise SystemExit('XREF_OUT_OF_RANGE')
                   file=root/('sboot_'+build+'_'+label+'_raw_bytes.bin')
                   file.write_bytes(blob[start:end])
@@ -789,7 +789,7 @@ jobs:
                   if len(asm)<15: raise SystemExit('EXPECTED_DISASSEMBLY_MISSING')
                   by_build[build]={'raw_file_xref_offset':hex(off),
                                    'window_start':hex(start),
-                                   'disassembly':asm[:40]}
+                                   'disassembly':asm[:72]}
               results[label]=by_build
           print('SBOOT_BOUNDED_AARCH64_DISASSEMBLY')
           print(json.dumps({
