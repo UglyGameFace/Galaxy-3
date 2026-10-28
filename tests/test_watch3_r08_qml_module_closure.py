@@ -86,6 +86,17 @@ class RealQmlModuleClosureTests(unittest.TestCase):
         with self.assertRaisesRegex(modules.ModuleClosureError,"AMBIGUOUS"):
             modules.audit(self.root)
 
+    def test_same_real_qmldir_exposed_via_lib64_alias_is_allowed(self):
+        alias=self.root/"usr/lib64"
+        alias.symlink_to("lib")
+        # The symlink target must be a real guest path. Build a correct alias:
+        alias.unlink()
+        alias.symlink_to("lib")
+        # This alias resolves to /usr/lib64 -> /usr/lib only if "lib" is
+        # a sibling under /usr, not a root-host absolute path.
+        result=modules.audit(self.root)
+        self.assertTrue(result["required_modules_present"])
+
     def test_malicious_plugin_name_rejected(self):
         self.write_module("QtQuick",extra="plugin ../../tmp/host\n")
         with self.assertRaisesRegex(modules.ModuleClosureError,"UNSAFE_QML_PLUGIN_NAME"):
