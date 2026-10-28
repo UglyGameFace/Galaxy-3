@@ -1,0 +1,104 @@
+name: Watch3 Issue 47 public Tizen 5.5 recovery source audit (NO DEVICE)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-tizen55-recovery-source-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-source-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install inert RPM archive readers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rpm2cpio cpio
+      - name: Download only four named small official Tizen 5.5 source RPM archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/watch3-tizen55-public-source
+          cd /tmp/watch3-tizen55-public-source
+          base='https://download.tizen.org/snapshots/TIZEN/Tizen-5.5/Tizen-5.5-Unified/latest/repos/standard/source'
+          for package in \
+            initrd-fota-1.1.3-0 \
+            initrd-recovery-0.3.0-0 \
+            system-recovery-0.3.0-0 \
+            system-rw-update-1.2.4-0; do
+            curl --fail --location --silent --show-error \
+              --retry 2 --connect-timeout 8 --max-time 45 \
+              --max-filesize 1000000 \
+              "$base/$package.src.rpm" -o "$package.src.rpm"
+            bytes=$(stat -c '%s' "$package.src.rpm")
+            test "$bytes" -gt 500 && test "$bytes" -lt 1000000
+            sha256sum "$package.src.rpm"
+            mkdir -p "$package"
+            ( cd "$package" && rpm2cpio "../$package.src.rpm" | cpio --quiet -id --no-absolute-filenames )
+          done
+      - name: Audit recovered source tarballs as TEXT ONLY, no execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import re
+          import tarfile
+
+          root = pathlib.Path("/tmp/watch3-tizen55-public-source")
+          patterns = re.compile(
+              r"recovery-update|rw-update|fota|bootmode|tizen-recovery|"
+              r"ramdisk|signature|signing|verify|rollback|partition|"
+              r"flash|system-recovery|delta\.tar", re.I
+          )
+          output = {"source": "public-official-Tizen-5.5-snapshot-2025",
+                    "watch_contacted": False, "firmware_written": False,
+                    "flash_allowed": False, "exact_r840x_bootloader_obtained": False,
+                    "packages": []}
+          for path in sorted(root.glob("*.src.rpm")):
+              package = path.name.removesuffix(".src.rpm")
+              item = {"package": package, "size": path.stat().st_size,
+                      "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                      "outer_files": [], "source_matches": []}
+              folder = root / package
+              for src in sorted(folder.rglob("*")):
+                  if not src.is_file():
+                      continue
+                  name = str(src.relative_to(folder))
+                  item["outer_files"].append(name)
+                  if not (name.endswith((".tar.gz", ".tar.xz", ".tgz", ".tar.bz2"))):
+                      continue
+                  with tarfile.open(src, "r:*") as tf:
+                      for member in tf.getmembers():
+                          if not member.isfile() or member.size > 100000 or len(item["source_matches"]) >= 45:
+                              continue
+                          f = tf.extractfile(member)
+                          if f is None:
+                              continue
+                          data = f.read(100001)
+                          if b"\x00" in data or len(data) > 100000:
+                              continue
+                          for i, line in enumerate(data.decode("utf-8", "replace").splitlines(), 1):
+                              if patterns.search(line):
+                                  item["source_matches"].append({"source_file": member.name, "line": i,
+                                      "keyword": patterns.search(line).group(0).lower()})
+                                  if len(item["source_matches"]) >= 45:
+                                      break
+              output["packages"].append(item)
+          print(json.dumps(output, indent=2))
+          PY
+      - name: Preserve validation of no device access or firmware installation
+        run: |
+          set -euo pipefail
+          test -d /tmp/watch3-tizen55-public-source
+          git diff --exit-code
+          echo 'PASS: official public source archives inspected on Ubuntu only.'
+          echo 'NO SDB/ODIN/USB/NetOdin, no custom-boot claim, no watched hardware, no firmware writes.'
