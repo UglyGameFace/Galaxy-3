@@ -20,6 +20,7 @@ REPO = "UglyGameFace/Galaxy-3"
 WORKFLOW = "watch3-r08-original-legacy-derivative.yml"
 SOURCE_MAIN_SHA = "73aed5d38c0e96192ba480c490e90f4b9a2611c0"
 PREFIX = "galaxy3-r08-DERIVED-LEGACY-EXT4-NOT-FLASHABLE-"
+PROOF_PREFIX = "galaxy3-r08-legacy-ext4-proof-"
 
 
 class ArtifactError(ValueError):
@@ -52,8 +53,17 @@ def choose(runs: dict, artifact_payloads: dict[int, dict]) -> dict:
                and 40_000_000 < item["size_in_bytes"] < 1_000_000_000]
     if len(matched) != 1:
         raise ArtifactError("EXACT_DERIVED_IMAGE_ARTIFACT_NOT_VERIFIED")
+    proof = [item for item in artifacts if
+             item.get("name") == PROOF_PREFIX + str(run_id)
+             and item.get("expired") is False
+             and isinstance(item.get("size_in_bytes"), int)
+             and 100 < item["size_in_bytes"] < 5_000_000]
+    if len(proof) != 1:
+        raise ArtifactError("MATCHING_DERIVATION_PROOF_ARTIFACT_NOT_VERIFIED")
     return {"run_id": run_id, "artifact_id": matched[0]["id"],
             "artifact_name": matched[0]["name"],
+            "proof_artifact_id": proof[0]["id"],
+            "proof_artifact_name": proof[0]["name"],
             "archive_bytes": matched[0]["size_in_bytes"],
             "main_commit_sha": SOURCE_MAIN_SHA,
             "original_image_is_separate": True,
@@ -112,6 +122,7 @@ def main() -> int:
             with args.github_output.open("a") as f:
                 f.write("run_id=" + str(result["run_id"]) + "\n")
                 f.write("artifact_name=" + result["artifact_name"] + "\n")
+                f.write("proof_artifact_name=" + result["proof_artifact_name"] + "\n")
     except (OSError, ValueError) as error:
         print("DERIVED_ARTIFACT_NOT_YET_VERIFIED: " + str(error), file=sys.stderr)
         return 2
