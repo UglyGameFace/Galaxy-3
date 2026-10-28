@@ -23,8 +23,8 @@ def fixture(footer=True):
     out[bl1_end+8:bl1_end+12] = b"daeh"
     pattern = struct.pack("<III", 7, 0, 0)
     if footer:
-        out[epbl_end-512-16:epbl_end-512-4] = pattern
-        out[0x11000:0x1100c] = pattern
+        out[epbl_end-256-16:epbl_end-256-4] = pattern
+        out[0x11000-272:0x11000-260] = pattern
     out[0x10000:0x10004] = b"ODIN"
     out[0x10100:0x10104] = b"LOKE"
     return bytes(out)
@@ -37,6 +37,21 @@ class SBootStage(unittest.TestCase):
         self.assertEqual(report["observed_header_boundaries"][1]["end_exclusive"], 16384)
         self.assertTrue(report["stage2_signature_footer_pattern_hypotheses"])
         self.assertFalse(report["signature_cryptographically_verified"])
+
+    def test_incidental_pattern_with_page_padding_is_not_a_footer(self):
+        data = bytearray(fixture(footer=False))
+        accidental = struct.pack("<III", 7, 0, 0)
+        data[0x10020:0x10020+12] = accidental
+        result = stage.parse(bytes(data))
+        self.assertEqual(result["stage2_signature_footer_pattern_hypotheses"], [])
+
+    def test_exact_footer_candidate_still_has_no_cryptographic_authority(self):
+        result = stage.parse(fixture())
+        groups = result["stage2_signature_footer_pattern_hypotheses"]
+        boundaries = [candidate["boundary_candidate"]
+                      for group in groups for candidate in group["candidates"]]
+        self.assertIn(0x11000, boundaries)
+        self.assertFalse(result["signature_cryptographically_verified"])
 
     def test_footer_absence_does_not_fabricate_structure(self):
         report = stage.parse(fixture(footer=False))
