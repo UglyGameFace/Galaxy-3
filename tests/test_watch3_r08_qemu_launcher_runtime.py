@@ -172,6 +172,27 @@ class RealPluginSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(probe.RuntimeFailure, "ESCAPES_ROOT"):
             probe.locate_plugin(self.root)
 
+    def test_installed_aarch64_svg_decoder_detected_inside_real_qt_plugin_root(self):
+        formats=self.plugin_dir.parent/"imageformats"
+        formats.mkdir()
+        candidate=formats/"libqsvg.so"
+        candidate.write_bytes(elf())
+        roots,svg=probe.actual_qt_plugin_roots(self.root)
+        self.assertIn(formats.parent,roots)
+        self.assertEqual(svg,[candidate])
+
+    def test_non_arm64_svg_decoder_fails_explicitly(self):
+        formats=self.plugin_dir.parent/"imageformats"
+        formats.mkdir()
+        (formats/"libqsvg.so").write_bytes(elf(machine=62))
+        with self.assertRaisesRegex(probe.RuntimeFailure,"QT_SVG_PLUGIN_WRONG_ARCH"):
+            probe.actual_qt_plugin_roots(self.root)
+
+    def test_svg_decoder_missing_cannot_be_silently_assumed_present(self):
+        roots,svg=probe.actual_qt_plugin_roots(self.root)
+        self.assertTrue(roots)
+        self.assertFalse(svg)
+
     def test_timeout_bound(self):
         with self.assertRaisesRegex(probe.RuntimeFailure, "OUT_OF_BOUNDS"):
             probe.inspect(self.root, duration=99)
@@ -218,6 +239,7 @@ class RealPluginSelectionTests(unittest.TestCase):
         env = popen.call_args.kwargs["env"]
         self.assertEqual(env["QT_QPA_PLATFORM"], "offscreen")
         self.assertEqual(env["QT_QUICK_BACKEND"], "software")
+        self.assertEqual(env["QT_PLUGIN_PATH"], str(self.plugin_dir.parent))
         self.assertNotIn("GITHUB_TOKEN", env)
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
         self.assertFalse(result["watch_contacted"])
