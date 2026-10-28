@@ -104,6 +104,31 @@ class RuntimeAnalysisTests(unittest.TestCase):
                                returncode=-9, timed_out=True, elapsed=9)
         self.assertEqual(result["status"], "LAUNCHER_RUNTIME_NOT_PROVEN")
 
+    def test_sustained_real_qml_delegate_activity_proves_bounded_engine_runtime(self):
+        lines = ('qt.qml.delegatemodel.recycling: no available item\n' * 24)
+        result = probe.analyze(lines, platform="offscreen",
+                               returncode=-9, timed_out=True, elapsed=9.0)
+        self.assertEqual(result["status"],
+                         "REAL_ARM64_LAUNCHER_QML_RUNTIME_OBSERVED_OFF_DEVICE")
+        self.assertEqual(result["evidence_mode"],
+                         "BOUNDED_ARM64_QML_DELEGATE_EVENT_PROCESSING")
+        self.assertEqual(result["qml_delegate_trace_line_count"], 24)
+        self.assertTrue(result["qml_delegate_processing_sustained"])
+        self.assertFalse(result["actual_qpa_plugin_loaded_in_qemu_trace"])
+        self.assertFalse(result["compositor_pixel_output_proven"])
+
+    def test_sparse_delegates_do_not_prove_runtime(self):
+        lines = ('qt.qml.delegatemodel.recycling: no available item\n' * 19)
+        result = probe.analyze(lines, platform="offscreen",
+                               returncode=-9, timed_out=True, elapsed=9.0)
+        self.assertEqual(result["status"], "LAUNCHER_RUNTIME_NOT_PROVEN")
+
+    def test_sustained_delegates_with_early_crash_do_not_pass(self):
+        lines = ('qt.qml.delegatemodel.recycling: active\n' * 40)
+        result = probe.analyze(lines, platform="offscreen",
+                               returncode=-11, timed_out=False, elapsed=2.0)
+        self.assertEqual(result["status"], "LAUNCHER_RUNTIME_NOT_PROVEN")
+
     def test_short_timeout_cannot_be_accepted(self):
         result = probe.analyze(trace(), platform="offscreen",
                                returncode=-9, timed_out=True, elapsed=0.2)
