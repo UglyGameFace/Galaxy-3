@@ -783,7 +783,7 @@ jobs:
                       run=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
                                          text=True,timeout=12,check=True)
                       asm=[line.strip() for line in run.stdout.splitlines()
-                           if re.match(r'^\\s*[0-9a-f]+:\\s',line)]
+                           if re.match(r'^\s*[0-9a-f]+:\s',line)]
                   finally:
                       file.unlink(missing_ok=True)
                   if len(asm)<15: raise SystemExit('EXPECTED_DISASSEMBLY_MISSING')
