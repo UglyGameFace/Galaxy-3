@@ -30,6 +30,57 @@ def tbnz(pc: int, dest: int, reg: int=0, bit: int=31) -> int:
             ((bit & 31) << 19) | (((dest-pc)//4 & 0x3FFF) << 5) | reg)
 
 
+def direct(pc: int, dest: int, call: bool = True) -> int:
+    return (0x94000000 if call else 0x14000000) | (((dest-pc)//4) & 0x3FFFFFF)
+
+
+def ldr(reg: int, base: int, off: int, width: int) -> int:
+    assert off % (width // 8) == 0
+    return (0xF9400000 if width == 64 else 0xB9400000) | (
+        (off // (width // 8)) << 10) | (base << 5) | reg
+
+
+def dispatch_fixture(build: str) -> bytes:
+    """Construct only operand patterns; never copy an executable firmware image."""
+    s = cfg.DISPATCH_REFERENCE_OFFSETS[build]
+    root, cmp_pc, case, call, recv, adjacent = (
+        s[k] for k in ("dispatcher", "command_cmp", "pit_case",
+                      "validator_call", "receive_call", "next_routine"))
+    b = bytearray(0x90000)
+    anchor = cfg.REFERENCES[build][1]
+    for n, word in enumerate((0xA9BD7BFD, 0x2A0103E2, 0x910003FD, 0xA90153F3)):
+        put(b, anchor-16+4*n, word)
+    for off, word in ((0, 0xD11143FF), (4, 0xAA0003E1), (8, 0xD2808002),
+                      (12, 0xA9007BFD), (16, 0x910003FD), (20, 0x910143A0)):
+        put(b, root+off, word)
+    put(b, cmp_pc-12, ldr(19, 29, 0x50, 32))
+    put(b, cmp_pc-8, 0x7101927F)
+    put(b, cmp_pc-4, cond(cmp_pc-4, root+0x90, 0))
+    put(b, cmp_pc, 0x7101967F)
+    put(b, cmp_pc+4, cond(cmp_pc+4, case, 0))
+    put(b, case, ldr(1, 29, 0x54, 32))
+    put(b, case+4, 0x90000014)  # ADRP x20 to current raw-file page
+    put(b, case+8, 0x91000294)  # ADD x20,x20,#0
+    put(b, case+12, ldr(0, 20, 4, 32))
+    put(b, case+16, 0x34000001 | ((((call+0xBC-case-16)//4) & 0x7FFFF) << 5))
+    for off, value in ((20, 0x7100043F), (28, 0x7100083F), (36, 0x71000C3F)):
+        put(b, case+off, value)
+    for off, target, condition in ((24,call+0x84,0),(32,call+0x38,0),(40,call-0x668,1)):
+        put(b, case+off, cond(case+off, target, condition))
+    put(b, case+44, 0x34000000 | ((((call-8-case-44)//4) & 0x7FFFF) << 5))
+    put(b, call-8, ldr(1,20,0x58,32))
+    put(b, call-4, ldr(0,20,0x30,64))
+    put(b, call, direct(call,anchor-16))
+    put(b, call+4, tbnz(call+4,call-0x700))
+    put(b, call+8, direct(call+8,adjacent))
+    put(b, adjacent, 0xA9BD7BFD)
+    put(b, recv-12, 0x710FFEDF)
+    put(b, recv-8, ldr(0,20,0x78,64))
+    put(b, recv-4, cond(recv-4,recv+0x80,13))
+    put(b, recv, direct(recv,root))
+    return bytes(b)
+
+
 def synthetic(anchor: int=0x1000, equal_delta: int=0x88) -> bytes:
     buf = bytearray(0x6000)
     pit = 0x2240
@@ -191,6 +242,88 @@ class BoundedPITGuards(unittest.TestCase):
         self.assertFalse(found["incoming_direct_edges"])
         self.assertFalse(found["indirect_callers_analyzed"])
 
+
+class DonorDispatchProvenance(unittest.TestCase):
+    def test_both_reference_layouts_have_separate_validator_and_following_call(self):
+        for build in cfg.REFERENCES:
+            with self.subTest(build=build):
+                b = dispatch_fixture(build)
+                r = cfg.donor_dispatch_context(b, build)
+                self.assertTrue(r["observed_slice_matches"], r["checks"])
+                self.assertEqual(r["path_classification"], "PIT_UPLOAD_FINALIZATION_CANDIDATE")
+                self.assertEqual((r["command_value"],r["subcommand_value"],r["required_state_value"]),
+                                 (0x65,3,0))
+                edges = cfg.inbound_candidates(b, cfg.REFERENCES[build][1],
+                                              start=0x40000,end=len(b))
+                self.assertEqual(edges["candidate_direct_call_count"], 2)
+                self.assertEqual(edges["candidate_direct_calls_to_pit_frame_entry"], 1)
+                self.assertEqual([e["target_role"] for e in edges["incoming_direct_edges"]],
+                                 ["PIT_FRAME_ENTRY_CANDIDATE", "OTHER_PIT_VICINITY_TARGET"])
+
+    def test_operand_and_branch_mutations_do_not_establish_supported_path(self):
+        build = "R500XXU1BSD3"
+        s = cfg.DISPATCH_REFERENCE_OFFSETS[build]
+        a, c, p, r = (s[k] for k in ("command_cmp","validator_call","pit_case","receive_call"))
+        mutations = (
+            (s["dispatcher"], 0xD503201F),  # No stack allocation.
+            (a, 0x71019A7F),  # Command 0x66 is not PIT 0x65.
+            (a+4, cond(a+4,p,1)),  # Wrong equality condition.
+            (a-12, ldr(19,29,0x54,32)),  # Not command word.
+            (p, ldr(1,29,0x58,32)),  # Not subcommand word.
+            (p+8, 0x91000273),  # ADD wrong register breaks state-object reference.
+            (p+12, ldr(0,20,8,32)),  # Wrong state-object slot.
+            (p+36, 0x7100083F),  # Subcommand 2, not upload finalization 3.
+            (p+40, cond(p+40,c-0x668,0)),  # Inverted reject branch.
+            (p+44, 0xB4000000 | ((((c-8-p-44)//4) & 0x7FFFF) << 5)),
+            (c-8, ldr(1,20,0x58,64)),  # W1 and X1 lengths differ.
+            (c-4, ldr(0,20,0x30,32)),  # Truncated pointer.
+            (c, direct(c,s["next_routine"])),  # Nearby entry is not validator.
+            (c+4,tbnz(c+4,c-0x700,bit=30)),  # Wrong error bit.
+            (c+8,direct(c+8,cfg.REFERENCES[build][1]-16)),  # Duplicated validator call.
+            (r-8,ldr(0,20,0x80,64)),  # Different receive buffer.
+            (r-12,0x710FFADF),  # Wrong received-byte threshold.
+            (r,direct(r,s["dispatcher"]+4)),  # Skip entry.
+        )
+        for pc, replacement in mutations:
+            with self.subTest(offset=hex(pc),word=hex(replacement)):
+                blob = bytearray(dispatch_fixture(build))
+                put(blob,pc,replacement)
+                report=cfg.donor_dispatch_context(bytes(blob),build)
+                self.assertFalse(report["observed_slice_matches"])
+                self.assertEqual(report["path_classification"],"UNRESOLVED_REFERENCE_SLICE")
+                self.assertIsNone(report["command_value"])
+                self.assertIsNone(report["validator_buffer_object_offset"])
+
+    def test_matching_slice_does_not_claim_wireless_unlock_or_read_safety(self):
+        r=cfg.donor_dispatch_context(dispatch_fixture("R500XXU1BSD3"),"R500XXU1BSD3")
+        for k in ("wireless_transport_proven","owner_R840X_equivalence_proven",
+                  "signature_bypass_proven","safe_read_only_device_operation_proven"):
+            self.assertIs(r[k],False)
+
+    def test_frame_pattern_mutation_removes_specific_entry_classification(self):
+        build="R500XXU1BSD3"
+        b=bytearray(dispatch_fixture(build))
+        anchor=cfg.REFERENCES[build][1]
+        put(b,anchor-8,0xD503201F)
+        r=cfg.inbound_candidates(bytes(b),anchor,start=0x40000,end=len(b))
+        self.assertIsNone(r["pit_frame_entry_candidate"])
+        self.assertEqual(r["candidate_direct_calls_to_pit_frame_entry"],0)
+        self.assertTrue(all(e["target_role"]=="OTHER_PIT_VICINITY_TARGET"
+                            for e in r["incoming_direct_edges"]))
+
+    def test_load_decoder_rejects_signed_writeback_and_register_addressing(self):
+        for word in (0xB9805A81,0xF85F8E80,0xF8606A80,0xB9005A81):
+            self.assertIsNone(cfg.load_unsigned(word))
+
+    def test_truncated_and_unknown_reference_fail_explicitly(self):
+        with self.assertRaisesRegex(ValueError,"TRUNCATED"):
+            cfg.donor_dispatch_context(b"\0"*32,"R500XXU1BSD3")
+        with self.assertRaisesRegex(ValueError,"UNSUPPORTED"):
+            cfg.donor_dispatch_context(b"\0"*32,"R840XXXU1AUA2")
+
+    def test_frame_candidate_rejects_bad_interval(self):
+        for a in (-4,0,2,0x1000):
+            self.assertIsNone(cfg.pit_entry_candidate(b"\0"*64,a))
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import struct
 import sys
 
 from watch3_sboot_pit_semantic_diff import REFERENCES, decode, inspect, read_pinned
+from watch3_sboot_xref_map import decode_adrp_add
 
 WINDOW_BYTES = 0x180
 MAX_VISITED = WINDOW_BYTES // 4
@@ -204,6 +205,19 @@ POSSIBLE_ENTRY_LOOKBACK_BYTES = 0x100
 MAX_DIRECT_INBOUND_CANDIDATES = 128
 
 
+def pit_entry_candidate(blob: bytes, anchor: int) -> int | None:
+    """Recognize the observed frame setup before the literal, not arbitrary vicinity.
+
+    This is deliberately an instruction-pattern candidate, not proof that all
+    instructions in the following window belong to the same function.
+    """
+    entry = anchor - 16
+    if entry < 0 or entry % 4 or entry + 16 > len(blob):
+        return None
+    expected = (0xA9BD7BFD, 0x2A0103E2, 0x910003FD, 0xA90153F3)
+    return entry if struct.unpack_from("<4I", blob, entry) == expected else None
+
+
 def inbound_candidates(blob: bytes, anchor: int, *,
                        start: int = DONOR_STAGE_START,
                        end: int = DONOR_STAGE_END) -> dict:
@@ -224,6 +238,7 @@ def inbound_candidates(blob: bytes, anchor: int, *,
     lower = anchor - POSSIBLE_ENTRY_LOOKBACK_BYTES
     upper = anchor + WINDOW_BYTES
     possible = []
+    entry = pit_entry_candidate(blob, anchor)
     for pc in range(start, end, 4):
         # Only direct B/BL instructions. CBZ/TBZ/B.cond and branch-register
         # instructions cannot independently identify the candidate caller.
@@ -242,12 +257,18 @@ def inbound_candidates(blob: bytes, anchor: int, *,
             "source_op": found["op"],
             "target_relative_to_pit_xref": found["target"] - anchor,
             "possible_function_entry_only": True,
+            "target_role": ("PIT_FRAME_ENTRY_CANDIDATE" if found["target"] == entry
+                            else "OTHER_PIT_VICINITY_TARGET"),
             "verified_external_wireless_caller": False,
         })
     return {
         "candidate_target_interval": [lower, upper],
         "candidate_direct_call_count": sum(x["source_op"] == "BL" for x in possible),
         "candidate_direct_branch_count": sum(x["source_op"] == "B" for x in possible),
+        "pit_frame_entry_candidate": entry,
+        "candidate_direct_calls_to_pit_frame_entry": sum(
+            x["source_op"] == "BL" and x["target_role"] == "PIT_FRAME_ENTRY_CANDIDATE"
+            for x in possible),
         "incoming_direct_edges": possible,
         "candidate_stage_only": True,
         "function_entry_verified": False,
@@ -258,21 +279,149 @@ def inbound_candidates(blob: bytes, anchor: int, *,
     }
 
 
+# Offsets are observations from the TWO pinned reference files, not addresses
+# or scan defaults to use on any other model. No instruction is executed.
+DISPATCH_REFERENCE_OFFSETS = {
+    "R500XXU1BSD3": {
+        "dispatcher": 0x57430, "command_cmp": 0x57480,
+        "pit_case": 0x57A3C, "validator_call": 0x57E1C,
+        "receive_call": 0x7CCD0, "next_routine": 0x58D10,
+    },
+    "R500XXU1GUJ2": {
+        "dispatcher": 0x575B0, "command_cmp": 0x57600,
+        "pit_case": 0x57BBC, "validator_call": 0x57F9C,
+        "receive_call": 0x7D258, "next_routine": 0x58FC8,
+    },
+}
+
+
+def load_unsigned(word: int) -> dict | None:
+    """Only unsigned-immediate LDR Wt/Xt,[Xn,#imm], without writeback."""
+    kind = word & 0xFFC00000
+    if kind not in (0xB9400000, 0xF9400000):
+        return None
+    width = 64 if kind == 0xF9400000 else 32
+    return {"register": word & 31, "base": (word >> 5) & 31,
+            "offset": ((word >> 10) & 0xFFF) * (width // 8), "width": width}
+
+
+def donor_dispatch_context(blob: bytes, build: str) -> dict:
+    """Check the manually reviewed donor dispatch slice and operand provenance.
+
+    Unlike the broad inbound scan, this distinguishes the validator from the
+    adjacent routine. Each semantic assertion requires its actual operands and
+    branch condition. Matching a slice does NOT establish the caller's transport,
+    runtime address map, signature policy, or owner's bootloader behavior.
+    """
+    if build not in DISPATCH_REFERENCE_OFFSETS:
+        raise ValueError("UNSUPPORTED_DISPATCH_REFERENCE")
+    sites = DISPATCH_REFERENCE_OFFSETS[build]
+    if (not isinstance(blob, bytes) or len(blob) < max(sites.values()) + 4):
+        raise ValueError("TRUNCATED_DISPATCH_REFERENCE")
+    anchor = REFERENCES[build][1]
+    entry = pit_entry_candidate(blob, anchor)
+    root, cmp_pc, case, call, recv, adjacent = (
+        sites[k] for k in ("dispatcher", "command_cmp", "pit_case",
+                           "validator_call", "receive_call", "next_routine"))
+    word = lambda at: instruction(blob, at)
+
+    def transfer(at: int, op: str, target: int, **operands: int) -> bool:
+        decoded = branch(word(at), at)
+        return bool(decoded and decoded["op"] == op and decoded.get("target") == target
+                    and all(decoded.get(k) == v for k, v in operands.items()))
+
+    state_at = decode_adrp_add(blob, case + 4)
+    checks = {
+        "observed_pit_frame_entry": entry is not None,
+        "dispatcher_frame_setup": (word(root) == 0xD11143FF and
+                                   word(root + 12) == 0xA9007BFD),
+        "dispatcher_input_to_copy_x1": word(root + 4) == 0xAA0003E1,
+        "dispatcher_copy_size_0x400": word(root + 8) == 0xD2808002,
+        "dispatcher_frame_pointer": word(root + 16) == 0x910003FD,
+        "dispatcher_copy_destination_frame_0x50": word(root + 20) == 0x910143A0,
+        "command_from_frame_0x50": load_unsigned(word(cmp_pc - 12)) ==
+            {"register": 19, "base": 29, "offset": 0x50, "width": 32},
+        "previous_command_0x64_not_equal_for_0x65": (
+            word(cmp_pc - 8) == 0x7101927F and
+            transfer(cmp_pc - 4, "B_COND", root + 0x90, condition=0)),
+        "command_0x65_dispatch": (word(cmp_pc) == 0x7101967F and
+            transfer(cmp_pc + 4, "B_COND", case, condition=0)),
+        "subcommand_from_frame_0x54": load_unsigned(word(case)) ==
+            {"register": 1, "base": 29, "offset": 0x54, "width": 32},
+        "state_object_reference_in_x20": (
+            state_at is not None and word(case + 4) & 31 == 20),
+        "state_word_at_object_4": load_unsigned(word(case + 12)) ==
+            {"register": 0, "base": 20, "offset": 4, "width": 32},
+        "subcommand_3_fallthrough": (
+            transfer(case + 16, "CBZ", call + 0xBC, register=1) and
+            not (word(case + 16) & 0x80000000) and
+            word(case + 20) == 0x7100043F and
+            transfer(case + 24, "B_COND", call + 0x84, condition=0) and
+            word(case + 28) == 0x7100083F and
+            transfer(case + 32, "B_COND", call + 0x38, condition=0) and
+            word(case + 36) == 0x71000C3F and
+            transfer(case + 40, "B_COND", call - 0x668, condition=1)),
+        "state_0_branches_to_arguments": (
+            transfer(case + 44, "CBZ", call - 8, register=0) and
+            not (word(case + 44) & 0x80000000)),
+        "validator_length_w1_from_object_0x58": load_unsigned(word(call - 8)) ==
+            {"register": 1, "base": 20, "offset": 0x58, "width": 32},
+        "validator_buffer_x0_from_object_0x30": load_unsigned(word(call - 4)) ==
+            {"register": 0, "base": 20, "offset": 0x30, "width": 64},
+        "call_targets_pit_entry": entry is not None and transfer(call, "BL", entry),
+        "validator_negative_status_branches_away": transfer(
+            call + 4, "TBNZ", call - 0x700, register=0, bit=31),
+        "following_call_targets_separate_frame": (
+            transfer(call + 8, "BL", adjacent) and
+            word(adjacent) == 0xA9BD7BFD and adjacent > anchor + 0x100),
+        "receive_candidate_calls_dispatcher": transfer(recv, "BL", root),
+        "receive_command_buffer_from_object": load_unsigned(word(recv - 8)) ==
+            {"register": 0, "base": 20, "offset": 0x78, "width": 64},
+        "receive_compares_0x400_bytes": (
+            word(recv - 12) == 0x710FFEDF and
+            transfer(recv - 4, "B_COND", recv + 0x80, condition=13)),
+    }
+    # A nonmatching byte slice must never receive the supported-path label.
+    matched = all(checks.values())
+    return {
+        "observed_slice_matches": matched,
+        "checks": checks,
+        "reference_file_offsets": dict(sites),
+        "pit_frame_entry_candidate": entry,
+        "state_object_file_relative_hypothesis": state_at,
+        "path_classification": ("PIT_UPLOAD_FINALIZATION_CANDIDATE" if matched
+                                else "UNRESOLVED_REFERENCE_SLICE"),
+        "command_value": 0x65 if matched else None,
+        "subcommand_value": 3 if matched else None,
+        "required_state_value": 0 if matched else None,
+        "validator_buffer_object_offset": 0x30 if matched else None,
+        "validator_length_object_offset": 0x58 if matched else None,
+        "receive_to_dispatch_static_call_observed": checks["receive_candidate_calls_dispatcher"],
+        "wireless_transport_proven": False,
+        "owner_R840X_equivalence_proven": False,
+        "signature_bypass_proven": False,
+        "safe_read_only_device_operation_proven": False,
+    }
+
+
 def compare(older: bytes, newer: bytes) -> dict:
     gates = {}
     graphs = {}
     incoming = {}
+    dispatch = {}
     for build, blob in (("R500XXU1BSD3", older), ("R500XXU1GUJ2", newer)):
         anchor = REFERENCES[build][1]
         gates[build] = find_gates(blob, anchor)
         graphs[build] = branch_graph(blob, anchor)
         incoming[build] = inbound_candidates(blob, anchor)
+        dispatch[build] = donor_dispatch_context(blob, build)
     patterns = [gates[x]["canonical_candidate_three_guards"] for x in REFERENCES]
     return {
         "schema": "uglyos-r500-sboot-pit-bounded-branch-graph-v1",
         "source_model": "SM-R500 only, NOT owner's SM-R840X",
         "reference_sha256": {k: v[0] for k, v in REFERENCES.items()},
         "gates": gates, "graphs": graphs, "inbound_candidate_edges": incoming,
+        "donor_dispatch_context": dispatch,
         "both_reference_versions_match_canonical_three_guard_shape": all(patterns),
         "CVE_root_cause_located": False,
         "firmware_signature_policy_proven": False,
