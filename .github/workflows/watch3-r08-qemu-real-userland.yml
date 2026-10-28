@@ -10,10 +10,17 @@ on:
       - 'tools/watch3_r08_qemu_launcher_closure.py'
       - 'tools/watch3_r08_qml_module_closure.py'
       - 'tools/watch3_r08_qemu_launcher_runtime.py'
+      - 'tools/watch3_r08_qemu_minimal_png_capture.py'
+      - 'tools/watch3_r08_qemu_vnc_capture.py'
+      - 'tools/watch3_r08_private_dbus_display.py'
+      - 'tools/watch3-r08-qemu-visual-offline.Dockerfile'
       - 'tests/test_watch3_r08_qemu_userland_smoke.py'
       - 'tests/test_watch3_r08_qemu_launcher_closure.py'
       - 'tests/test_watch3_r08_qml_module_closure.py'
       - 'tests/test_watch3_r08_qemu_launcher_runtime.py'
+      - 'tests/test_watch3_r08_qemu_minimal_png_capture.py'
+      - 'tests/test_watch3_r08_qemu_vnc_capture.py'
+      - 'tests/test_watch3_r08_private_dbus_display.py'
   workflow_dispatch:
 
 permissions:
@@ -29,6 +36,50 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Preflight private system D-Bus inside the EXACT network-disabled visual container
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -q -f tools/watch3-r08-qemu-visual-offline.Dockerfile \
+            --build-arg OFFLINE_UID="$(id -u)" --build-arg OFFLINE_GID="$(id -g)" \
+            -t uglyos-r08-qemu-visual:ci .
+          docker run --rm -i \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 96 \
+            --memory 2g \
+            --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
+            --user "$(id -u):$(id -g)" \
+            -v "$PWD/tools:/tools:ro" \
+            uglyos-r08-qemu-visual:ci \
+            python3 - <<'PY'
+          import sys, tempfile, subprocess
+          from pathlib import Path
+          sys.path.insert(0,"/tools")
+          from watch3_r08_private_dbus_display import private_system_bus
+          with tempfile.TemporaryDirectory(prefix="uglyos-bus-preflight-") as folder:
+              with private_system_bus(Path(folder)) as address:
+                  print("ISOLATED_PRIVATE_DBUS_SOCKET_READY",address)
+                  r=subprocess.run(
+                      ["dbus-send","--bus="+address,"--print-reply",
+                       "--reply-timeout=1200","--dest=org.freedesktop.DBus",
+                       "/org/freedesktop/DBus","org.freedesktop.DBus.ListNames"],
+                      capture_output=True,timeout=3,check=False)
+                  assert r.returncode==0, ("ISOLATED_PRIVATE_DBUS_REPLY_FAILED:"+r.stderr.decode(errors="replace")[-400:])
+                  assert b"org.freedesktop.DBus" in r.stdout
+                  print("PRIVATE_DBUS_METHOD_REPLY_VERIFIED_IN_NETWORK_NONE")
+          PY
+
+      - name: Install offline PNG validator for actual Qt software screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3-pil
+          python3 -c 'from PIL import Image; print("PIL_READY")'
+
       - name: Run deterministic provenance and emulation regression tests
         run: |
           set -euo pipefail
@@ -36,6 +87,9 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_launcher_closure.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qml_module_closure.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_launcher_runtime.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_minimal_png_capture.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_vnc_capture.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_private_dbus_display.py' -v
           python3 -m py_compile tools/watch3_r08_select_derived_artifact.py tools/watch3_r08_qemu_userland_smoke.py
 
       - name: Find verified main-commit legacy ext4 artifact, not an unrelated run
@@ -251,6 +305,87 @@ jobs:
               f.write("- Actual displayed pixels, Watch3 frame, Wayland client, stock rescue "
                       "and boot remain unproven.\n")
           PY
+
+      # The real October 24 ARM64 launcher never flushed a Qt minimal QPA
+      # backing-store frame (CI #40705354149). The negative test remains
+      # in tests/ but we do not waste 24 seconds re-running that dead end.
+      # VNC uses a raw framebuffer instead, confined to --network none.
+
+      - name: Require authentic ARM64 Qt VNC display plugin before building any container
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=tools python3 - <<'PY'
+          from pathlib import Path
+          from watch3_r08_qemu_vnc_capture import find_arm64_qvnc
+          from watch3_r08_qemu_launcher_runtime import PLATFORM_ROOTS
+          root=Path("extracted")
+          names={}
+          for prefix in PLATFORM_ROOTS:
+              parent=root/prefix
+              if parent.is_dir():
+                  names[prefix]=sorted(p.name for p in parent.glob("libq*.so"))
+          print("REAL_QT_ARM64_PLATFORM_PLUGIN_INVENTORY",names)
+          target=find_arm64_qvnc(root)
+          print("REAL_AARCH64_QVNC_PLUGIN_FOUND",target)
+          PY
+
+      - name: Run Qt VNC raw capture INSIDE Docker --network none ONLY
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p visual reports
+          docker run --rm \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 96 \
+            --memory 2g \
+            --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
+            --user "$(id -u):$(id -g)" \
+            -v "$PWD/extracted:/guest:ro" \
+            -v "$PWD/tools:/tools:ro" \
+            -v "$PWD/reports:/reports:rw" \
+            -v "$PWD/visual:/visual:rw" \
+            uglyos-r08-qemu-visual:ci \
+            python3 /tools/watch3_r08_qemu_vnc_capture.py \
+              --extracted-rootfs /guest \
+              --report /reports/real-arm64-vnc-no-network-raw-frame.json \
+              --frame-output /visual/real-arm64-asteroid-vnc-frame.png
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          report=json.loads(Path("reports/real-arm64-vnc-no-network-raw-frame.json").read_text())
+          assert report["status"]=="REAL_ARM64_QT_VNC_NONBLANK_PIXEL_FRAME_CAPTURED"
+          assert report["isolated_network_interfaces"]==["lo"]
+          assert report["rfb_protocol_3_3_handshake_verified"]
+          assert report["private_compositor_display_wakeup"]["compositor_show_fullscreen_command_sequence_proven"]
+          assert report["raw_fb_rect_updates_received"]>0
+          assert report["frame"]["nonuniform_real_pixels"]
+          assert not report["flashable"] and not report["watch_contacted"]
+          frame=Path("visual/real-arm64-asteroid-vnc-frame.png")
+          digest=hashlib.sha256(frame.read_bytes()).hexdigest()
+          assert digest==report["frame"]["png_sha256"]
+          print("REAL_AARCH64_COMPOSITOR_QT_FRAME_PIXELS",digest)
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
+              f.write("\n## OFF-DEVICE real ARM64 Qt VNC frame capture\n")
+              f.write("- Isolated Docker network namespace with loopback-only VNC.\n")
+              f.write("- Exact raw RFB 3.3 frame generated by real guest Qt compositor QPA.\n")
+              f.write("- Tested private D-Bus setUpdatesEnabled(false/true) makes compositor window visible.\n")
+              f.write("- Image SHA256: "+digest+"\n")
+              f.write("- Dimensions: 360x360 virtual pixels; not Watch3 LCD proof.\n")
+              f.write("- Actual screenshot in Actions PNG artifact. Watch never contacted.\n")
+          PY
+
+      - name: Publish verified real ARM64 360x360 Qt VNC pixel proof
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-ACTUAL-ARM64-visual-frame-${{ github.run_id }}
+          path: visual/real-arm64-asteroid-vnc-frame.png
+          retention-days: 30
+          if-no-files-found: error
 
       - name: Publish ONLY small reports, no firmware or whole filesystem
         if: always()
