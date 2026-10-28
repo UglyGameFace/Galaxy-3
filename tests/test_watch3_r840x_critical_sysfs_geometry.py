@@ -154,7 +154,7 @@ class GeometrySafetyTests(unittest.TestCase):
         self.assertNotIn("critical_p14_size", subset)
 
     def test_param_followup_diagnoses_individual_categorical_failures(self):
-        vals = {"critical_p10_size": "2048\\n"}
+        vals = {"critical_p10_size": "2048\n"}
         errors = {"critical_p10_start": "SYSFS_ACCESS_DENIED"}
         report = geometry.summarize_param(vals, errors, owner_watch=True)
         self.assertEqual(report["state"], "PARAM_FIELD_PARTIAL_OR_UNAVAILABLE")
@@ -188,7 +188,7 @@ class GeometrySafetyTests(unittest.TestCase):
 
     def test_param_followup_numeric_range_cannot_prove_pit_or_disk_bounds(self):
         result = geometry.summarize_param(
-            {"critical_p10_start": "10240\\n", "critical_p10_size": "256\\n"},
+            {"critical_p10_start": "10240\n", "critical_p10_size": "256\n"},
             owner_watch=True)
         self.assertEqual(result["state"], "TWO_PARAM_KERNEL_SCALARS_OBSERVED")
         self.assertEqual(result["param_sector_candidate"],
@@ -198,7 +198,7 @@ class GeometrySafetyTests(unittest.TestCase):
         self.assertFalse(result["independent_disk_capacity_verified_in_this_probe"])
         self.assertFalse(result["authentic_samsung_pit_obtained"])
         self.assertFalse(result["flash_allowed"])
-        for bad in ("0\\n", "-10", "0x100", "PRIVATE", "9999999999999999"):
+        for bad in ("0\n", "-10", "0x100", "PRIVATE", "9999999999999999"):
             with self.subTest(bad=bad):
                 result = geometry.summarize_param(
                     {"critical_p10_start": "10240", "critical_p10_size": bad},
@@ -219,7 +219,7 @@ class GeometrySafetyTests(unittest.TestCase):
             def fake_collect(ip, key_path, probes):
                 self.assertIs(probes, sdb.CRITICAL_PARAM_GEOMETRY_PROBES)
                 called.append(1)
-                return ({"critical_p10_size": "2048\\n"},
+                return ({"critical_p10_size": "2048\n"},
                         {"critical_p10_start": "SYSFS_PATH_OR_COMMAND_NOT_FOUND"})
             with patch.object(geometry, "collect", side_effect=fake_collect):
                 self.assertEqual(geometry.main([
