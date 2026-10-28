@@ -49,7 +49,7 @@ def summarize(values: dict[str, str], errors: dict[str, str] | None = None,
     Use start/size only as KERNEL REPORTED geometric candidates. Never
     authenticate PIT, partition images, signed recovery or boot acceptance.
     """
-    if not isinstance(values, dict) or not isinstance(errors, dict | type(None)):
+    if not isinstance(values, dict) or (errors is not None and not isinstance(errors, dict)):
         raise GeometryError("INTERNAL_COLLECTOR_RESULT_INVALID")
     errors = {} if errors is None else errors
     if set(values) - set(CRITICAL_GEOMETRY_PROBES) or set(errors) - set(CRITICAL_GEOMETRY_PROBES):
@@ -107,8 +107,11 @@ def summarize(values: dict[str, str], errors: dict[str, str] | None = None,
         "sector_units": SECTOR_UNIT,
         "critical_partition_name_provenance": "OWNER_21_SYSFS_PARTNAME_TEXT_MERGE_NOT_SAMSUNG_PIT",
         "partition_scalar_observations": entries,
-        "nonoverlap_in_reported_three_candidates": not overlap if complete else None,
-        "watch_contacted_by_this_probe": owner_watch,
+        "nonoverlap_in_reported_three_candidates": (
+            False if overlap else True if complete else None),
+        "sdb_request_attempted": owner_watch,
+        "watch_contacted_by_this_probe": bool(owner_watch and values),
+        "device_identity_cryptographically_attested": False,
         "kernel_sector_ranges_observed": bool(complete and owner_watch),
         "all_21_partition_geometry_established": False,
         "kernel_geometry_equivalent_to_signed_samsung_pit": False,
