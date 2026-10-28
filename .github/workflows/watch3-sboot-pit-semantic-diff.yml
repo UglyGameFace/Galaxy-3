@@ -181,6 +181,15 @@ jobs:
                   "BL1_candidate_end":parts[0]["end_exclusive"],
                   "EPBL_candidate_end":parts[1]["end_exclusive"],
                   "footer_candidate_count_unverified":footer_candidates,
+                  "footer_pattern_groups":[
+                      {"assumed_signature_length":x["signature_bytes_hypothesis"],
+                       "epbl_header_fields":x["epbl_marker_numeric_fields"],
+                       "candidate_offsets":[
+                           [v["footer_file_offset"],v["boundary_candidate"]]
+                           for v in x["candidates"][:24]],
+                       "truncated":len(x["candidates"])>24}
+                      for x in data["stage2_signature_footer_pattern_hypotheses"]],
+
                   "ODIN_marker_count":len(data["reference_marker_locations"]["ODIN"]),
                   "LOKE_marker_count":len(data["reference_marker_locations"]["LOKE"]),
                   "PIT_marker_count":len(data["reference_marker_locations"]["PIT"]),
