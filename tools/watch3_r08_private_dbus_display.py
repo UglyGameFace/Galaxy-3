@@ -69,10 +69,10 @@ def private_system_bus(run_dir: Path):
             deadline = time.monotonic() + MAX_BUS_WAIT
             while not target.is_socket() and time.monotonic() < deadline:
                 if process.poll() is not None:
-                    raise PrivateBusError("PRIVATE_DBUS_DAEMON_EXITED_EARLY")
+                    raise PrivateBusError("PRIVATE_DBUS_DAEMON_EXITED_EARLY:" + log.read_text(errors="replace")[-900:])
                 time.sleep(0.05)
             if not target.is_socket():
-                raise PrivateBusError("PRIVATE_SYSTEM_BUS_SOCKET_NOT_READY")
+                raise PrivateBusError("PRIVATE_SYSTEM_BUS_SOCKET_NOT_READY:" + log.read_text(errors="replace")[-900:])
             yield address
         finally:
             if process.poll() is None:
