@@ -1,0 +1,175 @@
+name: Issue 47 execute real UgLyOS ARM64 userspace offline
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r08-qemu-real-userland.yml'
+      - 'tools/watch3_r08_select_derived_artifact.py'
+      - 'tools/watch3_r08_qemu_userland_smoke.py'
+      - 'tests/test_watch3_r08_qemu_userland_smoke.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  real-arm64-userland-guest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run deterministic provenance and emulation regression tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_userland_smoke.py' -v
+          python3 -m py_compile tools/watch3_r08_select_derived_artifact.py tools/watch3_r08_qemu_userland_smoke.py
+
+      - name: Find verified main-commit legacy ext4 artifact, not an unrelated run
+        id: source
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          python3 tools/watch3_r08_select_derived_artifact.py \
+            --output reports/source-artifact.json \
+            --github-output "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import json
+          a=json.load(open("reports/source-artifact.json"))
+          assert a["main_commit_sha"]=="73aed5d38c0e96192ba480c490e90f4b9a2611c0"
+          assert a["artifact_name"].endswith(str(a["run_id"]))
+          assert a["proof_artifact_name"].endswith(str(a["run_id"]))
+          assert not a["flash_allowed"]
+          print("EXACT_DERIVED_IMAGE_ARTIFACT_VERIFIED",a["artifact_name"])
+          PY
+
+      - name: Retrieve ONLY the corrected real 755MB UgLyOS image
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.source.outputs.artifact_name }}
+          run-id: ${{ steps.source.outputs.run_id }}
+          repository: UglyGameFace/Galaxy-3
+          github-token: ${{ github.token }}
+          path: derived
+
+      - name: Download exact same-run derivation JSON proof
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.source.outputs.proof_artifact_name }}
+          run-id: ${{ steps.source.outputs.run_id }}
+          repository: UglyGameFace/Galaxy-3
+          github-token: ${{ github.token }}
+          path: reports/paired-proof
+
+      - name: Independently verify the actual derived file hash and legacy ext4
+        shell: bash
+        run: |
+          set -euo pipefail
+          filename=asteroid-image-noblesse-r08.rootfs-20261024125252.legacy-ext4-OFFLINE-NOT-FLASHABLE.ext4
+          test -f "derived/$filename" && test ! -L "derived/$filename"
+          python3 - <<'PY'
+          import hashlib,json,re
+          from pathlib import Path
+          p=Path("reports/paired-proof/legacy-derivative.json")
+          proof=json.loads(p.read_text())
+          src=json.loads(Path("reports/source-artifact.json").read_text())
+          filename="asteroid-image-noblesse-r08.rootfs-20261024125252.legacy-ext4-OFFLINE-NOT-FLASHABLE.ext4"
+          f=Path("derived")/filename
+          assert proof["status"]=="OFF_DEVICE_DERIVED_EXT4_VALIDATED"
+          assert proof["source_run"]==40095182440
+          assert proof["source_sha256"]=="8358d60f213c7acf8857a7a9795e7de9a35acbc70d6d3743b72299dfe8a3ed72"
+          assert proof["source_original_unchanged"] and proof["orphan_file_absent"]
+          assert proof["older_e2fsprogs_checked"] and not proof["flashable"]
+          assert proof["derived_filename"]==filename
+          assert proof["derived_bytes"]==755658752 and f.stat().st_size==proof["derived_bytes"]
+          assert re.fullmatch("[a-f0-9]{64}",proof["derived_sha256"])
+          hasher=hashlib.sha256()
+          with f.open("rb") as inp:
+              for chunk in iter(lambda:inp.read(4*1024*1024),b""):
+                  hasher.update(chunk)
+          assert hasher.hexdigest()==proof["derived_sha256"], "DERIVED_IMAGE_NOT_MATCHING_SAME_RUN_PROOF"
+          assert src["proof_artifact_name"].endswith(str(src["run_id"]))
+          result={"source_main_sha":src["main_commit_sha"],"derivation_run_id":src["run_id"],
+                  "source_original_sha256":proof["source_sha256"],
+                  "derived_image_sha256_verified":hasher.hexdigest(),
+                  "same_run_proof_verified":True, "watch_contacted":False,
+                  "flash_allowed":False}
+          Path("reports/verified-downloaded-derivative.json").write_text(
+              json.dumps(result,indent=2)+"\n")
+          print("SAME_RUN_DERIVED_IMAGE_AND_PROOF_VERIFIED",hasher.hexdigest())
+          PY
+          python3 tools/validate_watch3_legacy_ext4.py "derived/$filename" \
+            --report reports/independent-derived-ext4-readonly.json
+
+      - name: Install host AArch64 emulator and filesystem inspection tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            --no-install-recommends qemu-user e2fsprogs file binutils
+          command -v qemu-aarch64
+          command -v debugfs
+          qemu-aarch64 --version
+
+      - name: Extract checksum-pinned guest filesystem into fresh host directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p extracted
+          test -d extracted && test ! -L extracted
+          # debugfs is READ-ONLY without -w. Source SHA256 verified above.
+          # Extraction changes only the disposable directory on CI host.
+          debugfs -R "rdump / extracted" \
+            derived/asteroid-image-noblesse-r08.rootfs-20261024125252.legacy-ext4-OFFLINE-NOT-FLASHABLE.ext4 \
+            > reports/read-only-extraction.stdout 2> reports/read-only-extraction.stderr
+          test -f extracted/usr/bin/asteroid-launcher
+          test -f extracted/usr/lib/systemd/user/asteroid-launcher.service
+          test -f extracted/var/lib/environment/compositor/10-platform.conf
+          python3 tools/validate_watch3_graphics_rootfs.py extracted
+          echo "REAL_ARM64_ROOTFS_EXTRACTED_WITHOUT_MOUNT_OR_WATCH_ACCESS"
+
+      - name: Execute real built ARM64 program under QEMU linux-user
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/watch3_r08_qemu_userland_smoke.py \
+            --extracted-rootfs extracted \
+            --expected-image-sha256 "$(python3 -c 'import json; print(json.load(open("reports/verified-downloaded-derivative.json"))["derived_image_sha256_verified"])')" \
+            --output reports/qemu-real-arm64-userland.json
+          python3 - <<'PY'
+          import json,os
+          a=json.load(open("reports/qemu-real-arm64-userland.json"))
+          assert a["result"]=="REAL_ARM64_USERSPACE_EXECUTED_OFF_DEVICE"
+          assert a["qemu_linux_user_execution_returncode"]==0
+          assert a["launcher_elf64_aarch64"] and a["probe_output_exact_marker_seen"]
+          assert a["qemu_executes_on_HOST_kernel_not_Watch3_kernel"]
+          assert not a["flash_allowed"] and not a["bootloader_acceptance_proven"]
+          print("REAL_GUEST_ARM64_EXECUTION_PASSED",a["executed_guest_binary"])
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write("## Real saved UgLyOS ARM64 userspace under QEMU\n")
+              f.write("- Source ext4 is distinct, hash-pinned and legacy-fsck validated.\n")
+              f.write("- Real ARM64 utility: "+a["executed_guest_binary"]+"\n")
+              f.write("- QEMU linux-user with guest libraries: PASSED.\n")
+              f.write("- Host kernel used, not Watch3 Linux 4.9. Hardware boot and stock recovery NOT proven.\n")
+              f.write("- Flash/installation decision: NO_GO.\n")
+          PY
+
+      - name: Publish ONLY small reports, no firmware or whole filesystem
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy3-r08-real-qemu-arm64-proof-${{ github.run_id }}
+          path: reports/*.json
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Keep repository source unchanged
+        run: git diff --exit-code && git status --short
