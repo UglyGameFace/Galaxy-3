@@ -145,7 +145,55 @@ jobs:
               'flash_allowed':False
           },indent=2))
           PY
+      - name: Audit nested FOTA TAR headers only, in ephemeral runner filesystem
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/reference-tar"
+          7z e -bd -y "$RUNNER_TEMP/reference-R500-BSD3.7z" \
+            "-o$RUNNER_TEMP/reference-tar" >/dev/null
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import tarfile
+
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'reference-tar'
+          files = list(root.iterdir())
+          if len(files) != 1 or files[0].name != 'R500XXU1BSD3-FOTA.tar' or not files[0].is_file():
+              raise SystemExit('ARCHIVE_MEMBER_UNEXPECTED')
+          p = files[0]
+          if p.stat().st_size != 39589387:
+              raise SystemExit('NESTED_TAR_LENGTH_CHANGED')
+          with tarfile.open(p,'r:') as archive:
+              members = archive.getmembers()
+              if not 1 <= len(members) <= 2000:
+                  raise SystemExit('NESTED_TAR_COUNT_UNBOUNDED')
+              safe = []
+              for m in members:
+                  name = m.name
+                  if (not 1 <= len(name) <= 240 or name.startswith('/')
+                          or '..' in name.split('/') or any(ord(ch)<32 for ch in name)):
+                      raise SystemExit('UNSAFE_NESTED_PATH')
+                  safe.append({'name':name,'size':m.size,'type':m.type.decode('ascii','replace')})
+          print(json.dumps({
+              'reference_model':'SM-R500 only',
+              'reference_build':'R500XXU1BSD3',
+              'nested_tar_bytes':p.stat().st_size,
+              'nested_tar_sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
+              'nested_tar_member_count':len(safe),
+              'nested_tar_members':safe[:120],
+              'nested_member_list_truncated':len(safe)>120,
+              'nested_payload_files_opened_or_executed':False,
+              'firmware_published_to_repo':False,
+              'physical_watch_contacted':False,
+              'stock_r840x_recovery_verified':False,
+              'flash_allowed':False,
+          },indent=2))
+          PY
       - name: Record research limitation
         run: |
-          echo 'Downloaded one public SM-R500 archive in isolated runner, then listed members only; no watch communication, firmware execution or flashing.'
+          echo 'Downloaded one public SM-R500 archive and unpacked only its containing TAR to ephemeral runner disk for header inspection. No watch communication, firmware execution or flashing.'
           echo 'Sibling SM-R500 filenames alone do NOT authenticate R840X stock rescue, signed images, PIT or custom boot.'
