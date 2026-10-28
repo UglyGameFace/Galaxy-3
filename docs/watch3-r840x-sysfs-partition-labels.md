@@ -732,13 +732,12 @@ If an input is missing or a local output already exists, the
 offline script will safely refuse; do not delete the original
 evidence. Choose a fresh `--output` filename if necessary.
 
-**Pending verification:** until this command actually validates
-the four existing local JSON files, do not call the merged
-JSON artifact `ALL_21_KERNEL_TEXT_PARTNAME_FIELDS_RECONCILED`
-or claim we have independently verified each file's bytes.
-The individual, user-reported physical observations are valuable
-and specific, but a CI test using generated synthetic fixtures
-is **not** their on-phone reconciliation.
+**Historical note (superseded by physical owner-run merge below):**
+At this stage, all four local files had not yet been reconciled.
+The owner has **now run** the actual merge on the Android phone and supplied
+its sanitized result. Synthetic CI alone never verified the actual files.
+The recorded file digests are **local identity only**, not a signed
+hardware attestation.
 
 **Hardware gates unchanged:** `NO_GO` for Odin session-start,
 PIT transfer, boot/recovery/param writes, unsigned kernel boot
@@ -747,3 +746,95 @@ is neither an authentic Samsung-signed PIT nor a full OEM
 stock recovery pathway. Do **not** rerun batches 1/2/3
 or perform extra physical probes for this task.
 
+
+
+## Completed owner-run offline 21/21 merge (October 27, 2026)
+
+**This is no longer a pending command.** The owner ran the existing
+`tools/watch3_r840x_merge_sysfs_reports_offline.py` in Android Termux
+with all **four preserved** local reports after updating to
+`main=e39c2807f8eaca806561f3a27eedbaf2ee989192`. It produced
+`~/watch3-r840x-all21-sysfs-evidence.json` with:
+
+- `schema=uglyos-r840x-physical-sysfs-evidence-merge-v1`
+- `state=ALL_21_KERNEL_TEXT_PARTNAME_FIELDS_RECONCILED`
+- `readable_uevent_count=21` and `partname_field_count=21`
+- `recognized_public_label_count=9`, `redacted_unclassified_indices`
+  `[1,2,3,4,6,8,9,12,15,16,17,19]`
+- `not_in_supplied_reports=[]`
+- `source_kind=OWNER_SUPPLIED_REDACTED_REPORTS_NOT_CRYPTOGRAPHICALLY_ATTESTED`
+- `watch_contacted_by_merge=false`, `samsung_pit_authenticated=false`,
+  `partition_offsets_sizes_verified=false`,
+  `all_21_physical_partition_contents_read=false`,
+  `signed_stock_image_verified=false`,
+  `stock_recovery_proven=false`,
+  `bootloader_accepted_custom_image=false`, `flash_allowed=false`,
+  `result=NO_GO`.
+
+The merge tool confirmed **all 21 indices** and their presence in the
+four **distinct, already-saved** read-only SDB reports. It did not
+contact the physical watch, use Odin, read raw partition bytes, or
+calculate partition start/end sectors.
+
+### Verified by the owner's on-phone schema checks, not Samsung signatures
+
+The owner-supplied report contained these SHA-256s **for the original
+local redacted JSON inputs** (not for raw sysfs files or firmware images):
+
+| Report role | Recorded source indices | SHA-256 of local redacted input report |
+| --- | --- | --- |
+| fixed | 1, 20, 21 | `cdf428b879f43ddce0fbe7b323c6ea5852744b0e55591d30b9f60d3aa5f1e517` |
+| batch1 | 2–7 | `6a719892c664fbbb5fccf7e31b9b81349cff4902dfe4abb71b48ff30bd5101a0` |
+| batch2 | 8–13 | `d1bc08ef4d35a23c40eeeb5c49b716264ea3fd44e9d4a2988503599074a89c54` |
+| batch3 | 14–19 | `2267efafa804c0676ccfe71687be8f7f783bcc86593e27874d81ff114aa46ca7` |
+
+The merger checks the expected indices, recognized labels,
+schema, `PAP` owner-CSC reference, recorded build, source paths and
+`NO_GO` flags. These hashes make it possible to identify the four
+source files again on the **owner's phone**, but cannot independently
+attest the physical eMMC contents.
+
+### Concrete kernel-reported partition-label evidence
+
+| Numbered eMMC partition | Sanitized recognized `PARTNAME` | Interpretation limit |
+| --- | --- | --- |
+| `mmcblk0p5` | `module` | Kernel text label only |
+| `mmcblk0p7` | `steady` | Kernel text label only |
+| `mmcblk0p10` | `param` | Corresponds *by name* to the partition class in Samsung's 2021 bootloader advisory; not proof of vulnerability on this build |
+| `mmcblk0p11` | `up_param` | No known verified boot behavior or image format |
+| `mmcblk0p13` | `boot` | Named normal boot partition; **no contents, signing envelope or boot image packaging inspected** |
+| `mmcblk0p14` | `recovery` | Recovery-labeled partition; **not verified to repair an unbootable watch** |
+| `mmcblk0p18` | `csc` | Partition named CSC, distinct from the separately read active `PAP` text configuration |
+| `mmcblk0p20` | `rootfs` | Kernel label confirms a rootfs-named partition, not a proven filesystem mount/dependency or restorable signed system image |
+| `mmcblk0p21` | `user` | Kernel label only; no raw user data accessed |
+
+The remaining **12** positions are `unclassified` **by our
+privacy filter**, not by the kernel itself; the underlying `PARTNAME`
+values were intentionally omitted from the saved reports.
+Do **not** interpret these as empty, unused or unallocated partitions.
+Other bootloader components may live in unclassified partitions,
+eMMC hardware boot areas or RPMB; these were **not inspected**.
+
+### What changes for Issue #47, and what does not
+
+This new physical evidence **does resolve the old unknown index-to-name
+relationship for nine common labels** and removes the need to repeat
+any of the three read-only batches. We can now distinguish
+`param`, `boot`, `recovery`, `csc` and `rootfs` in the
+running kernel's text namespace, rather than guessing their positions.
+
+However, `21/21` is the **coverage of privacy-filtered kernel
+metadata**, **not** a complete authenticated Samsung PIT or a complete
+partition-role map. It does not supply partition geometry (offsets
+or block sizes), authentic BL/AP/CSC recovery package contents,
+signature/anti-rollback acceptance or the ability to boot a custom
+kernel safely.
+
+**Next real research gate:** independently corroborated R840X
+OEM stock restoration (firmware/provenance/PIT/rollback) and
+Samsung boot-chain behavior **off-device**. Do not run NetOdin
+`print-pit`/session start, read `/dev/mmcblk0pN`, flash retail
+SM-R840 firmware, or change the active `PAP` CSC simply because
+the labels are now known.
+
+**NO-GO remains unchanged for all watch writes and installation.**
