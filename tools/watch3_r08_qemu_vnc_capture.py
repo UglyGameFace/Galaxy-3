@@ -33,6 +33,9 @@ from PIL import Image, ImageStat
 from watch3_r08_qemu_userland_smoke import read_arm64, SmokeFailure
 from watch3_r08_qemu_launcher_runtime import actual_qt_plugin_roots, PLATFORM_ROOTS
 from watch3_r08_qml_module_closure import ROOTS as QML_ROOTS
+from watch3_r08_private_dbus_display import (
+    private_system_bus, force_compositor_window_visible,
+)
 
 CAPTURE_SECONDS = 28
 PORT = 5900
@@ -193,126 +196,136 @@ def capture(root: Path, *, max_seconds: int = CAPTURE_SECONDS) -> tuple[dict, by
             "QT_DEBUG_PLUGINS": "0",
             "QT_LOGGING_RULES": "qt.qml.states=true",
         }
-        started = time.monotonic()
-        with logfile.open("wb") as output:
-            try:
-                proc = subprocess.Popen(
-                    ["qemu-aarch64", "-L", str(root), str(launcher), "-platform",
-                     "vnc:size=360x360:port=5900"],
-                    cwd=run_dir, env=environment, stdin=subprocess.DEVNULL,
-                    stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
-            except OSError as exc:
-                raise RfbError("QEMU_GUEST_PROCESS_START_FAILED") from exc
-            frames = 0
-            unblank = None
-            best_image = None
-            best_metrics = None
-            last_metrics = None
-            handshake_proven = False
-            problem = None
-            try:
-                conn = None
-                # Qt ARM64 startup can take several seconds under emulation.
-                while time.monotonic() - started < min(17, max_seconds):
-                    if proc.poll() is not None:
-                        problem = "GUEST_EXITED_BEFORE_VNC_HANDSHAKE"
-                        break
-                    try:
-                        conn = socket.create_connection(("127.0.0.1", PORT), timeout=1)
-                        break
-                    except (OSError, socket.timeout):
-                        time.sleep(0.35)
-                if conn:
-                    with conn:
-                        conn.settimeout(3.0)
-                        width, height = handshake(conn)
-                        handshake_proven = True
-                        image = Image.new("RGB", (width, height), (0,0,0))
-                        while time.monotonic() - started < max_seconds and frames < 96:
-                            if proc.poll() is not None:
-                                problem = "GUEST_EXITED_DURING_VNC_CAPTURE"
-                                break
-                            try:
-                                image, rectangles = framebuffer_update(conn, width, height, image)
-                            except RfbError as exc:
-                                problem = str(exc)
-                                break
-                            if rectangles:
-                                frames += 1
-                                state = metrics(image)
-                                last_metrics = state
-                                if state["nonuniform_real_pixels"]:
-                                    unblank = image.copy()
-                                    best_metrics = state
-                                    break
-                                # Do not exhaust the capture budget on rapid
-                                # repeated black-frame responses before Qt has
-                                # initialized its scenegraph under emulation.
-                                time.sleep(0.55)
-                        if unblank is None and problem is None:
-                            problem = "NO_NONBLANK_RFB_FRAME_RECEIVED"
-                elif problem is None:
-                    problem = "QT_VNC_SERVER_NOT_LISTENING"
-            finally:
-                if proc.poll() is None:
-                    try:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+        with private_system_bus(run_dir) as dbus_address:
+            environment["DBUS_SYSTEM_BUS_ADDRESS"] = dbus_address
+            started = time.monotonic()
+            with logfile.open("wb") as output:
                 try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired as exc:
-                    raise RfbError("QEMU_PROCESS_GROUP_NOT_TERMINATED") from exc
-        runtime = round(time.monotonic() - started, 2)
-        with logfile.open("rb") as f:
-            diag = f.read(MAX_LOG_BYTES + 1)
-        log = diag.decode("utf-8", errors="replace")
-        errors = [text for text in ("Unsupported image format", "error while loading",
-                                   "could not load the qt platform plugin",
-                                   "segmentation fault")
-                  if text.lower() in log.lower()]
-        report = {
-            "schema": "uglyos-r08-real-arm64-qt-vnc-raw-frame-v1",
-            "status": "REAL_ARM64_QT_VNC_FRAME_UNVERIFIED",
-            "isolated_network_interfaces": isolated,
-            "network_namespace": "docker --network none, no host or external VNC",
-            "vnc_loopback_only_inside_namespace": True,
-            "actual_target_aarch64_vnc_qpa": "/" + str(vnc.relative_to(root)),
-            "source_compiled_arm64_launcher": "/usr/bin/asteroid-launcher",
-            "rfb_protocol_3_3_handshake_verified": handshake_proven,
-            "raw_fb_rect_updates_received": frames,
-            "last_raw_frame_color_statistics": last_metrics,
-            "runtime_seconds": runtime,
-            "qt_image_format_errors": errors,
-            "guest_aarch64_qsvg_decoder_present": bool(svg),
-            "png_created_by_host_rfb_client_from_actual_guest_framebuffer": bool(unblank),
-            "original_watch3_display_tested": False,
-            "exynos9110_hardware_emulated": False,
-            "samsung_bootloader_accepted": False,
-            "stock_r840x_rescue_proven": False,
-            "watch_contacted": False,
-            "flashable": False, "decision": "NO_GO",
-        }
-        if unblank is not None and not errors and best_metrics:
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir=run_dir) as temp:
-                pngfile = Path(temp.name)
-            try:
-                unblank.save(pngfile, format="PNG")
-                data = pngfile.read_bytes()
-            finally:
-                pngfile.unlink(missing_ok=True)
-            if not 100 <= len(data) <= 2_000_000:
-                raise RfbError("CAPTURED_RFB_PNG_LENGTH_INVALID")
-            report["frame"] = {
-                **best_metrics, "png_sha256": hashlib.sha256(data).hexdigest(),
-                "png_bytes": len(data),
+                    proc = subprocess.Popen(
+                        ["qemu-aarch64", "-L", str(root), str(launcher), "-platform",
+                         "vnc:size=360x360:port=5900"],
+                        cwd=run_dir, env=environment, stdin=subprocess.DEVNULL,
+                        stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+                except OSError as exc:
+                    raise RfbError("QEMU_GUEST_PROCESS_START_FAILED") from exc
+                frames = 0
+                unblank = None
+                best_image = None
+                best_metrics = None
+                last_metrics = None
+                handshake_proven = False
+                problem = None
+                wake = None
+                try:
+                    conn = None
+                    # Qt ARM64 startup can take several seconds under emulation.
+                    while time.monotonic() - started < min(17, max_seconds):
+                        if proc.poll() is not None:
+                            problem = "GUEST_EXITED_BEFORE_VNC_HANDSHAKE"
+                            break
+                        try:
+                            conn = socket.create_connection(("127.0.0.1", PORT), timeout=1)
+                            break
+                        except (OSError, socket.timeout):
+                            time.sleep(0.35)
+                    if conn:
+                        with conn:
+                            conn.settimeout(3.0)
+                            width, height = handshake(conn)
+                            handshake_proven = True
+                            # Exact pinned original compositor XML exposes this
+                            # private D-Bus method. Toggle false then true to show
+                            # the otherwise hidden QQuickWindow off-device.
+                            wake = force_compositor_window_visible(
+                                dbus_address, max_wait=7.0)
+                            image = Image.new("RGB", (width, height), (0,0,0))
+                            while time.monotonic() - started < max_seconds and frames < 96:
+                                if proc.poll() is not None:
+                                    problem = "GUEST_EXITED_DURING_VNC_CAPTURE"
+                                    break
+                                try:
+                                    image, rectangles = framebuffer_update(conn, width, height, image)
+                                except RfbError as exc:
+                                    problem = str(exc)
+                                    break
+                                if rectangles:
+                                    frames += 1
+                                    state = metrics(image)
+                                    last_metrics = state
+                                    if state["nonuniform_real_pixels"]:
+                                        unblank = image.copy()
+                                        best_metrics = state
+                                        break
+                                    # Do not exhaust the capture budget on rapid
+                                    # repeated black-frame responses before Qt has
+                                    # initialized its scenegraph under emulation.
+                                    time.sleep(0.55)
+                            if unblank is None and problem is None:
+                                problem = "NO_NONBLANK_RFB_FRAME_RECEIVED"
+                    elif problem is None:
+                        problem = "QT_VNC_SERVER_NOT_LISTENING"
+                finally:
+                    if proc.poll() is None:
+                        try:
+                            os.killpg(proc.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired as exc:
+                        raise RfbError("QEMU_PROCESS_GROUP_NOT_TERMINATED") from exc
+            runtime = round(time.monotonic() - started, 2)
+            with logfile.open("rb") as f:
+                diag = f.read(MAX_LOG_BYTES + 1)
+            log = diag.decode("utf-8", errors="replace")
+            errors = [text for text in ("Unsupported image format", "error while loading",
+                                       "could not load the qt platform plugin",
+                                       "segmentation fault")
+                      if text.lower() in log.lower()]
+            report = {
+                "schema": "uglyos-r08-real-arm64-qt-vnc-raw-frame-v1",
+                "status": "REAL_ARM64_QT_VNC_FRAME_UNVERIFIED",
+                "isolated_network_interfaces": isolated,
+                "network_namespace": "docker --network none, no host or external VNC",
+                "vnc_loopback_only_inside_namespace": True,
+                "actual_target_aarch64_vnc_qpa": "/" + str(vnc.relative_to(root)),
+                "source_compiled_arm64_launcher": "/usr/bin/asteroid-launcher",
+                "rfb_protocol_3_3_handshake_verified": handshake_proven,
+                "raw_fb_rect_updates_received": frames,
+                "last_raw_frame_color_statistics": last_metrics,
+                "private_compositor_display_wakeup": wake,
+                "runtime_seconds": runtime,
+                "qt_image_format_errors": errors,
+                "guest_aarch64_qsvg_decoder_present": bool(svg),
+                "png_created_by_host_rfb_client_from_actual_guest_framebuffer": bool(unblank),
+                "original_watch3_display_tested": False,
+                "exynos9110_hardware_emulated": False,
+                "samsung_bootloader_accepted": False,
+                "stock_r840x_rescue_proven": False,
+                "watch_contacted": False,
+                "flashable": False, "decision": "NO_GO",
             }
-            report["status"] = "REAL_ARM64_QT_VNC_NONBLANK_PIXEL_FRAME_CAPTURED"
-            return report, data
-        report["reason"] = problem or ("QT_FATAL_RUNTIME_MESSAGES" if errors
-                                     else "NO_VALID_NONBLANK_RAW_FRAMEBUFFER")
-        report["guest_log_tail"] = log[-1700:]
-        return report, None
+            if (unblank is not None and not errors and best_metrics and
+                    wake and wake["compositor_show_fullscreen_command_sequence_proven"]):
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir=run_dir) as temp:
+                    pngfile = Path(temp.name)
+                try:
+                    unblank.save(pngfile, format="PNG")
+                    data = pngfile.read_bytes()
+                finally:
+                    pngfile.unlink(missing_ok=True)
+                if not 100 <= len(data) <= 2_000_000:
+                    raise RfbError("CAPTURED_RFB_PNG_LENGTH_INVALID")
+                report["frame"] = {
+                    **best_metrics, "png_sha256": hashlib.sha256(data).hexdigest(),
+                    "png_bytes": len(data),
+                }
+                report["status"] = "REAL_ARM64_QT_VNC_NONBLANK_PIXEL_FRAME_CAPTURED"
+                return report, data
+            report["reason"] = problem or ("QT_FATAL_RUNTIME_MESSAGES" if errors
+                                         else "NO_VALID_NONBLANK_RAW_FRAMEBUFFER")
+            report["guest_log_tail"] = log[-1700:]
+            return report, None
 
 
 def main() -> int:
