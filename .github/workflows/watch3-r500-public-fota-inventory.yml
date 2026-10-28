@@ -106,7 +106,7 @@ jobs:
           if p.stat().st_size != expected['size'] or not 1 <= p.stat().st_size <= 37_000_000:
               raise SystemExit('REFERENCE_ARCHIVE_SIZE_MISMATCH')
           blob = p.read_bytes()
-          github_sha = hashlib.sha1(b'blob ' + str(len(blob)).encode() + b'\\0' + blob).hexdigest()
+          github_sha = hashlib.sha1(b'blob ' + str(len(blob)).encode() + b'\0' + blob).hexdigest()
           if github_sha != expected['sha']:
               raise SystemExit('REFERENCE_GIT_BLOB_HASH_MISMATCH')
           run = subprocess.run(['7z','l','-slt',str(p)],text=True,capture_output=True,timeout=50,check=True)
@@ -114,7 +114,7 @@ jobs:
           if len(out) != 2:
               raise SystemExit('ARCHIVE_MEMBER_LIST_NOT_FOUND')
           members = []
-          for record in out[1].strip().split('\\n\\n'):
+          for record in out[1].strip().split('\n\n'):
               info = {}
               for line in record.splitlines():
                   if ' = ' in line:
