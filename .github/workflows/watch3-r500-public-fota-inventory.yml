@@ -1,0 +1,81 @@
+name: Issue 47 sibling Exynos 9110 FOTA archive inventory (offline only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/watch3-r500-public-fota-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-public-git-tree:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - name: Obtain only public Git object metadata (no firmware files)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 2 \
+            --connect-timeout 8 --max-time 35 --max-filesize 2000000 \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'User-Agent: UglyOS-research-issue-47' \
+            'https://api.github.com/repos/lapinclown/SM-R500-TizenFOTA-pkgs/git/trees/main?recursive=1' \
+            -o "$RUNNER_TEMP/r500-tree.json"
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          from collections import Counter, defaultdict
+
+          p = pathlib.Path(os.environ['RUNNER_TEMP']) / 'r500-tree.json'
+          if p.stat().st_size > 2_000_000:
+              raise SystemExit('TRUNCATED_OR_OVERSIZE_TREE_RESPONSE')
+          obj = json.loads(p.read_text())
+          if obj.get('truncated') is not False or not re.fullmatch(r'[0-9a-f]{40}', obj.get('sha', '')):
+              raise SystemExit('TREE_METADATA_INCOMPLETE')
+          rows = obj.get('tree')
+          if not isinstance(rows, list) or not 1 <= len(rows) <= 1000:
+              raise SystemExit('INVALID_GIT_TREE')
+          files = []
+          for row in rows:
+              path, kind, sha = row.get('path'), row.get('type'), row.get('sha')
+              if not isinstance(path,str) or not 1 <= len(path) <= 300 or not re.fullmatch(r'[0-9a-f]{40}',str(sha)):
+                  raise SystemExit('INVALID_GIT_OBJECT')
+              if kind == 'blob':
+                  size = row.get('size')
+                  if not isinstance(size,int) or size < 0:
+                      raise SystemExit('INVALID_BLOB_SIZE')
+                  files.append({'path': path, 'size': size})
+          # Model-specific filenames are public upstream metadata only.
+          candidates = sorted((x for x in files if re.search(
+              r'sboot|bootloader|recovery|param|\\.(?:zip|tar|md5|bin|enc4?|img|delta|ua)$',
+              x['path'], re.I)), key=lambda x:x['path'])
+          # Summarize total object-size footprints; don't assert authenticity or download assets.
+          totals = defaultdict(int)
+          for f in files:
+              totals[f['path'].split('/')[0]] += f['size']
+          print(json.dumps({
+              'source_repository': 'lapinclown/SM-R500-TizenFOTA-pkgs',
+              'source_model': 'SM-R500 (NOT SM-R840X)',
+              'git_tree_sha': obj['sha'],
+              'git_objects_in_tree': len(rows),
+              'blob_count': len(files),
+              'top_level_blob_bytes': dict(sorted(totals.items())),
+              'candidate_paths': candidates[:80],
+              'all_candidate_paths_reported': len(candidates) <= 80,
+              'stock_r840x_images_found': False,
+              'watch_contacted': False,
+              'fota_archive_downloaded': False,
+              'firmware_executed_or_written': False,
+              'flash_allowed': False,
+          },indent=2))
+          PY
+      - name: Record research limitation
+        run: |
+          echo 'No device communication, no firmware download, no executables or update scripts run.'
+          echo 'Sibling SM-R500 filenames alone do NOT authenticate R840X stock rescue, signed images, PIT or custom boot.'
