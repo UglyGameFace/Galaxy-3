@@ -243,6 +243,90 @@ jobs:
               'flash_allowed':False,
           },indent=2))
           PY
+      - name: Classify sibling boot deltas and update-agent implementation without execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import struct
+          import subprocess
+          import tarfile
+
+          p = pathlib.Path(os.environ['RUNNER_TEMP']) / 'reference-tar' / 'R500XXU1BSD3-FOTA.tar'
+          if not p.is_file() or p.stat().st_size != 39589387:
+              raise SystemExit('NESTED_REFERENCE_TAR_MISSING_OR_CHANGED')
+          expected = {
+              'cm.bin':2597136,
+              'delta.boot':686281,
+              'delta.ramdisk1':1622,
+              'delta.ramdisk2':73789,
+              'delta.recovery':2,
+              'delta.ua':141748,
+              'delta.upparam':11055,
+          }
+          with tarfile.open(p, 'r:') as tf:
+              seen = {}
+              for name, size in expected.items():
+                  try: m = tf.getmember(name)
+                  except KeyError: raise SystemExit('MISSING_EXPECTED_REFERENCE_MEMBER:' + name)
+                  if not m.isfile() or m.size != size or m.size > 3000000:
+                      raise SystemExit('UNEXPECTED_REFERENCE_MEMBER_SIZE_OR_TYPE:' + name)
+                  fd = tf.extractfile(m)
+                  if fd is None: raise SystemExit('MEMBER_UNREADABLE:' + name)
+                  data = fd.read(size+1)
+                  if len(data) != size: raise SystemExit('MEMBER_SHORT_READ:' + name)
+                  seen[name] = data
+
+          kinds = []
+          for name, data in seen.items():
+              if data.startswith(b'\\x7fELF'):
+                  fmt = 'ELF'
+              elif data.startswith(b'\\x1f\\x8b'):
+                  fmt = 'gzip'
+              elif data.startswith(b'ANDROID!'):
+                  fmt = 'Android-boot-header'
+              else:
+                  fmt = 'opaque-or-delta'
+              kinds.append({'member':name,'size':len(data),'sha256':hashlib.sha256(data).hexdigest(),
+                            'header_hex':data[:16].hex(),'header_kind':fmt})
+          agent = seen['delta.ua']
+          if not agent.startswith(b'\\x7fELF'):
+              print('REFERENCE_UPDATE_AGENT_NOT_ELF: do not assume executable architecture')
+              elf = None
+          else:
+              elf = {'elf_class':agent[4], 'endian':agent[5],
+                     'machine':struct.unpack('<H', agent[18:20])[0] if agent[5]==1 else None,
+                     'type':struct.unpack('<H', agent[16:18])[0] if agent[5]==1 else None}
+          # Record relevant identifier strings ONLY, without executing external firmware.
+          pattern = re.compile(rb'[ -~]{7,220}')
+          terms = re.compile(rb'(?i)fota|delta|recovery|boot|ramdisk|part_tbl|/dev/|/opt/|/usr/|signature|verif|crypto|sha|cert|md5|update|firmware|system|ext4|bspatch|librsync|libz|lzma')
+          found = []
+          for m in pattern.finditer(agent):
+              b = m.group(0)
+              if terms.search(b):
+                  found.append(b.decode('ascii','replace'))
+          # Do not emit excessively long runs or arbitrary embedded data.
+          found = sorted(set(found))
+          print(json.dumps({
+              'model':'SM-R500 public reference, NOT R840X',
+              'reference_tar_sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
+              'target_member_sizes_pinned_from_previous_real_run':True,
+              'headers':kinds,
+              'delta_ua_elf':elf,
+              'delta_ua_relevant_strings':found[:80],
+              'delta_ua_matches_truncated':len(found)>80,
+              'original_r840x_firmware':False,
+              'these_deltas_are_complete_recovery_images':False,
+              'archive_contents_executed':False,
+              'physical_watch_contacted':False,
+              'flash_allowed':False
+          },indent=2))
+          PY
       - name: Record research limitation
         run: |
           echo 'Downloaded one public SM-R500 archive and unpacked only its containing TAR to ephemeral runner disk for header inspection. No watch communication, firmware execution or flashing.'
