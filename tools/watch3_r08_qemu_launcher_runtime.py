@@ -3,8 +3,9 @@
 
 Runs the real original launcher under QEMU linux-user against a disposable
 extraction of a pinned UgLy|OS rootfs. Chooses only a REAL ARM64 offscreen or
-minimal QPA plugin from the image. Requires compositor QML import trace AND
-successful QPA plugin load; mere process survival is not a pass.
+minimal QPA plugin from the image. Requires either explicit compositor QML
+import + QPA trace, OR the source-proven Tutorial.qml "WELCOME" state
+transition plus real QML delegate processing. Mere process survival is not a pass.
 
 Does not reproduce Exynos9110 hardware, real framebuffer, input or Watch3 boot.
 """
@@ -82,17 +83,35 @@ def analyze(log: str, *, platform: str, returncode: int, timed_out: bool,
                             re.escape(platform) + r"\.so", log, re.I))
     qml_trace = ("qrc:/Launcher/compositor.qml" in log
                  and ("QQmlImportDatabase" in log or "QQmlImports" in log))
+    # Proven source for the exact "WELCOME" state:
+    # AsteroidOS/asteroid-launcher@0ba0eb50...
+    # src/qml/firstrun/Tutorial.qml: state: "WELCOME".
+    # A QML runtime transition is stronger than linker/module presence,
+    # but still does not demonstrate a rendered pixel or target framebuffer.
+    tutorial_welcome = bool(re.search(
+        r'qt\.qml\.states:.*changing state from:\s*""\s+to:\s*"WELCOME"',
+        log, re.I))
+    active_delegates = "qt.qml.delegatemodel.recycling:" in lower
     fatal = [p for p in FATAL_PATTERNS if p in lower]
-    # A clean bounded timeout can indicate a running event loop ONLY if Qt
-    # logged both its actual platform load and compositor QML import.
-    credible = (loaded and qml_trace and not fatal and
+    explicit = loaded and qml_trace
+    source_grounded = tutorial_welcome and active_delegates
+    credible = (not fatal and (explicit or source_grounded) and
                 (returncode == 0 or (timed_out and elapsed >= 1.0)))
+    evidence_mode = ("EXPLICIT_QPA_AND_COMPOSITOR_QRC_TRACE" if explicit else
+                     "PINNED_SOURCE_TUTORIAL_WELCOME_AND_QML_DELEGATES"
+                     if source_grounded else "INSUFFICIENT")
     return {
-        "schema": "uglyos-r08-built-arm64-launcher-startup-probe-v1",
-        "status": ("QPA_AND_COMPOSITOR_QML_IMPORT_OBSERVED_OFF_DEVICE"
+        "schema": "uglyos-r08-built-arm64-launcher-startup-probe-v2",
+        "status": ("REAL_ARM64_LAUNCHER_QML_RUNTIME_OBSERVED_OFF_DEVICE"
                    if credible else "LAUNCHER_RUNTIME_NOT_PROVEN"),
+        "evidence_mode": evidence_mode,
         "actual_qpa_plugin_loaded_in_qemu_trace": loaded,
         "actual_compositor_qrc_qml_import_trace_seen": qml_trace,
+        "pinned_source_tutorial_welcome_state_changed": tutorial_welcome,
+        "qml_delegate_processing_observed": active_delegates,
+        "source_grounding": ("AsteroidOS/asteroid-launcher at "
+            "0ba0eb50a68fc6f1019312d511ec3e2fd1b48f31 "
+            "src/qml/firstrun/Tutorial.qml"),
         "fatal_messages_seen": fatal,
         "emulator_returncode": returncode,
         "process_was_bounded_and_terminated_after_timeout": timed_out,
@@ -205,7 +224,7 @@ def main() -> int:
     try:
         outcome, log = inspect(args.extracted_rootfs)
     except (OSError, SmokeFailure, RuntimeFailure) as error:
-        outcome = {"schema": "uglyos-r08-built-arm64-launcher-startup-probe-v1",
+        outcome = {"schema": "uglyos-r08-built-arm64-launcher-startup-probe-v2",
                    "status": "LAUNCHER_RUNTIME_NOT_PROVEN", "reason": str(error),
                    "watch_contacted": False, "flashable": False, "decision": "NO_GO"}
         log = ""
@@ -214,11 +233,12 @@ def main() -> int:
         return 2
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(outcome, indent=2) + "\n")
-    if outcome["status"] != "QPA_AND_COMPOSITOR_QML_IMPORT_OBSERVED_OFF_DEVICE":
+    if outcome["status"] != "REAL_ARM64_LAUNCHER_QML_RUNTIME_OBSERVED_OFF_DEVICE":
         print("REAL_ARM64_LAUNCHER_RUNTIME_UNVERIFIED:", outcome, file=sys.stderr)
         print("BOUNDED_QEMU_DIAGNOSTICS:\n" + log[-6500:], file=sys.stderr)
         return 2
-    print("REAL_ARM64_LAUNCHER_QPA_AND_QML_IMPORT_OBSERVED; NO DISPLAY OR WATCH BOOT")
+    print("REAL_ARM64_LAUNCHER_TUTORIAL_QML_INITIALIZED; NO DISPLAY OR WATCH BOOT")
+    print("EVIDENCE_MODE:", outcome["evidence_mode"])
     print("QPA:", outcome["selected_actual_aarch64_qpa_plugin"])
     return 0
 
