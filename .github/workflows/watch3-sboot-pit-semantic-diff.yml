@@ -6,8 +6,10 @@ on:
     paths:
       - 'tools/watch3_sboot_pit_semantic_diff.py'
       - 'tools/watch3_sboot_pit_control_flow.py'
+      - 'tools/watch3_sboot_stage_map.py'
       - 'tests/test_watch3_sboot_pit_semantic_diff.py'
       - 'tests/test_watch3_sboot_pit_control_flow.py'
+      - 'tests/test_watch3_sboot_stage_map.py'
       - '.github/workflows/watch3-sboot-pit-semantic-diff.yml'
   workflow_dispatch:
 
@@ -24,6 +26,8 @@ jobs:
           persist-credentials: false
       - name: Run synthetic decoder, safety and mutation regressions
         run: python3 -m unittest discover -s tests -p 'test_watch3_sboot_pit_*.py' -v
+      - name: Reject malformed or misleading candidate S-BOOT stage metadata
+        run: python3 -m unittest discover -s tests -p 'test_watch3_sboot_stage_map.py' -v
       - name: Fetch pinned historical R500 FOTA archives (NOT R840X)
         shell: bash
         run: |
@@ -152,6 +156,69 @@ jobs:
                           f"{hex(x['header_mismatch_fallthrough']['end_file_offset'])}.\n")
               f.write('- Raw file-offset graph only. No runtime mapping, sender reachability, '
                       'CVE root cause, SM-R840X custom boot or full stock rescue proven. **NO_GO**.\n')
+          PY
+      - name: Map bounded S-BOOT stage header candidates from two original reference firmware files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/watch3_sboot_stage_map.py \
+            --older "$RUNNER_TEMP/older/reference-sboot.bin" \
+            --newer "$RUNNER_TEMP/newer/reference-sboot.bin" \
+            --output "$RUNNER_TEMP/stage-metadata.json"
+          python3 - <<'PY'
+          import json,os,pathlib
+          p=pathlib.Path(os.environ["RUNNER_TEMP"])/"stage-metadata.json"
+          r=json.loads(p.read_text())
+          assert r["status"]=="NO_GO" and not r["real_r840x_sboot_obtained"]
+          brief={}
+          for build,data in r["images"].items():
+              parts=data["observed_header_boundaries"]
+              assert len(parts)==2 and parts[0]["end_exclusive"]==parts[1]["start"]
+              assert 2048 <= parts[0]["end_exclusive"] < parts[1]["end_exclusive"] < 1_921_296
+              footer_candidates=sum(len(x["candidates"])
+                                    for x in data["stage2_signature_footer_pattern_hypotheses"])
+              boundaries=sorted({row["boundary_candidate"]
+                                 for group in data["stage2_signature_footer_pattern_hypotheses"]
+                                 for row in group["candidates"]})
+              assert boundaries==[0x40000, 0x115000, 0x155000, 0x1D5000], (
+                  "PINNED_ORIGINAL_SBOOT_STAGE_CANDIDATES_CHANGED:"+build)
+              pit=r["candidate_pit_code_regions"][build]
+              assert pit is not None and pit["candidate_region_index"]==1
+              assert (pit["start_file_offset"],pit["end_file_offset_exclusive"])==(
+                  0x40000,0x115000)
+              assert pit["code_reachable_from_wireless_odin_proven"] is False
+              brief[build]={
+                  "BL1_candidate_end":parts[0]["end_exclusive"],
+                  "EPBL_candidate_end":parts[1]["end_exclusive"],
+                  "footer_candidate_count_unverified":footer_candidates,
+                  "PIT_validator_candidate_interval":pit,
+                  "candidate_boundary_offsets":boundaries,
+                  "footer_pattern_groups":[
+                      {"assumed_signature_length":x["signature_bytes_hypothesis"],
+                       "epbl_header_fields":x["epbl_marker_numeric_fields"],
+                       "candidate_offsets":[
+                           [v["footer_file_offset"],v["boundary_candidate"]]
+                           for v in x["candidates"][:24]],
+                       "truncated":len(x["candidates"])>24}
+                      for x in data["stage2_signature_footer_pattern_hypotheses"]],
+
+                  "ODIN_marker_count":len(data["reference_marker_locations"]["ODIN"]),
+                  "LOKE_marker_count":len(data["reference_marker_locations"]["LOKE"]),
+                  "PIT_marker_count":len(data["reference_marker_locations"]["PIT"]),
+                  "signature_verified":data["signature_cryptographically_verified"],
+                  "main_bootloader_stage_boundaries_verified":data["main_bootloader_stage_boundaries_proven"],
+              }
+          assert r["pit_code_region_correspondence_hypothesis"] is True
+          print("PINNED_SBOOT_STAGE_HEADER_METADATA")
+          print(json.dumps(brief,indent=2))
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
+              f.write("\n## Original SM-R500 S-BOOT stage-header candidates\n")
+              for name,row in brief.items():
+                  f.write(f"- {name}: BL1 header end 0x{row['BL1_candidate_end']:x}, "
+                          f"EPBL header end 0x{row['EPBL_candidate_end']:x}, "
+                          f"footer-pattern candidates {row['footer_candidate_count_unverified']}.\n")
+              f.write("- **No signature verification, exact SM-R840X bootloader, recovery or "
+                      "custom kernel acceptance. Physical writes remain NO_GO.**\n")
           PY
       - name: Verify repository left unchanged and firmware not committed
         run: git diff --exit-code && git status --short
