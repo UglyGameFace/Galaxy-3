@@ -6,10 +6,12 @@ on:
     paths:
       - 'tools/watch3_sboot_pit_semantic_diff.py'
       - 'tools/watch3_sboot_pit_control_flow.py'
-      - 'tools/watch3_sboot_stage_map.py'\n      - 'tools/watch3_sboot_xref_map.py'
+      - 'tools/watch3_sboot_stage_map.py'
+      - 'tools/watch3_sboot_xref_map.py'
       - 'tests/test_watch3_sboot_pit_semantic_diff.py'
       - 'tests/test_watch3_sboot_pit_control_flow.py'
-      - 'tests/test_watch3_sboot_stage_map.py'\n      - 'tests/test_watch3_sboot_xref_map.py'
+      - 'tests/test_watch3_sboot_stage_map.py'
+      - 'tests/test_watch3_sboot_xref_map.py'
       - '.github/workflows/watch3-sboot-pit-semantic-diff.yml'
   workflow_dispatch:
 
@@ -225,9 +227,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s tests -p 'test_watch3_sboot_xref_map.py' -v
-          python3 tools/watch3_sboot_xref_map.py \\
-            --older "$RUNNER_TEMP/older/reference-sboot.bin" \\
-            --newer "$RUNNER_TEMP/newer/reference-sboot.bin" \\
+          python3 tools/watch3_sboot_xref_map.py \
+            --older "$RUNNER_TEMP/older/reference-sboot.bin" \
+            --newer "$RUNNER_TEMP/newer/reference-sboot.bin" \
             --output "$RUNNER_TEMP/xrefs.json"
           python3 - <<'PY'
           import json, os, pathlib
@@ -235,12 +237,12 @@ jobs:
           assert d['decision']=='NO_GO' and not d['source_is_exact_owner_bootloader']
           assert all(d['known_pit_xref_anchor_present'].values()), 'REAL_SBOOT_KNOWN_PIT_XREF_MISSING'
           with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
-              f.write('\\n## Verified sibling ARM64 literal-reference candidates\\n')
+              f.write('\n## Verified sibling ARM64 literal-reference candidates\n')
               for build, report in d['models'].items():
                   f.write(f"- {build}: " +
                           ', '.join(f"{name}={num}" for name,num in report['xref_counts'].items()) +
-                          '. File-offset candidates only, never handler reachability.\\n')
-              f.write('- SM-R840X original S-BOOT missing; no CVE proof, unlock or recovery. **NO_GO**.\\n')
+                          '. File-offset candidates only, never handler reachability.\n')
+              f.write('- SM-R840X original S-BOOT missing; no CVE proof, unlock or recovery. **NO_GO**.\n')
           PY
       - name: Verify repository left unchanged and firmware not committed
         run: git diff --exit-code && git status --short
