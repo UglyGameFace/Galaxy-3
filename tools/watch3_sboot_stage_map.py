@@ -71,14 +71,17 @@ def parse(blob: bytes) -> dict:
                 if at < 0:
                     break
                 cursor = at + 1
-                boundary = (at + 16 + sig_len + 4095) & ~4095
-                if epbl_end < boundary <= len(blob):
-                    if not matches or matches[-1]["boundary_candidate"] != boundary:
-                        matches.append({
-                            "footer_file_offset": at,
-                            "boundary_candidate": boundary,
-                            "footer_variant": variant,
-                        })
+                # Reject most incidental 12-byte patterns inside a payload:
+                # no guessed padding; the footer itself must end exactly
+                # on a 4 KiB stage boundary. This is still a hypothesis.
+                boundary = at + 16 + sig_len
+                if (at % 4 == 0 and boundary % 4096 == 0
+                        and epbl_end < boundary <= len(blob)):
+                    matches.append({
+                        "footer_file_offset": at,
+                        "boundary_candidate": boundary,
+                        "footer_variant": variant,
+                    })
             if matches:
                 footer_patterns.append({
                     "signature_bytes_hypothesis": sig_len,
