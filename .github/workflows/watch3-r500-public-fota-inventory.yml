@@ -804,6 +804,69 @@ jobs:
               'flash_allowed':False
           },indent=2))
           PY
+      - name: Independently disassemble six real sboot cross-reference instruction windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq binutils-aarch64-linux-gnu
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import tarfile
+
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          old=root/'reference-tar'/'R500XXU1BSD3-FOTA.tar'
+          newlist=list((root/'reference-new-tar').glob('*.tar'))
+          if len(newlist)!=1:raise SystemExit('NEW_REFERENCE_TAR_UNAVAILABLE')
+          samples=(
+            ('old',old,'4715861156eeceb949899d355ccc37eefb57062888aadc76aa9f93f9eaf5966e',
+              {'ODIN':380528,'PIT':363440,'recovery':451188}),
+            ('new',newlist[0],'c96813f283e2f98d3f33a30c6215fa25b06b756b93adf55ecf8d59fc4d9211a9',
+              {'ODIN':381364,'PIT':364128,'recovery':452440}),
+          )
+          report={}
+          for label,archive,expected,markers in samples:
+            with tarfile.open(archive,'r:') as tf:
+              m=tf.getmember('sboot.bin')
+              if not m.isfile() or m.size!=1921296:raise SystemExit('INCORRECT_SBOOT_LENGTH')
+              data=tf.extractfile(m).read()
+            if hashlib.sha256(data).hexdigest()!=expected:raise SystemExit('UNEXPECTED_SBOOT_SHA')
+            p=root/('reference-sboot-'+label+'.bin')
+            p.write_bytes(data)
+            windows={}
+            for marker,offset in markers.items():
+              start=offset-32
+              end=offset+56
+              cmd=['aarch64-linux-gnu-objdump','-D','-b','binary','-m','aarch64',
+                   '--start-address='+str(start),'--stop-address='+str(end),str(p)]
+              proc=subprocess.run(cmd,capture_output=True,text=True,timeout=25,check=True)
+              insns=[]
+              for line in proc.stdout.splitlines():
+                match=re.match(r'^\\s*([0-9a-f]+):\\s+([0-9a-f]{8})\\s+([A-Za-z0-9.]+)\\s*(.*)
+        run: |
+          echo 'Source models compared offline; no flashable Watch3 image, PIT or recovery was produced.'
+,line)
+                if match:
+                  insns.append({'offset':int(match.group(1),16),
+                                'instruction':match.group(3),
+                                'operands':match.group(4)[:75]})
+              if not 15<=len(insns)<=30:raise SystemExit('DISASSEMBLY_WINDOW_MISSING')
+              # These are derived mnemonics/operands; no firmware bytes committed or output.
+              windows[marker]={'instruction_anchor_offset':offset,'decoded_instructions':insns}
+            report[label]={'sha256':expected,'windows':windows}
+            p.unlink()
+          print('REFERENCE_SBOOT_INDEPENDENT_AARCH64_OBJDUMP_WINDOWS')
+          print(json.dumps({'source_model':'SM-R500, NOT R840X','function_boundaries_validated':False,
+                            'strings_referenced_by_decoded_INSTRUCTIONS_not_merely_byte_patterns':True,
+                            'patch_semantics_identified':False,
+                            'watch_contacted':False,'bootloader_executed':False,
+                            'versions':report},indent=2))
+          PY
       - name: Record research limitation
         run: |
           echo 'Source models compared offline; no flashable Watch3 image, PIT or recovery was produced.'
