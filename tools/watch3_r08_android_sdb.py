@@ -55,9 +55,46 @@ PARTITION_SYSFS_FIXED_PROBES = {
     "partition_p21_uevent": "cat /sys/class/block/mmcblk0p21/uevent",
 }
 
+
+# After the owner's real p1/p20/p21 PARTNAME observations, the remaining
+# known numbered eMMC partitions can be *optionally* inspected in three
+# distinct batches. Each entry is a literal kernel text pseudo-file;
+# never construct a command from user-supplied partition indices, wildcards
+# or raw /dev storage paths. A batch is exactly six requests, not a scan.
+PARTITION_SYSFS_REMAINING_BATCH_PROBES = (
+    {
+    "partition_p2_uevent": "cat /sys/class/block/mmcblk0p2/uevent",
+    "partition_p3_uevent": "cat /sys/class/block/mmcblk0p3/uevent",
+    "partition_p4_uevent": "cat /sys/class/block/mmcblk0p4/uevent",
+    "partition_p5_uevent": "cat /sys/class/block/mmcblk0p5/uevent",
+    "partition_p6_uevent": "cat /sys/class/block/mmcblk0p6/uevent",
+    "partition_p7_uevent": "cat /sys/class/block/mmcblk0p7/uevent",
+},
+    {
+    "partition_p8_uevent": "cat /sys/class/block/mmcblk0p8/uevent",
+    "partition_p9_uevent": "cat /sys/class/block/mmcblk0p9/uevent",
+    "partition_p10_uevent": "cat /sys/class/block/mmcblk0p10/uevent",
+    "partition_p11_uevent": "cat /sys/class/block/mmcblk0p11/uevent",
+    "partition_p12_uevent": "cat /sys/class/block/mmcblk0p12/uevent",
+    "partition_p13_uevent": "cat /sys/class/block/mmcblk0p13/uevent",
+},
+    {
+    "partition_p14_uevent": "cat /sys/class/block/mmcblk0p14/uevent",
+    "partition_p15_uevent": "cat /sys/class/block/mmcblk0p15/uevent",
+    "partition_p16_uevent": "cat /sys/class/block/mmcblk0p16/uevent",
+    "partition_p17_uevent": "cat /sys/class/block/mmcblk0p17/uevent",
+    "partition_p18_uevent": "cat /sys/class/block/mmcblk0p18/uevent",
+    "partition_p19_uevent": "cat /sys/class/block/mmcblk0p19/uevent",
+},
+)
+SYSFS_PROBE_SETS = (PARTITION_SYSFS_PROBES, PARTITION_SYSFS_FIXED_PROBES,
+                    *PARTITION_SYSFS_REMAINING_BATCH_PROBES)
+
 # Explicit, fixed, read-only operations; storage and battery probe sets run
 # only when expressly requested. Normal boot collection stays unchanged.
 ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES, **PARTITION_SYSFS_PROBES, **PARTITION_SYSFS_FIXED_PROBES}
+for _fixed_sysfs_batch in PARTITION_SYSFS_REMAINING_BATCH_PROBES:
+    ALLOWED_PROBES.update(_fixed_sysfs_batch)
 # Preserve the existing audited boot/power/bezel contract; root-path checks
 # are a separate, opt-in, fixed read-only set.
 ALLOWED_PROBES.update(ROOT_PATH_PROBES)
@@ -419,7 +456,8 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
             probes is not POWER_PROBES and probes is not BEZEL_PROBES and
             probes is not BOOT_MEMORY_PROBES and probes is not ROOT_PATH_PROBES and
             probes is not FOTA_PATH_PROBES and probes is not PARTITION_SYSFS_PROBES and
-            probes is not PARTITION_SYSFS_FIXED_PROBES):
+            probes is not PARTITION_SYSFS_FIXED_PROBES and
+            not any(probes is batch for batch in PARTITION_SYSFS_REMAINING_BATCH_PROBES)):
         raise SdbError("Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed (plus the fixed root-path set)")
     for name in probes:
         try:
@@ -458,7 +496,7 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
                         problems[name] = reason
                     else:
                         observations[name] = value
-            elif probes is PARTITION_SYSFS_PROBES or probes is PARTITION_SYSFS_FIXED_PROBES:
+            elif any(probes is set_ for set_ in SYSFS_PROBE_SETS):
                 # Categorical diagnostics only. Never leak vendor-supplied
                 # shell text, UUIDs, paths or arbitrary file contents.
                 if not value.strip():
@@ -481,7 +519,7 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
                 "authorization", "authentication", "private key", "crypto", "rsa"
             )):
                 raise
-            if probes is PARTITION_SYSFS_PROBES or probes is PARTITION_SYSFS_FIXED_PROBES:
+            if any(probes is set_ for set_ in SYSFS_PROBE_SETS):
                 problems[name] = (
                     "SDB_SHELL_TIMED_OUT" if isinstance(exc, ShellCloseError) and
                     "timed out" in str(exc).lower() else
@@ -500,7 +538,8 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
             problems[name] = ("SDB_TRANSPORT_UNREACHABLE" if
                               probes is ROOT_PATH_PROBES or probes is FOTA_PATH_PROBES or
                               probes is PARTITION_SYSFS_PROBES or
-                              probes is PARTITION_SYSFS_FIXED_PROBES
+                              probes is PARTITION_SYSFS_FIXED_PROBES or
+                              any(probes is batch for batch in PARTITION_SYSFS_REMAINING_BATCH_PROBES)
                               else "Watch did not answer this SDB read")
     return observations, problems
 
