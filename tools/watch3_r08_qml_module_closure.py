@@ -47,11 +47,15 @@ def locate_module(root: Path, module: str) -> dict:
             hits.append((parent, config))
     if not hits:
         raise ModuleClosureError("REQUIRED_QML_MODULE_MISSING:" + module)
-    # Qt modules can legitimately appear under alternate import roots, but
-    # identical duplicate targets can mask which module QML actually chooses.
-    if len(hits) != 1:
+    # Yocto commonly exposes /lib -> /usr/lib or /lib64 -> /usr/lib64.
+    # Multiple import PATH entries resolving to the SAME qmldir are benign.
+    # Multiple DISTINCT qmldir contents/locations remain ambiguous and fail.
+    unique = {}
+    for parent, config in hits:
+        unique[config.resolve()] = (parent.resolve(), config.resolve())
+    if len(unique) != 1:
         raise ModuleClosureError("AMBIGUOUS_QML_MODULE_DEPLOYMENT:" + module)
-    parent, config = hits[0]
+    parent, config = next(iter(unique.values()))
     if config.stat().st_size > MAX_QMLDIR or config.stat().st_size == 0:
         raise ModuleClosureError("QMLDIR_EMPTY_OR_UNBOUNDED:" + module)
     source = config.read_text(encoding="utf-8")
