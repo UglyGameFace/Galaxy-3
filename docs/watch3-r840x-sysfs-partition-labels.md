@@ -373,7 +373,7 @@ observation. The script reads exactly three ordinary kernel sysfs
 `uevent` text pseudo-files for **p1, p20, p21**; no PIT dump,
 partition contents, stock image or flashing. It can still fail at the
 *shell service* stage even after a successful SDB handshake.
-Read-only sysfs availability has **not** yet been physically proven.
+This probe **later succeeded** on the owner's watch; see the new dated observation below.
 
 A useful result will be a categorical per-path status:
 `PARTNAME_FIELD_OBSERVED`, `UEVENT_READABLE_BUT_PARTNAME_ABSENT`,
@@ -409,3 +409,104 @@ public Samsung bootloader vulnerabilities to an actual partition
 **never** become an instruction to overwrite it. An authentic
 full model-matching OEM recovery archive and verified reversible
 return-to-stock are still mandatory before any boot experiment.
+
+## Verified October 27 physical result: three literal sysfs paths SUCCEEDED
+
+Owner used the normal Tizen Wi-Fi debugging connection and the existing
+`--fixed-paths` mode on physical **SM-R840X**, installed
+`R840XXXU1AUA2`, with independently observed active CSC `PAP`.
+
+Sanitized private Termux report:
+`~/watch3-r840x-sysfs-fixed-20261027-195942-30781.json`.
+
+Actual JSON evidence:
+- `state=FIXED_SYSFS_PARTNAME_FIELDS_OBSERVED`
+- `owner_watch_sysfs_observed=true`
+- `probe_mode=THREE_EXPLICIT_TEXT_PATHS_NO_WILDCARD`
+- `tested_partition_indices=[1,20,21]`
+- `readable_uevent_files=3`, `partname_fields_observed=3`
+- `mmcblk0p1`: `PARTNAME_FIELD_OBSERVED`, **`unclassified`**
+  according to our privacy-safe allowlist. This means an actual
+  `PARTNAME` *was* present but its raw value was intentionally not
+  reported. It does NOT mean the kernel named it literally
+  `unclassified` or that the partition has no purpose.
+- `mmcblk0p20`: `PARTNAME_FIELD_OBSERVED`, **`rootfs`**
+- `mmcblk0p21`: `PARTNAME_FIELD_OBSERVED`, **`user`**
+- `remaining_partition_indices_not_tested=[2..19]` and
+  `full_partition_layout_proven=false`.
+
+This is independent physical label metadata. In particular,
+`mmcblk0p20=rootfs` is no longer merely a block-size-matching
+hypothesis. However, `PARTNAME` is not proof of exactly which
+filesystem is mounted from a partition, the signed R840X PIT, kernel
+and bootloader locations, rollback compatibility, or a stock rescue.
+
+The report also explicitly confirms
+`raw_partition_bytes_read=false`, `pit_requested=false`,
+`odin_session_started=false`, `watch_write_performed=false`,
+`stock_recovery_proven=false`,
+`bootloader_acceptance_proven=false`, `flash_allowed=false` and
+`result=NO_GO`.
+
+### New bounded follow-up: three *opt-in* batches for remaining p2–p19
+
+**Only after the corresponding pull request's mock-SDB CI passes and
+its changes are merged to main**, use `--remaining-batch` to
+request six literal, distinct sysfs `uevent` text paths at a time:
+
+| Batch | Exact indices | Total paths |
+| --- | --- | --- |
+| 1 | `mmcblk0p2` through `mmcblk0p7` | 6 |
+| 2 | `mmcblk0p8` through `mmcblk0p13` | 6 |
+| 3 | `mmcblk0p14` through `mmcblk0p19` | 6 |
+
+The original **p1/p20/p21 are not reread**, and the older
+wildcard/glob command is **not attempted**. All 18 commands are
+hardcoded in the SDB operation allowlist. They contain only a
+literal `cat /sys/class/block/mmcblk0pN/uevent`. No
+`/dev/mmcblk0*` block-device accesses, root, arbitrary shell
+commands, SSH, update, PIT request, bootloader session, CSC change
+or partition writes are possible through this mode.
+
+On your Android phone, with the watch booted normally into Tizen
+and its **currently displayed watch Wi-Fi IP** (not an old/stale
+address), run the first batch:
+
+```sh
+cd ~/Galaxy-3 && git switch main && git pull --ff-only
+out="$HOME/watch3-r840x-sysfs-p2-p7-$(date +%Y%m%d-%H%M%S)-$$.json"
+python tools/watch3_r840x_partition_sysfs_readonly.py \
+  --watch-ip WATCH_CURRENT_WIFI_IP \
+  --remaining-batch 1 --report "$out"
+cat "$out"
+```
+
+Then run **batch 2** with `--remaining-batch 2` and a
+**different report name** if batch 1 actually returned useful
+`PARTNAME_FIELD_OBSERVED` entries. Run **batch 3** similarly
+only if connection and transport remain reliable. Do not
+blindly rerun multiple batches when the first gives
+`SDB_TRANSPORT_UNREACHABLE`, `SYSFS_ACCESS_DENIED`,
+shell refusal or timeouts.
+
+This is normal Tizen SDB read-only work, **not an Odin session**.
+No raw unknown partition labels, UUID, IP, serial, or privileged
+image contents are saved. Known public partition names pass a
+fixed allowlist; unknown labels are `unclassified` and may
+require separate future source-grounded research. Any single
+batch report still states `full_partition_layout_proven=false`,
+even if all six requested text files are readable. Absent/missing
+`PARTNAME` means an unknown role, not a missing partition.
+
+### Explicit next gate after three physical batches
+
+If all three owner reports succeed, a future **offline-only**
+cross-report reconciliation can combine and check *observed*
+indices **1–21** with the original three-file report. That
+must preserve each file's provenance, reject duplicates and
+conflicting labels, and distinguish any `unclassified` and
+`not_exported` entries. It must never claim this text mapping
+is an authenticated Samsung PIT, complete recovery image, verified
+bootloader unlock, or safe alternate UgLy|OS boot.
+
+**Status: NO-GO for all watch modification and flashing.**
