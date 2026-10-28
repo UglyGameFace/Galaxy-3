@@ -618,3 +618,132 @@ have a preserved report:** the six existing explicitly allowlisted
 read-only sysfs `uevent` paths for p2–p7. Do not repeat batches
 2 or 3, use the old wildcard probe, or experiment with
 NetOdin, modified CSC, boot/recovery/param partitions or retail firmware.
+
+## Physical Batch 1 received: all 21 sysfs text positions now have reported observations (October 27)
+
+The owner has now supplied the previously missing full sanitized **batch 1**
+JSON directly from their **physical SM-R840X**, in normal Tizen over
+authenticated read-only SDB. Its local private report filename is:
+
+`~/watch3-r840x-batch1-1793149368-7379.json`
+
+This is a path reported by the owner, **not a file in this repository or
+a file downloaded by CI**. The owner ran the existing
+`tools/watch3_r840x_partition_sysfs_readonly.py --remaining-batch 1`
+with a time-stamped, exclusive local output. Its **verbatim report
+contract**, transcribed without claiming independently obtained raw
+kernel bytes:
+
+- `schema=uglyos-r840x-sysfs-partition-names-v1`
+- `device_target=SM-R840X`,
+  `installed_build_recorded=R840XXXU1AUA2`,
+  `active_csc_recorded=PAP`
+- `state=FIXED_SYSFS_PARTNAME_FIELDS_OBSERVED`,
+  `owner_watch_sysfs_observed=true`
+- `probe_mode=SIX_EXPLICIT_TEXT_PATHS_BATCH_1_NO_WILDCARD`,
+  `remaining_batch_number=1`
+- `tested_partition_indices=[2,3,4,5,6,7]`
+- `readable_uevent_files=6`, `partname_fields_observed=6`
+- all six entries `status=PARTNAME_FIELD_OBSERVED`
+- `p2=unclassified`, `p3=unclassified`, `p4=unclassified`,
+  **`p5=module`**, `p6=unclassified`, **`p7=steady`**
+- `prior_owner_observations_not_repeated=[1,20,21]`;
+  the established original fixed group was not run again
+- `raw_partition_bytes_read=false`, `pit_requested=false`,
+  `odin_session_started=false`, `watch_write_performed=false`,
+  `stock_recovery_proven=false`,
+  `bootloader_acceptance_proven=false`, `flash_allowed=false`,
+  `result=NO_GO`.
+
+**Important correction to shorthand:** `unclassified` is the
+*probe's privacy-preserving replacement* for an observed but
+unknown/unapproved `PARTNAME` string. It does **not** mean the
+kernel literally emitted `PARTNAME=unclassified`, that the
+partition lacks a name, or that the partition has no role. The
+tool intentionally does not expose the original unknown label.
+
+### Evidence from all four physically read groups
+
+These entries are transcribed from **four separately owner-supplied**
+redacted reports: the original p1/p20/p21 fixed group and the
+already-documented physical batches 2 and 3, plus the new batch 1.
+They have not yet been individually loaded together and checked by
+the offline reconciliation CLI on the owner's phone.
+
+| Position | Privacy-filtered `PARTNAME` | Owner report |
+| --- | --- | --- |
+| `mmcblk0p1` | `unclassified` | original fixed |
+| `mmcblk0p2` | `unclassified` | batch 1 |
+| `mmcblk0p3` | `unclassified` | batch 1 |
+| `mmcblk0p4` | `unclassified` | batch 1 |
+| `mmcblk0p5` | **`module`** | batch 1 |
+| `mmcblk0p6` | `unclassified` | batch 1 |
+| `mmcblk0p7` | **`steady`** | batch 1 |
+| `mmcblk0p8` | `unclassified` | batch 2 |
+| `mmcblk0p9` | `unclassified` | batch 2 |
+| `mmcblk0p10` | **`param`** | batch 2 |
+| `mmcblk0p11` | **`up_param`** | batch 2 |
+| `mmcblk0p12` | `unclassified` | batch 2 |
+| `mmcblk0p13` | **`boot`** | batch 2 |
+| `mmcblk0p14` | **`recovery`** | batch 3 |
+| `mmcblk0p15` | `unclassified` | batch 3 |
+| `mmcblk0p16` | `unclassified` | batch 3 |
+| `mmcblk0p17` | `unclassified` | batch 3 |
+| `mmcblk0p18` | **`csc`** | batch 3 |
+| `mmcblk0p19` | `unclassified` | batch 3 |
+| `mmcblk0p20` | **`rootfs`** | original fixed |
+| `mmcblk0p21` | **`user`** | original fixed |
+
+This yields **21/21 distinct physically observed readable kernel
+`uevent` files**, with **21/21 `PARTNAME` fields present** across
+four separate owner sessions, **9 recognized public names**
+(`module`, `steady`, `param`, `up_param`, `boot`,
+`recovery`, `csc`, `rootfs`, `user`) and **12 redacted
+`unclassified` names**. These counts are derived by taking the
+union of the four owner-reported disjoint index ranges, not from
+the original per-batch `remaining_partition_indices_not_tested`
+lists. The signed Samsung PIT, raw contents, secure boot chain,
+partition geometry, restoration and model-specific retail
+cross-flash compatibility are **NOT** established.
+
+### Next step: reconcile already-existing JSON files OFFLINE
+
+The independently implemented `watch3_r840x_merge_sysfs_reports_offline.py`
+tool is **already on `main`**. Use it with all **four preserved
+Termux report files**. It performs **zero network/SDB/Watch3
+communication**. It validates per-report schema, exact fixed
+source paths and mode, all expected indices, fail-closed
+NO-GO flags, counts and SHA-256 local-file identity:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r840x_merge_sysfs_reports_offline.py \
+  --fixed "$HOME/watch3-r840x-sysfs-fixed-20261027-195942-30781.json" \
+  --batch1 "$HOME/watch3-r840x-batch1-1793149368-7379.json" \
+  --batch2 "$HOME/watch3-r840x-batch2-1793148619-7379.json" \
+  --batch3 "$HOME/watch3-r840x-batch3-1793148623-7379.json" \
+  --output "$HOME/watch3-r840x-all21-sysfs-evidence.json"
+cat "$HOME/watch3-r840x-all21-sysfs-evidence.json"
+```
+
+All source filenames are from owner-supplied prior reports, **not
+independently available in the assistant's current environment**.
+If an input is missing or a local output already exists, the
+offline script will safely refuse; do not delete the original
+evidence. Choose a fresh `--output` filename if necessary.
+
+**Pending verification:** until this command actually validates
+the four existing local JSON files, do not call the merged
+JSON artifact `ALL_21_KERNEL_TEXT_PARTNAME_FIELDS_RECONCILED`
+or claim we have independently verified each file's bytes.
+The individual, user-reported physical observations are valuable
+and specific, but a CI test using generated synthetic fixtures
+is **not** their on-phone reconciliation.
+
+**Hardware gates unchanged:** `NO_GO` for Odin session-start,
+PIT transfer, boot/recovery/param writes, unsigned kernel boot
+and retail firmware conversion. Kernel `PARTNAME` metadata
+is neither an authentic Samsung-signed PIT nor a full OEM
+stock recovery pathway. Do **not** rerun batches 1/2/3
+or perform extra physical probes for this task.
+

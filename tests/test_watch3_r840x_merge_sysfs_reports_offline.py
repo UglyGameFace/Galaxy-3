@@ -19,6 +19,13 @@ import watch3_r840x_merge_sysfs_reports_offline as merge
 
 PUBLIC_OWNER_LABELS = {
     1: "unclassified",
+    # Owner-provided Batch 1 on 2026-10-27, physical fixed sysfs p2..p7:
+    2: "unclassified",
+    3: "unclassified",
+    4: "unclassified",
+    5: "module",
+    6: "unclassified",
+    7: "steady",
     8: "unclassified",
     9: "unclassified",
     10: "param",
@@ -119,6 +126,17 @@ class OfflineMergeTests(unittest.TestCase):
         self.assertEqual(result["readable_uevent_count"], 21)
         self.assertEqual(result["partname_field_count"], 21)
         self.assertEqual(result["not_in_supplied_reports"], [])
+        # These are known labels present in four separately supplied,
+        # privacy-filtered physical reports; fixtures only in CI.
+        self.assertEqual(result["recognized_public_label_count"], 9)
+        self.assertEqual(result["recognized_public_label_indices"],
+                         [5, 7, 10, 11, 13, 14, 18, 20, 21])
+        self.assertEqual(result["redacted_unclassified_indices"],
+                         [1, 2, 3, 4, 6, 8, 9, 12, 15, 16, 17, 19])
+        self.assertEqual(result["positions"][4]["kernel_reported_label"], "module")
+        self.assertEqual(result["positions"][6]["kernel_reported_label"], "steady")
+        self.assertEqual(result["positions"][9]["kernel_reported_label"], "param")
+        self.assertEqual(result["positions"][13]["kernel_reported_label"], "recovery")
         self.assertEqual(result["result"], "NO_GO")
         self.assertFalse(result["samsung_pit_authenticated"])
         self.assertFalse(result["stock_recovery_proven"])
