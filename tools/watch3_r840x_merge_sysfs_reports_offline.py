@@ -68,6 +68,8 @@ def _no_duplicate_keys(pairs):
 def read_json_file(path: Path) -> tuple[dict, str]:
     """Reject symlinks and large inputs; never echo file paths or raw content."""
     try:
+        if path.is_symlink():
+            raise EvidenceError("INPUT_UNREADABLE_OR_SYMLINK")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(path, flags)
         try:
@@ -133,11 +135,11 @@ def validate_report(data: dict, role: str) -> list[dict]:
         if not isinstance(item, dict) or type(item.get("partition_index")) is not int or item["partition_index"] != i:
             raise EvidenceError("PROBE_INDEX_MISMATCH")
         status = item.get("status")
-        if status not in KNOWN_STATUS:
+        if not isinstance(status, str) or status not in KNOWN_STATUS:
             raise EvidenceError("UNKNOWN_PROBE_STATUS")
         label = item.get("kernel_reported_label")
         if status == "PARTNAME_FIELD_OBSERVED":
-            if label not in LABELS and label != "unclassified":
+            if not isinstance(label, str) or (label not in LABELS and label != "unclassified"):
                 raise EvidenceError("PARTNAME_NOT_RECOGNIZED_OR_REDACTED")
         elif status == "UEVENT_READABLE_BUT_PARTNAME_ABSENT":
             if label != "not_exported":
