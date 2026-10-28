@@ -15,7 +15,8 @@ from pathlib import Path
 import re
 import sys
 
-from watch3_r08_android_sdb import CRITICAL_GEOMETRY_PROBES, SdbError, collect
+from watch3_r08_android_sdb import (CRITICAL_GEOMETRY_PROBES,
+                                   CRITICAL_PARAM_GEOMETRY_PROBES, SdbError, collect)
 
 SCHEMA = "uglyos-r840x-critical-sysfs-sector-geometry-v1"
 TARGET = "SM-R840X"
@@ -131,25 +132,116 @@ def summarize(values: dict[str, str], errors: dict[str, str] | None = None,
     }
 
 
+
+# These categorical errors are already produced by the audited shared
+# collector. Never copy raw stdout/stderr or exception text into reports.
+PARAM_ERROR_CATEGORIES = frozenset((
+    "SYSFS_EMPTY_SHELL_OUTPUT", "SYSFS_ACCESS_DENIED",
+    "SYSFS_PATH_OR_COMMAND_NOT_FOUND", "SDB_SHELL_TIMED_OUT",
+    "SDB_SHELL_CLOSED_OR_REFUSED", "SDB_PROTOCOL_OR_READ_FAILURE",
+    "SDB_TRANSPORT_UNREACHABLE",
+))
+
+
+def summarize_param(values: dict[str, str], errors: dict[str, str] | None = None,
+                    *, owner_watch: bool = False) -> dict:
+    """Diagnose only p10's two known sysfs values; never infer Samsung PIT.
+
+    This is deliberately a separate snapshot, not a merge with the owner's
+    original seven-scalar report. Only two fixed commands are allowed.
+    """
+    if not isinstance(values, dict) or (errors is not None and not isinstance(errors, dict)):
+        raise GeometryError("INTERNAL_COLLECTOR_RESULT_INVALID")
+    errors = {} if errors is None else errors
+    if (set(values) - set(CRITICAL_PARAM_GEOMETRY_PROBES) or
+            set(errors) - set(CRITICAL_PARAM_GEOMETRY_PROBES)):
+        raise GeometryError("UNEXPECTED_COLLECTOR_PATH")
+    statuses = {}
+    numbers = {}
+    for key in CRITICAL_PARAM_GEOMETRY_PROBES:
+        raw = values.get(key)
+        value = _sector(raw)
+        if value is not None and (key.endswith("_start") or value > 0):
+            statuses[key] = "KERNEL_NUMERIC_FIELD_OBSERVED"
+            numbers[key] = value
+        elif key in errors:
+            category = errors[key]
+            statuses[key] = (category if category in PARAM_ERROR_CATEGORIES
+                             else "SDB_OR_SYSFS_FIELD_UNAVAILABLE")
+        elif key not in values:
+            statuses[key] = "FIELD_NOT_RETURNED"
+        else:
+            statuses[key] = "MALFORMED_NUMERIC_SYSFS_FIELD"
+    start = numbers.get("critical_p10_start")
+    size = numbers.get("critical_p10_size")
+    complete = start is not None and size is not None
+    end = start + size if complete else None
+    if complete and end > MAX_SECTORS:
+        complete = False
+    return {
+        "schema": "uglyos-r840x-param-sysfs-diagnostic-v1",
+        "model_recorded": TARGET,
+        "installed_build_recorded": FIRMWARE,
+        "active_csc_previously_observed": CSC,
+        "source_mode": ("PHYSICAL_SDB_FIXED_PARAM_SCALAR_PROBE"
+                        if owner_watch else "OFFLINE_OR_SYNTHETIC_ONLY"),
+        "state": ("TWO_PARAM_KERNEL_SCALARS_OBSERVED" if complete
+                  else "PARAM_FIELDS_INCONSISTENT" if end is not None
+                  else "PARAM_FIELD_PARTIAL_OR_UNAVAILABLE"),
+        "source_paths_fixed_no_raw_partition_devices": list(
+            CRITICAL_PARAM_GEOMETRY_PROBES.values()),
+        "field_diagnostics": statuses,
+        "param_sector_candidate": {
+            "start_sector": start if complete else None,
+            "sector_count": size if complete else None,
+            "end_exclusive_sector": end if complete else None,
+        },
+        "sector_units": SECTOR_UNIT,
+        "param_geometry_observed_on_watch": bool(owner_watch and complete),
+        "independent_disk_capacity_verified_in_this_probe": False,
+        "combined_with_previous_snapshot": False,
+        "watch_contacted_by_this_probe": bool(owner_watch and (values or errors)),
+        "device_identity_cryptographically_attested": False,
+        "authentic_samsung_pit_obtained": False,
+        "partition_contents_read": False,
+        "signed_stock_images_obtained": False,
+        "stock_recovery_proven": False,
+        "custom_boot_accepted": False,
+        "odin_session_started": False,
+        "firmware_written": False,
+        "flash_allowed": False,
+        "result": "NO_GO",
+        "interpretation": ("Two fixed text-only p10 sysfs scalar reads. Error statuses "
+                           "are categorical and no raw output is retained. This result "
+                           "is not a Samsung PIT or a proof of stock rescue or boot."),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--watch-ip", required=True,
                     help="Current private Wi-Fi IP shown by the watch in normal Tizen")
+    ap.add_argument("--param-only", action="store_true",
+                    help="Only retry the two p10 scalar reads; preserve the previous report")
     ap.add_argument("--key-path", type=Path,
                     default=Path.home() / ".config/galaxy3/watch3-sdbkey")
-    ap.add_argument("--output", type=Path,
-                    default=Path.home() / "watch3-r840x-critical-geometry-redacted.json")
+    ap.add_argument("--output", type=Path, default=None)
     args = ap.parse_args(argv)
-    path = args.output.expanduser()
+    default_name = ("watch3-r840x-param-geometry-diagnostic-redacted.json"
+                    if args.param_only else "watch3-r840x-critical-geometry-redacted.json")
+    path = (args.output or Path.home() / default_name).expanduser()
     try:
         # Preserve earlier evidence and skip watch contact on accidental reruns.
         if path.exists() or path.is_symlink():
             raise GeometryError("REPORT_ALREADY_EXISTS")
         if not path.parent.is_dir():
             raise GeometryError("REPORT_PARENT_MISSING")
+        requested = (CRITICAL_PARAM_GEOMETRY_PROBES if args.param_only
+                     else CRITICAL_GEOMETRY_PROBES)
         values, errors = collect(args.watch_ip, args.key_path.expanduser(),
-                                 probes=CRITICAL_GEOMETRY_PROBES)
-        report = summarize(values, errors, owner_watch=True)
+                                 probes=requested)
+        report = (summarize_param(values, errors, owner_watch=True)
+                  if args.param_only else summarize(values, errors, owner_watch=True))
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as file:
