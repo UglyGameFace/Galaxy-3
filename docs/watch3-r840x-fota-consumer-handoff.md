@@ -672,3 +672,93 @@ than being silently reported as the same firmware. There is **no supported,
 proven stock restore or unsigned boot** yet. Prioritize exact R840X stock
 firmware provenance and non-destructive download/recovery channel evidence
 over indefinitely probing further inaccessible privileged files.
+
+
+## Public Tizen 5.5 recovery source: real four-RPM offline examination (Oct 27, 2026)
+
+**Provenance, not an exact-watch firmware match.** At
+[GitHub Actions run #40630342343](https://github.com/UglyGameFace/Galaxy-3/actions/runs/40630342343),
+a separate Ubuntu 24.04 runner actually downloaded and extracted four small
+source RPMs from the **official public Tizen 5.5** archive:
+`https://download.tizen.org/snapshots/TIZEN/Tizen-5.5/Tizen-5.5-Unified/latest/repos/standard/source/`.
+The scripts were **read as text only**, never run, installed, transferred to
+the owner's watch or used to build/flash a firmware image. The source is a
+**2025 Tizen 5.5 reference**, not a verified byte-for-byte original of the
+owner's installed **2021 Samsung R840X** image.
+
+| Source RPM | Downloaded bytes | Recorded SHA-256 |
+| --- | ---: | --- |
+| `initrd-fota-1.1.3-0.src.rpm` | 10,569 | `7edb517e8b3b3ed96f27c7bb498f5c06918541e53fb1a6e044813393a56f29f9` |
+| `initrd-recovery-0.3.0-0.src.rpm` | 12,780 | `838848f012cc55874ed0654755bc67e6d0c23f783621df0d79ff8a890c84e870` |
+| `system-recovery-0.3.0-0.src.rpm` | 221,800 | `8c6871f22dea68189af607bf1920b1b8b8981f3c1a10a9e0be1c63038da7fa56` |
+| `system-rw-update-1.2.4-0.src.rpm` | 56,650 | `c19469bfa4c4c74d9e7f3b2ecfe7bd98a140ef5192ec23d3e02835f323b5793c` |
+
+The [source audit workflow](../.github/workflows/watch3-tizen55-recovery-source-audit.yml)
+pins these four **previously actually observed download hashes** on future
+runs and fails if a public archive changes. This is **file integrity and
+repeatability**, not an OEM signature/rollback attestation for R840X.
+
+### Exact observed source-code control edges (generic Tizen only)
+
+1. **Early recovery dispatch**:
+   `initrd-recovery-0.3.0/src/initrd-recovery/init`, lines **69–95**,
+   parses `bootmode` from the *already booted kernel's* `/proc/cmdline`,
+   then dispatches to `/sbin/<bootmode>-init` if present, otherwise
+   reboots. This occurs **after** a bootloader successfully loads the
+   recovery kernel/ramdisk. It is **not** a device unlock, a way to
+   direct an R840X bootloader, or proof it has this same script.
+2. **Generic recovery entry**:
+   `system-recovery-0.3.0/src/system-recovery/recovery-init.in`,
+   lines **16–39, 69–79**, resolves `ROOTFS`, `SYSTEM-DATA`, `USER`
+   by `blkid`, mounts a system tree, invokes a recovery UI or
+   non-graphical handler, then unmounts and reboots. This source also
+   has a generic debugging console on `ttyS1`; **do not infer actual
+   R840X UART wiring, an exposed shell or a safe bypass** from it.
+3. **Generic FOTA data dependency**:
+   `initrd-fota-1.1.3/scripts/fota-init.sh`, lines **10–21, 122–135,
+   143–170**, uses `/opt/data/update/DELTA.PATH` to locate a
+   `delta.ua` update-agent executable and `delta.tar` package,
+   building a **runtime text partition list** `part_tbl.txt` from
+   `blkid` labels. That list is **NOT** a Samsung-authenticated PIT,
+   nor does it prove a missing partition is safe to recreate.
+4. **Generic FOTA verification boundary**:
+   The same source, lines **171–188**, *conditionally* invokes
+   `/usr/sbin/upg-verifier` on the delta archive, rejects a failed
+   result, and logs a **skipped verification** warning if the tool is
+   absent. Next it would run the **separate executable `delta.ua`**,
+   whose identity, signature checks, authorization and writes were
+   **not** inspected. The presence of a conditional branch in public
+   source **DOES NOT establish** that the physical Watch3 lacks a
+   verifier, has an exploitable route, accepts an unsigned update,
+   or permits an alternate boot image. Other bootloader, update-agent
+   and platform policy checks can still apply.
+
+### Cross-artifact mismatch and significance
+
+The **real owner-extracted Samsung**
+`com.samsung.fota-consumer` service uses
+`/opt/usr/data/fota/save/delta.tar` for its accessory/SAP transfer,
+whereas this **generic public reference** uses
+`/opt/data/update/DELTA.PATH` and `delta.ua`. Their paths and
+processes are **not identical**. The actual intervening Samsung
+`fota.consumer` D-Bus receiver, archive handoff, target-specific
+`upg-verifier` installation, and signature policy remain **unverified**.
+
+Likewise, the actual watch's `recovery-update.service` calls
+`/usr/bin/recovery-update.sh`, while the generic
+`system-recovery` source's visible entrypoint is
+`recovery-init.in`. The `rw-update-systemd.sh` filename wasn't
+found in **this bounded four-package source archive search**; neither
+negative observation proves absence on the physical watch. The
+original units/script RECV findings remain authoritative for the
+owner's installed image, and the inaccessible scripts must **not**
+be re-requested merely to repeat a failed unprivileged read.
+
+**Engineering disposition:** The public source now explains a
+generic Tizen bootmode dispatch, package verification boundary,
+and a separate update-agent stage. It narrows **offline**
+boot-chain analysis but supplies **no** original signed R840X
+bootloader, PIT, recovery archive, demonstrated stock restore
+or custom-kernel acceptance. The owner's single working watch
+remains untouched: `NO_GO` for firmware writes, recovery
+activation, FOTA triggers, Odin commands or exploit tests.
