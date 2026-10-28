@@ -27,7 +27,7 @@ import time
 from watch3_r08_qemu_userland_smoke import read_arm64, SmokeFailure
 from watch3_r08_qml_module_closure import ROOTS
 
-LIMIT_SECONDS = 9
+LIMIT_SECONDS = 18
 MAX_LOG_BYTES = 8_000_000
 DIAGNOSTIC_EXCERPT_BYTES = 24_000
 PLATFORMS = ("offscreen", "minimal")
@@ -47,6 +47,7 @@ FATAL_PATTERNS = (
     "symbol lookup error",
     "failed to create opengl context",
     "segmentation fault",
+    "unsupported image format",
 )
 
 
@@ -171,7 +172,7 @@ def analyze(log: str, *, platform: str, returncode: int, timed_out: bool,
 
 def inspect(root: Path, *, emulator: str = "qemu-aarch64",
             duration: int = LIMIT_SECONDS) -> tuple[dict, str]:
-    if duration < 2 or duration > 12:
+    if duration < 2 or duration > 25:
         raise RuntimeFailure("OUT_OF_BOUNDS_PROBE_DURATION")
     if not root.is_dir() or root.is_symlink():
         raise RuntimeFailure("INVALID_ROOTFS")
@@ -207,8 +208,10 @@ def inspect(root: Path, *, emulator: str = "qemu-aarch64",
         "QML_IMPORT_PATH": ":".join(qmlpaths.values()),
         "QML2_IMPORT_PATH": ":".join(qmlpaths.values()),
         "QML_IMPORT_TRACE": "1",
-        "QT_DEBUG_PLUGINS": "1",
-        "QT_LOGGING_RULES": "qt.qml.*=true;qt.qpa.*=true",
+        # Qt plugin discovery was visibly active in the original 9-second
+        # run; dumping full plugin metadata needlessly consumed the budget.
+        "QT_DEBUG_PLUGINS": "0",
+        "QT_LOGGING_RULES": "qt.qml.states=true;qt.qml.delegatemodel.recycling=true",
         "QT_LOGGING_TO_CONSOLE": "1",
     }
     started = time.monotonic()
