@@ -60,7 +60,7 @@ def private_system_bus(run_dir: Path):
     with log.open("wb") as stderr:
         process = subprocess.Popen(
             ["dbus-daemon", "--session", "--nofork", "--nopidfile",
-             "--bus=" + address],
+             "--address=" + address],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stderr,
             cwd=run_dir, start_new_session=True,
             env={"PATH": "/usr/bin:/bin", "HOME": str(run_dir)},
