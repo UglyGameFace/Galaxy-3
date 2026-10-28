@@ -110,6 +110,16 @@ class SBootStage(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "REGULAR"):
                 stage.read_pinned(Path(folder), "R500XXU1BSD3")
 
+    def test_candidate_region_contains_offset_but_not_verified_entry(self):
+        parsed = stage.parse(fixture())
+        region = stage.locate_candidate_region(parsed, 0x6000)
+        self.assertEqual(region["start_file_offset"], 0x4000)
+        self.assertEqual(region["end_file_offset_exclusive"], 0x11000)
+        self.assertEqual(region["candidate_region_index"], 0)
+        self.assertFalse(region["code_reachable_from_wireless_odin_proven"])
+        self.assertIsNone(stage.locate_candidate_region(parsed, 0x12000))
+        self.assertIsNone(stage.locate_candidate_region(parsed, -1))
+
     def test_compare_does_not_claim_recovery(self):
         result = stage.compare(fixture(), fixture(footer=False))
         self.assertEqual(result["status"], "NO_GO")
