@@ -24,6 +24,12 @@ ARM64 = 183
 MAX_OUTPUT = 100_000
 PROBE_TOKEN = "UGLYOS_REAL_ARM64_ROOTFS_PROBE_47"
 CANDIDATES = (
+    # Standard systemd executables should be real target AArch64 ELF binaries.
+    # --version runs no service manager or hardware-device initialization.
+    ("usr/bin/systemctl", ["--version"], "systemd"),
+    ("usr/bin/journalctl", ["--version"], "systemd"),
+    ("usr/lib/systemd/systemd", ["--version"], "systemd"),
+    ("lib/systemd/systemd", ["--version"], "systemd"),
     ("usr/bin/env", ["UGLYOS_R08_PROBE=" + PROBE_TOKEN], "UGLYOS_R08_PROBE=" + PROBE_TOKEN),
     ("bin/busybox", ["echo", PROBE_TOKEN], PROBE_TOKEN),
     ("usr/bin/busybox", ["echo", PROBE_TOKEN], PROBE_TOKEN),
@@ -101,7 +107,13 @@ def validate(root: Path, *, emulator: str = "qemu-aarch64", expected_image_sha: 
         selected = (relative, candidate, args, expected, metadata)
         break
     if selected is None:
-        raise SmokeFailure("NO_REAL_ARM64_SYSTEM_UTILITY_FOR_QEMU_PROBE")
+        # Print only fixed path basenames and type/ELF metadata, never guest contents.
+        checks=[]
+        for relative, _, _ in CANDIDATES:
+            file=root/relative
+            checks.append(relative + ":" + ("symlink" if file.is_symlink() else
+                          "file" if file.is_file() else "absent"))
+        raise SmokeFailure("NO_REAL_ARM64_SYSTEM_UTILITY_FOR_QEMU_PROBE:" + ",".join(checks))
     relative, candidate, args, expected, metadata = selected
     # The real rootfs is ALREADY extracted by debugfs to a disposable host
     # directory. qemu-aarch64 -L supplies the guest's ELF interpreter/libs.
