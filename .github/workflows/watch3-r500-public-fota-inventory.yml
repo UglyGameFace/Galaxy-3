@@ -338,7 +338,87 @@ jobs:
               'flash_allowed':False
           },indent=2))
           PY
-      - name: Record research limitation
+      - name: Compare original pre-July and post-July sibling sboot binaries off-device
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 2 \
+            --connect-timeout 10 --max-time 120 --max-filesize 60000000 \
+            -H 'User-Agent: UglyOS-public-sboot-comparison' \
+            'https://raw.githubusercontent.com/lapinclown/SM-R500-TizenFOTA-pkgs/main/R500XXU1GUJ2/R500XXU1GUJ2-FOTA.7z' \
+            -o "$RUNNER_TEMP/reference-R500-GUJ2.7z"
+          mkdir -p "$RUNNER_TEMP/reference-new-tar"
+          7z e -bd -y "$RUNNER_TEMP/reference-R500-GUJ2.7z" \
+            "-o$RUNNER_TEMP/reference-new-tar" >/dev/null
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import tarfile
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          tree = json.loads((root/'r500-tree.json').read_text())
+          path = 'R500XXU1GUJ2/R500XXU1GUJ2-FOTA.7z'
+          src = [x for x in tree['tree'] if x.get('path') == path and x.get('type') == 'blob']
+          if len(src) != 1:
+              raise SystemExit('POST_PATCH_SOURCE_MISSING')
+          bpath = root/'reference-R500-GUJ2.7z'
+          content = bpath.read_bytes()
+          gitsha = hashlib.sha1(b'blob '+str(len(content)).encode()+b'\0'+content).hexdigest()
+          if len(content) != src[0]['size'] or gitsha != src[0]['sha']:
+              raise SystemExit('POST_PATCH_PUBLIC_BLOB_MISMATCH')
+          prepath = root/'reference-tar'/'R500XXU1BSD3-FOTA.tar'
+          postfiles = list((root/'reference-new-tar').glob('*.tar'))
+          if len(postfiles) != 1 or not 1 <= postfiles[0].stat().st_size <= 150_000_000:
+              raise SystemExit('POST_PATCH_TAR_NOT_UNIQUE_OR_TOO_LARGE')
+          def get_sboot(tarpath):
+              with tarfile.open(tarpath,'r:') as tar:
+                  items=[m for m in tar.getmembers() if m.name=='sboot.bin' and m.isfile()]
+                  if not items:
+                      return None
+                  if len(items)!=1 or items[0].size>16_000_000:
+                      raise SystemExit('BOOTLOADER_MEMBER_UNEXPECTED')
+                  return tar.extractfile(items[0]).read()
+          previous=get_sboot(prepath)
+          newer=get_sboot(postfiles[0])
+          if previous is None:
+              raise SystemExit('PRE_PATCH_SBOOT_MISSING')
+          markers=('ODIN','LOKE','PIT','param','recovery','EXYNOS','SM-R500','SM-R840')
+          summary = {
+              'source_model':'SM-R500 only, not R840X',
+              'baseline_build':'R500XXU1BSD3',
+              'comparison_build':'R500XXU1GUJ2',
+              'baseline_sboot_length':len(previous),
+              'baseline_sboot_sha256':hashlib.sha256(previous).hexdigest(),
+              'comparison_blob_git_sha1':gitsha,
+              'comparison_sboot_present':newer is not None,
+              'comparison_tar_bytes':postfiles[0].stat().st_size,
+              'bootloader_executed':False,
+              'no_watch_contact':True,
+              'no_firmware_written':True,
+              'sacrificial_restore_proven':False,
+              'custom_boot_proven':False,
+          }
+          if newer is not None:
+              summary.update({
+                  'comparison_sboot_length':len(newer),
+                  'comparison_sboot_sha256':hashlib.sha256(newer).hexdigest(),
+                  'identical_bytes':newer==previous,
+                  'equal_length':len(newer)==len(previous),
+                  'same_offset_equal_4k_blocks':sum(
+                      previous[i:i+4096] == newer[i:i+4096]
+                      for i in range(0,min(len(previous),len(newer)),4096)),
+                  'same_offset_compared_4k_blocks':(min(len(previous),len(newer))+4095)//4096,
+                  'baseline_marker_counts':{m:previous.count(m.encode()) for m in markers},
+                  'comparison_marker_counts':{m:newer.count(m.encode()) for m in markers},
+              })
+          print('PRE_POST_SBOOT_COMPARISON')
+          print(json.dumps(summary,indent=2))
+          PY
+
         run: |
           echo 'Downloaded one public SM-R500 archive and unpacked only its containing TAR to ephemeral runner disk for header inspection. No watch communication, firmware execution or flashing.'
           echo 'Sibling SM-R500 filenames alone do NOT authenticate R840X stock rescue, signed images, PIT or custom boot.'
+      - name: Record research limitation
+        run: |
+          echo 'Source models compared offline; no flashable Watch3 image, PIT or recovery was produced.'
