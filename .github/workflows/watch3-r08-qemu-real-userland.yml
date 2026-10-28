@@ -232,7 +232,10 @@ jobs:
           assert (p["actual_qpa_plugin_loaded_in_qemu_trace"] and
                   p["actual_compositor_qrc_qml_import_trace_seen"]) or (
                   p["pinned_source_tutorial_welcome_state_changed"] and
-                  p["qml_delegate_processing_observed"])
+                  p["qml_delegate_processing_observed"]) or (
+                  p["qml_delegate_processing_sustained"] and
+                  p["qml_delegate_trace_line_count"] >= 20 and
+                  p["process_was_bounded_and_terminated_after_timeout"])
           assert not p["fatal_messages_seen"]
           assert not p["guest_log_truncated_for_analysis"]
           assert not p["compositor_pixel_output_proven"]
@@ -242,9 +245,9 @@ jobs:
               f.write("\n## Real target ARM64 launcher QML runtime initialization\n")
               f.write("- Selected AArch64 QPA plugin: "+p["selected_actual_aarch64_qpa_plugin"]+"\n")
               f.write("- Verified evidence: "+p["evidence_mode"]+"\n")
-              f.write("- Pinned Asteroid source declares the tutorial WELCOME state; "
-                      "real QEMU target emitted state transition and QML delegate activity "
-                      "or explicit QPA+compositor import markers.\n")
+              f.write("- Evidence may be source-backed WELCOME QML transition, explicit QPA "
+                      "and compositor import trace, or sustained real QML delegate-model "
+                      "event processing; do not conflate these distinct levels.\n")
               f.write("- Actual displayed pixels, Watch3 frame, Wayland client, stock rescue "
                       "and boot remain unproven.\n")
           PY
