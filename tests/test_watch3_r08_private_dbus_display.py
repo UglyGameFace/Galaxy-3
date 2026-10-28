@@ -34,7 +34,7 @@ class DisplayWakeTests(unittest.TestCase):
 
     def test_missing_service_never_claimed_visible(self):
         with patch.object(bus,"send_display_update",return_value=False), \
-             patch.object(bus.time,"monotonic",side_effect=[0,0,0.4,0.5,1.5]), \
+             patch.object(bus.time,"monotonic",side_effect=[0,0,0.4,0.5,1.5,1.6]), \
              patch.object(bus.time,"sleep"):
             result=bus.force_compositor_window_visible(
                 "unix:path=/tmp/uglyos-test/uglyos-private-system.sock",
