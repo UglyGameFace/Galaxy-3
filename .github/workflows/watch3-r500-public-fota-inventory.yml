@@ -284,9 +284,9 @@ jobs:
 
           kinds = []
           for name, data in seen.items():
-              if data.startswith(b'\\x7fELF'):
+              if data.startswith(b'\x7fELF'):
                   fmt = 'ELF'
-              elif data.startswith(b'\\x1f\\x8b'):
+              elif data.startswith(b'\x1f\x8b'):
                   fmt = 'gzip'
               elif data.startswith(b'ANDROID!'):
                   fmt = 'Android-boot-header'
@@ -295,7 +295,7 @@ jobs:
               kinds.append({'member':name,'size':len(data),'sha256':hashlib.sha256(data).hexdigest(),
                             'header_hex':data[:16].hex(),'header_kind':fmt})
           agent = seen['delta.ua']
-          if not agent.startswith(b'\\x7fELF'):
+          if not agent.startswith(b'\x7fELF'):
               print('REFERENCE_UPDATE_AGENT_NOT_ELF: do not assume executable architecture')
               elf = None
           else:
