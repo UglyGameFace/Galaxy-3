@@ -117,8 +117,8 @@ def map_references(blob: bytes, *, start: int = STAGE_START,
 
 
 def compare(old: bytes, new: bytes) -> dict:
-    a = map_references(old)
-    b = map_references(new)
+    a = map_references(old, start=STAGE_START, end=STAGE_END)
+    b = map_references(new, start=STAGE_START, end=STAGE_END)
     return {
         "schema": "uglyos-sibling-sboot-pcrel-xrefs-v1",
         "source_model": "SM-R500; NOT physical SM-R840X",
