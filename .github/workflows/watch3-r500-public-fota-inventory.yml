@@ -564,6 +564,87 @@ jobs:
               'bootloader_executed':False,
           },indent=2))
           PY
+      - name: Test AArch64 PC-relative references to real ODIN and LOKE strings (offline only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import struct
+          import tarfile
+
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          def sboot(path):
+              with tarfile.open(path,'r:') as tf:
+                  m = tf.getmember('sboot.bin')
+                  if not m.isfile() or m.size != 1921296:
+                      raise SystemExit('UNEXPECTED_SBOOT_MEMBER')
+                  result = tf.extractfile(m).read(m.size+1)
+                  if len(result) != m.size: raise SystemExit('SHORT_SBOOT')
+                  return result
+          old=sboot(root/'reference-tar'/'R500XXU1BSD3-FOTA.tar')
+          postfiles=list((root/'reference-new-tar').glob('*.tar'))
+          if len(postfiles)!=1: raise SystemExit('POST_REFERENCE_TAR_MISSING')
+          new=sboot(postfiles[0])
+          if hashlib.sha256(old).hexdigest()!='4715861156eeceb949899d355ccc37eefb57062888aadc76aa9f93f9eaf5966e':
+              raise SystemExit('PRE_SBOOT_SHA_CHANGED')
+          if hashlib.sha256(new).hexdigest()!='c96813f283e2f98d3f33a30c6215fa25b06b756b93adf55ecf8d59fc4d9211a9':
+              raise SystemExit('POST_SBOOT_SHA_CHANGED')
+          # Raw file offset mapping is only a HYPOTHESIS, not a verified runtime VA.
+          # AArch64 ADRP + ADD immediate encoding; one-to-one byte-offset
+          # reference requires the same base mapping for code and rodata.
+          def refs(buf):
+              labels = ('ODIN','LOKE','param','recovery','PIT')
+              offsets = {}
+              for label in labels:
+                  needle=label.encode('ascii')
+                  offsets[label]=[]
+                  at=0
+                  while (k:=buf.find(needle,at))>=0:
+                      offsets[label].append(k)
+                      at=k+len(needle)
+              candidates=[]
+              for off in range(0,len(buf)-32,4):
+                  word=struct.unpack_from('<I',buf,off)[0]
+                  if word & 0x9f000000 != 0x90000000: continue
+                  immlo=(word>>29)&3
+                  immhi=(word>>5)&0x7ffff
+                  imm=(immhi<<2)|immlo
+                  if imm&(1<<20): imm-=1<<21
+                  page=(off&~4095)+(imm<<12)
+                  reg=word&31
+                  for delta in (4,8,12,16,20,24):
+                      add=struct.unpack_from('<I',buf,off+delta)[0]
+                      if (add&0xff000000)!=0x91000000 or ((add>>5)&31)!=reg:
+                          continue
+                      shift=12 if (add>>22)&1 else 0
+                      target=page+(((add>>10)&0xfff)<<shift)
+                      for label,positions in offsets.items():
+                          if target in positions:
+                              candidates.append({
+                                  'code_file_offset':hex(off),
+                                  'add_file_offset':hex(off+delta),
+                                  'referenced_string':label,
+                                  'string_file_offset':hex(target),
+                                  'raw_offset_assumption_only':True})
+              return {'string_offsets':{k:[hex(x) for x in v[:12]] for k,v in offsets.items()},
+                      'candidate_xrefs':candidates[:70],
+                      'candidate_xrefs_total':len(candidates)}
+          result={'source_model':'SM-R500 only, NOT R840X',
+                  'baseline_build':'R500XXU1BSD3',
+                  'comparison_build':'R500XXU1GUJ2',
+                  'baseline':refs(old),'comparison':refs(new),
+                  'mapping_from_file_offset_to_runtime_va_verified':False,
+                  'disassembled_functions_proven':False,
+                  'identified_2021_CVE_patch':False,
+                  'binary_executed':False,
+                  'watch_contacted':False,'flash_allowed':False}
+          print('AARCH64_PC_RELATIVE_XREF_CANDIDATES')
+          print(json.dumps(result,indent=2))
+          PY
       - name: Record research limitation
         run: |
           echo 'Source models compared offline; no flashable Watch3 image, PIT or recovery was produced.'
