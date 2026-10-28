@@ -6,7 +6,9 @@ on:
     paths:
       - 'tools/watch3_r08_android_sdb.py'
       - 'tools/watch3_r840x_partition_sysfs_readonly.py'
+      - 'tools/watch3_r840x_merge_sysfs_reports_offline.py'
       - 'tests/test_watch3_r840x_partition_sysfs_readonly.py'
+      - 'tests/test_watch3_r840x_merge_sysfs_reports_offline.py'
       - 'tests/test_watch3_r840x_sdb_connect_only.py'
       - 'docs/watch3-r840x-sysfs-partition-labels.md'
       - '.github/workflows/watch3-r840x-sysfs-partition-labels.yml'
@@ -30,10 +32,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s tests -p 'test_watch3_r840x_partition_sysfs_readonly.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r840x_merge_sysfs_reports_offline.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r840x_sdb_connect_only.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_storage_mapping.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_android_sdb.py' -v
-          python3 -m py_compile tools/watch3_r840x_partition_sysfs_readonly.py
+          python3 -m py_compile tools/watch3_r840x_partition_sysfs_readonly.py tools/watch3_r840x_merge_sysfs_reports_offline.py
           python3 - <<'PY'
           from pathlib import Path
           script = Path('tools/watch3_r840x_partition_sysfs_readonly.py').read_text()
@@ -47,6 +50,12 @@ jobs:
           assert 'PARTITION_SYSFS_REMAINING_BATCH_PROBES' in sdb
           assert 'inspect_remaining_batch' in script
           assert '--remaining-batch' in script
+          merged = Path('tools/watch3_r840x_merge_sysfs_reports_offline.py').read_text()
+          assert 'watch_contacted_by_merge' in merged
+          assert '"samsung_pit_authenticated": False' in merged
+          assert '"flash_allowed": False' in merged
+          assert '"result": "NO_GO"' in merged
+          assert 'socket.' not in merged and 'subprocess.' not in merged
           from sys import path as import_path
           import_path.insert(0, 'tools')
           from watch3_r08_android_sdb import PARTITION_SYSFS_REMAINING_BATCH_PROBES

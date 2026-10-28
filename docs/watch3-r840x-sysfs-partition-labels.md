@@ -510,3 +510,111 @@ is an authenticated Samsung PIT, complete recovery image, verified
 bootloader unlock, or safe alternate UgLy|OS boot.
 
 **Status: NO-GO for all watch modification and flashing.**
+
+
+## Physical owner result: batches 2 and 3 both succeeded (October 27, 2026)
+
+After the proven `p1/p20/p21` read, the owner ran the preexisting
+`--remaining-batch 2` and `--remaining-batch 3` with their current
+watch-side private IP from Android/Termux. The owner shared both
+complete **privacy-filtered JSON summaries** in chat. No private
+network address or unsanitized sysfs records are committed here.
+
+Both batches report:
+- `FIXED_SYSFS_PARTNAME_FIELDS_OBSERVED`, `owner_watch_sysfs_observed=true`
+- **6/6** readable explicitly selected `uevent` text files and **6/6**
+  kernel `PARTNAME` fields per batch
+- `raw_partition_bytes_read=false`, `pit_requested=false`,
+  `odin_session_started=false`, `watch_write_performed=false`,
+  `stock_recovery_proven=false`, `bootloader_acceptance_proven=false`,
+  `flash_allowed=false`, `result=NO_GO`.
+
+| Numbered eMMC partition | Sanitized kernel label | Direct source |
+| --- | --- | --- |
+| `mmcblk0p1` | `unclassified` | earlier original fixed group |
+| `mmcblk0p2`–`p7` | **No report supplied in this evidence** | batch 1 not yet reconciled |
+| `mmcblk0p8` | `unclassified` | batch 2 |
+| `mmcblk0p9` | `unclassified` | batch 2 |
+| `mmcblk0p10` | **`param`** | batch 2 |
+| `mmcblk0p11` | **`up_param`** | batch 2 |
+| `mmcblk0p12` | `unclassified` | batch 2 |
+| `mmcblk0p13` | **`boot`** | batch 2 |
+| `mmcblk0p14` | **`recovery`** | batch 3 |
+| `mmcblk0p15` | `unclassified` | batch 3 |
+| `mmcblk0p16` | `unclassified` | batch 3 |
+| `mmcblk0p17` | `unclassified` | batch 3 |
+| `mmcblk0p18` | **`csc`** | batch 3 |
+| `mmcblk0p19` | `unclassified` | batch 3 |
+| `mmcblk0p20` | **`rootfs`** | earlier original fixed group |
+| `mmcblk0p21` | **`user`** | earlier original fixed group |
+
+**Combined available owner-reported evidence: 15 distinct readable
+positions**, seven clear public labels
+(`param`, `up_param`, `boot`, `recovery`, `csc`, `rootfs`,
+`user`), eight `unclassified` positions, and **six positions p2–p7
+not established by the reports shared so far**. The word
+`unclassified` is **our privacy filter**, not the literal kernel
+PARTNAME or evidence a partition lacks a name. The original
+`remaining_partition_indices_not_tested` list is *relative to a
+single report's selected six indices*; it is not a global running
+coverage result.
+
+This is especially helpful for the original Samsung Watch3
+July-2021 `param`/`recovery` bootloader CVE investigation:
+these names now map to **actual kernel-exported owner-watch labels**
+at p10 and p14 respectively. **It does not prove CVE exploitability**,
+raw partition contents, Samsung PIT correspondence, Samsung signing
+rules, custom kernel acceptance, or safe recovery. Neither name
+justifies reading/writing raw `/dev/mmcblk0p10` or
+`/dev/mmcblk0p14`, and the watch's stock system must remain intact.
+
+### Reconcile existing reports OFFLINE, without contacting the watch
+
+To avoid double-counting or treating each batch's local `not_tested`
+array as a global list, the new
+`tools/watch3_r840x_merge_sysfs_reports_offline.py` accepts only
+**already-saved redacted JSON reports** from the original fixed
+group and optional numbered batches. It revalidates version, model,
+build, CSC, exact six or three source paths, mode, indices, per-file
+counts, labels and fixed `NO_GO` flags. It refuses duplicate input
+bytes or unrecognized values. It makes **zero SDB, Odin or network
+requests** and never opens any block devices. Its JSON report
+contains only the sanitized role labels and SHA256s of its input
+JSON files (local identity, **not** watch attestation).
+
+On the Android phone, if the same earlier reports still exist in
+Termux `$HOME`, combine them with:
+
+```sh
+cd ~/Galaxy-3 && git pull --ff-only
+python tools/watch3_r840x_merge_sysfs_reports_offline.py \
+  --fixed "$HOME/watch3-r840x-sysfs-fixed-20261027-195942-30781.json" \
+  --batch2 "$HOME/watch3-r840x-batch2-1793148619-7379.json" \
+  --batch3 "$HOME/watch3-r840x-batch3-1793148623-7379.json" \
+  --output "$HOME/watch3-r840x-partition-coverage-15-of-21.json"
+cat "$HOME/watch3-r840x-partition-coverage-15-of-21.json"
+```
+
+These filenames come from the earlier owner reports, **not from
+files accessible to the research environment**; if one is absent,
+do not invent it. The offline command will refuse absent input.
+An existing output is never overwritten; use a new filename for
+subsequent evidence.
+
+Once an independently observed **batch 1, p2–p7** sanitized report
+is available, add `--batch1 /actual/saved/batch1-report.json`
+and change the output filename. If those six sysfs text reads are
+available, the reconciler can record **21/21 readable partition text
+records**. It will *still* report
+`samsung_pit_authenticated=false`,
+`partition_offsets_sizes_verified=false`,
+`stock_recovery_proven=false`,
+`flash_allowed=false`, and `NO_GO`.
+It does not have access to a signed Samsung PIT, any raw partition
+bytes, or a recovery method.
+
+**Next low-risk hardware question, only if batch 1 does not already
+have a preserved report:** the six existing explicitly allowlisted
+read-only sysfs `uevent` paths for p2–p7. Do not repeat batches
+2 or 3, use the old wildcard probe, or experiment with
+NetOdin, modified CSC, boot/recovery/param partitions or retail firmware.
