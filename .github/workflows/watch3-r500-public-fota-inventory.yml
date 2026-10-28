@@ -53,7 +53,7 @@ jobs:
                   files.append({'path': path, 'size': size})
           # Model-specific filenames are public upstream metadata only.
           candidates = sorted((x for x in files if re.search(
-              r'sboot|bootloader|recovery|param|\\.(?:zip|tar|md5|bin|enc4?|img|delta|ua)$',
+              r'sboot|bootloader|recovery|param|\.(?:zip|tar|md5|bin|enc4?|img|delta|ua)$',
               x['path'], re.I)), key=lambda x:x['path'])
           # Summarize total object-size footprints; don't assert authenticity or download assets.
           totals = defaultdict(int)
