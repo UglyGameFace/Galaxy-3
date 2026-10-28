@@ -142,9 +142,42 @@ def read_pinned(path: Path, build: str) -> bytes:
         os.close(fd)
 
 
+
+PIT_CODE_ANCHORS = {"R500XXU1BSD3": 0x58BB0, "R500XXU1GUJ2": 0x58E60}
+
+
+def locate_candidate_region(parsed: dict, offset: int) -> dict | None:
+    """Find candidate signed-stage interval, never a proved runtime region."""
+    if offset < 0:
+        return None
+    boundaries = sorted({
+        entry["boundary_candidate"]
+        for group in parsed["stage2_signature_footer_pattern_hypotheses"]
+        for entry in group["candidates"]
+    })
+    points = [parsed["observed_header_boundaries"][-1]["end_exclusive"]] + boundaries
+    for index, (start, end) in enumerate(zip(points, points[1:])):
+        if start <= offset < end:
+            return {
+                "candidate_region_index": index,
+                "start_file_offset": start,
+                "end_file_offset_exclusive": end,
+                "reason": "between repeated exact-page-aligned footer patterns",
+                "code_reachable_from_wireless_odin_proven": False,
+            }
+    return None
+
+
 def compare(old: bytes, new: bytes) -> dict:
     a, b = parse(old), parse(new)
+    located = {name: locate_candidate_region(parsed, PIT_CODE_ANCHORS[name])
+               for name, parsed in (("R500XXU1BSD3", a), ("R500XXU1GUJ2", b))}
     return {
+        "candidate_pit_code_regions": located,
+        "pit_code_region_correspondence_hypothesis": (
+            all(x is not None for x in located.values()) and
+            located["R500XXU1BSD3"]["candidate_region_index"] ==
+            located["R500XXU1GUJ2"]["candidate_region_index"]),
         "schema": "uglyos-exynos9110-sibling-sboot-stage-comparison-v1",
         "source_model": "SM-R500 historical sibling; NOT physical SM-R840X",
         "images": {"R500XXU1BSD3": a, "R500XXU1GUJ2": b},
