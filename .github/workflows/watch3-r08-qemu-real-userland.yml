@@ -36,6 +36,41 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Preflight private system D-Bus inside the EXACT network-disabled visual container
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -q -f tools/watch3-r08-qemu-visual-offline.Dockerfile \
+            -t uglyos-r08-qemu-visual:ci .
+          docker run --rm -i \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 96 \
+            --memory 2g \
+            --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
+            --user "$(id -u):$(id -g)" \
+            -v "$PWD/tools:/tools:ro" \
+            uglyos-r08-qemu-visual:ci \
+            python3 - <<'PY'
+          import sys, tempfile, subprocess
+          from pathlib import Path
+          sys.path.insert(0,"/tools")
+          from watch3_r08_private_dbus_display import private_system_bus
+          with tempfile.TemporaryDirectory(prefix="uglyos-bus-preflight-") as folder:
+              with private_system_bus(Path(folder)) as address:
+                  print("ISOLATED_PRIVATE_DBUS_SOCKET_READY",address)
+                  r=subprocess.run(
+                      ["dbus-send","--address="+address,"--print-reply",
+                       "--reply-timeout=1200","--dest=org.freedesktop.DBus",
+                       "/org/freedesktop/DBus","org.freedesktop.DBus.ListNames"],
+                      capture_output=True,timeout=3,check=False)
+                  assert r.returncode==0, ("ISOLATED_PRIVATE_DBUS_REPLY_FAILED:"+r.stderr.decode(errors="replace")[-400:])
+                  assert b"org.freedesktop.DBus" in r.stdout
+                  print("PRIVATE_DBUS_METHOD_REPLY_VERIFIED_IN_NETWORK_NONE")
+          PY
+
       - name: Install offline PNG validator for actual Qt software screenshots
         shell: bash
         run: |
@@ -293,13 +328,6 @@ jobs:
           target=find_arm64_qvnc(root)
           print("REAL_AARCH64_QVNC_PLUGIN_FOUND",target)
           PY
-
-      - name: Build standalone reproducible QEMU visual client image
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker build -q -f tools/watch3-r08-qemu-visual-offline.Dockerfile \
-            -t uglyos-r08-qemu-visual:ci .
 
       - name: Run Qt VNC raw capture INSIDE Docker --network none ONLY
         shell: bash
