@@ -32,7 +32,7 @@ class RuntimeAnalysisTests(unittest.TestCase):
         result = probe.analyze(trace(), platform="offscreen",
                                returncode=0, timed_out=False, elapsed=0.9)
         self.assertEqual(result["status"],
-                         "QPA_AND_COMPOSITOR_QML_IMPORT_OBSERVED_OFF_DEVICE")
+                         "REAL_ARM64_LAUNCHER_QML_RUNTIME_OBSERVED_OFF_DEVICE")
         self.assertFalse(result["compositor_pixel_output_proven"])
         self.assertFalse(result["flashable"])
 
@@ -65,6 +65,43 @@ class RuntimeAnalysisTests(unittest.TestCase):
     def test_crash_after_successful_trace_not_success(self):
         result = probe.analyze(trace(), platform="offscreen",
                                returncode=-11, timed_out=False, elapsed=2)
+        self.assertEqual(result["status"], "LAUNCHER_RUNTIME_NOT_PROVEN")
+
+    def test_source_grounded_real_tutorial_state_and_delegates_is_runtime_proof(self):
+        # The exact WELCOME transition is defined in pinned source
+        # src/qml/firstrun/Tutorial.qml; not generic host Qt log chatter.
+        real = ('qt.qml.states: 0x10df350 changing state from: "" to: "WELCOME"\n'
+                'qt.qml.delegatemodel.recycling: pool size after drain: 0\n')
+        result = probe.analyze(real, platform="offscreen",
+                               returncode=-9, timed_out=True, elapsed=9.0)
+        self.assertEqual(result["status"],
+                         "REAL_ARM64_LAUNCHER_QML_RUNTIME_OBSERVED_OFF_DEVICE")
+        self.assertEqual(result["evidence_mode"],
+                         "PINNED_SOURCE_TUTORIAL_WELCOME_AND_QML_DELEGATES")
+        self.assertTrue(result["pinned_source_tutorial_welcome_state_changed"])
+        self.assertTrue(result["qml_delegate_processing_observed"])
+        self.assertFalse(result["actual_qpa_plugin_loaded_in_qemu_trace"])
+        self.assertFalse(result["actual_compositor_qrc_qml_import_trace_seen"])
+        self.assertFalse(result["compositor_pixel_output_proven"])
+
+    def test_welcome_string_without_actual_qml_state_transition_rejected(self):
+        result = probe.analyze("Welcome to AsteroidOS\nqt.qml.delegatemodel.recycling: hello",
+                               platform="offscreen", returncode=0,
+                               timed_out=False, elapsed=1)
+        self.assertEqual(result["status"], "LAUNCHER_RUNTIME_NOT_PROVEN")
+
+    def test_state_transition_without_qml_delegate_processing_rejected(self):
+        result = probe.analyze(
+            'qt.qml.states: 0x1 changing state from: "" to: "WELCOME"',
+            platform="offscreen", returncode=0, timed_out=False, elapsed=1)
+        self.assertEqual(result["status"], "LAUNCHER_RUNTIME_NOT_PROVEN")
+
+    def test_fatal_qml_error_blocks_source_grounded_state_evidence(self):
+        real = ('qt.qml.states: 0x1 changing state from: "" to: "WELCOME"\n'
+                'qt.qml.delegatemodel.recycling: no available item\n'
+                'module "QtQuick" is not installed\n')
+        result = probe.analyze(real, platform="offscreen",
+                               returncode=-9, timed_out=True, elapsed=9)
         self.assertEqual(result["status"], "LAUNCHER_RUNTIME_NOT_PROVEN")
 
     def test_short_timeout_cannot_be_accepted(self):
@@ -149,7 +186,7 @@ class RealPluginSelectionTests(unittest.TestCase):
         with patch.object(probe.shutil, "which", return_value="/usr/bin/qemu-aarch64"), \
              patch.object(probe.subprocess, "Popen", side_effect=start) as popen:
             result, log = probe.inspect(self.root)
-        self.assertEqual(result["status"], "QPA_AND_COMPOSITOR_QML_IMPORT_OBSERVED_OFF_DEVICE")
+        self.assertEqual(result["status"], "REAL_ARM64_LAUNCHER_QML_RUNTIME_OBSERVED_OFF_DEVICE")
         args = popen.call_args.args[0]
         self.assertEqual(args[:3], ["qemu-aarch64", "-L", str(self.root)])
         self.assertEqual(args[-2:], ["-platform", "offscreen"])
