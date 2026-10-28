@@ -77,6 +77,34 @@ def locate_plugin(root: Path) -> tuple[str, Path]:
     raise RuntimeFailure("NO_ARM64_OFFSCREEN_OR_MINIMAL_QPA_PLUGIN")
 
 
+def actual_qt_plugin_roots(root: Path) -> tuple[list[Path], list[Path]]:
+    """Locate guest Qt plugindir roots and optional real ARM64 SVG handlers."""
+    root = root.resolve()
+    prefixes = []
+    svg = []
+    for rel in PLATFORM_ROOTS:
+        parent = (root / rel).parent
+        if not parent.is_dir():
+            continue
+        resolved = parent.resolve()
+        if not resolved.is_relative_to(root):
+            raise RuntimeFailure("QT_PLUGIN_SEARCH_ROOT_ESCAPES_GUEST")
+        if resolved not in prefixes:
+            prefixes.append(resolved)
+        candidate = parent / "imageformats" / "libqsvg.so"
+        if candidate.is_file():
+            actual = candidate.resolve()
+            if not actual.is_relative_to(root):
+                raise RuntimeFailure("QT_SVG_PLUGIN_OUTSIDE_GUEST_ROOT")
+            try:
+                read_arm64(actual)
+            except SmokeFailure as err:
+                raise RuntimeFailure("QT_SVG_PLUGIN_WRONG_ARCH") from err
+            if actual not in svg:
+                svg.append(actual)
+    return prefixes, svg
+
+
 def analyze(log: str, *, platform: str, returncode: int, timed_out: bool,
             elapsed: float) -> dict:
     lower = log.lower()
@@ -153,6 +181,9 @@ def inspect(root: Path, *, emulator: str = "qemu-aarch64",
         raise RuntimeFailure("MISSING_OR_UNSAFE_REAL_LAUNCHER")
     read_arm64(launcher)
     platform, plugin = locate_plugin(root)
+    plugin_roots, svg_plugins = actual_qt_plugin_roots(root)
+    if not plugin_roots:
+        raise RuntimeFailure("NO_QT_PLUGIN_ROOTS")
     if not shutil.which(emulator):
         raise RuntimeFailure("QEMU_AARCH64_MISSING")
     qmlpaths: dict[Path, str] = {}
@@ -171,6 +202,7 @@ def inspect(root: Path, *, emulator: str = "qemu-aarch64",
         "QEMU_LD_PREFIX": str(root),
         "QT_QPA_PLATFORM": platform,
         "QT_QPA_PLATFORM_PLUGIN_PATH": str(plugin.parent),
+        "QT_PLUGIN_PATH": ":".join(map(str, plugin_roots)),
         "QT_QUICK_BACKEND": "software",
         "QML_IMPORT_PATH": ":".join(qmlpaths.values()),
         "QML2_IMPORT_PATH": ":".join(qmlpaths.values()),
@@ -227,6 +259,13 @@ def inspect(root: Path, *, emulator: str = "qemu-aarch64",
         outcome["reason"] = "EXCESSIVE_QT_STARTUP_OUTPUT"
     outcome["selected_actual_aarch64_qpa_plugin"] = "/" + str(plugin.relative_to(root))
     outcome["target_qml_import_root_count"] = len(qmlpaths)
+    outcome["target_qt_plugin_root_count"] = len(plugin_roots)
+    outcome["actual_installed_aarch64_qsvg_plugins"] = [
+        "/" + str(path.relative_to(root)) for path in svg_plugins]
+    outcome["actual_aarch64_qsvg_image_decoder_present"] = bool(svg_plugins)
+    outcome["svg_decode_error_lines"] = sum(
+        1 for line in log.splitlines()
+        if "Unsupported image format" in line and ".svg" in line)
     return outcome, log
 
 
