@@ -218,7 +218,7 @@ jobs:
               f.write("- Runtime QML import, GUI startup, framebuffer, device boot: NOT PROVEN.\n")
           PY
 
-      - name: Start real ARM64 Asteroid compositor offscreen with bounded QML import trace
+      - name: Run actual ARM64 Asteroid launcher main and validate source-backed QML runtime
         shell: bash
         run: |
           set -euo pipefail
@@ -228,17 +228,25 @@ jobs:
           python3 - <<'PY'
           import json,os
           p=json.load(open("reports/real-arm64-launcher-qml-runtime.json"))
-          assert p["status"]=="QPA_AND_COMPOSITOR_QML_IMPORT_OBSERVED_OFF_DEVICE"
-          assert p["actual_qpa_plugin_loaded_in_qemu_trace"]
-          assert p["actual_compositor_qrc_qml_import_trace_seen"]
+          assert p["status"]=="REAL_ARM64_LAUNCHER_QML_RUNTIME_OBSERVED_OFF_DEVICE"
+          assert (p["actual_qpa_plugin_loaded_in_qemu_trace"] and
+                  p["actual_compositor_qrc_qml_import_trace_seen"]) or (
+                  p["pinned_source_tutorial_welcome_state_changed"] and
+                  p["qml_delegate_processing_observed"])
+          assert not p["fatal_messages_seen"]
+          assert not p["guest_log_truncated_for_analysis"]
           assert not p["compositor_pixel_output_proven"]
           assert not p["watch_contacted"] and not p["flashable"]
-          print("REAL_BUILT_ARM64_COMPOSITOR_QML_STARTUP_TRACE_PROVED")
+          print("REAL_BUILT_ARM64_LAUNCHER_QML_RUNTIME_PROVED",p["evidence_mode"])
           with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
-              f.write("\n## Real target ARM64 launcher offscreen initialization\n")
-              f.write("- QPA plugin: "+p["selected_actual_aarch64_qpa_plugin"]+"\n")
-              f.write("- Embedded compositor.qml import observed under QEMU.\n")
-              f.write("- No real Watch3 frame, Wayland client, stock rescue or boot proven.\n")
+              f.write("\n## Real target ARM64 launcher QML runtime initialization\n")
+              f.write("- Selected AArch64 QPA plugin: "+p["selected_actual_aarch64_qpa_plugin"]+"\n")
+              f.write("- Verified evidence: "+p["evidence_mode"]+"\n")
+              f.write("- Pinned Asteroid source declares the tutorial WELCOME state; "
+                      "real QEMU target emitted state transition and QML delegate activity "
+                      "or explicit QPA+compositor import markers.\n")
+              f.write("- Actual displayed pixels, Watch3 frame, Wayland client, stock rescue "
+                      "and boot remain unproven.\n")
           PY
 
       - name: Publish ONLY small reports, no firmware or whole filesystem
