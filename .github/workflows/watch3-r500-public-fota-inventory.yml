@@ -847,10 +847,7 @@ jobs:
               proc=subprocess.run(cmd,capture_output=True,text=True,timeout=25,check=True)
               insns=[]
               for line in proc.stdout.splitlines():
-                match=re.match(r'^\\s*([0-9a-f]+):\\s+([0-9a-f]{8})\\s+([A-Za-z0-9.]+)\\s*(.*)
-        run: |
-          echo 'Source models compared offline; no flashable Watch3 image, PIT or recovery was produced.'
-,line)
+                match=re.match(r'^\s*([0-9a-f]+):\s+([0-9a-f]{8})\s+([A-Za-z0-9.]+)\s*(.*)$',line)
                 if match:
                   insns.append({'offset':int(match.group(1),16),
                                 'instruction':match.group(3),
