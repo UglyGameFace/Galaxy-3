@@ -207,6 +207,7 @@ def capture(root: Path, *, max_seconds: int = CAPTURE_SECONDS) -> tuple[dict, by
             unblank = None
             best_image = None
             best_metrics = None
+            last_metrics = None
             handshake_proven = False
             problem = None
             try:
@@ -227,7 +228,7 @@ def capture(root: Path, *, max_seconds: int = CAPTURE_SECONDS) -> tuple[dict, by
                         width, height = handshake(conn)
                         handshake_proven = True
                         image = Image.new("RGB", (width, height), (0,0,0))
-                        while time.monotonic() - started < max_seconds and frames < 40:
+                        while time.monotonic() - started < max_seconds and frames < 96:
                             if proc.poll() is not None:
                                 problem = "GUEST_EXITED_DURING_VNC_CAPTURE"
                                 break
@@ -239,10 +240,15 @@ def capture(root: Path, *, max_seconds: int = CAPTURE_SECONDS) -> tuple[dict, by
                             if rectangles:
                                 frames += 1
                                 state = metrics(image)
+                                last_metrics = state
                                 if state["nonuniform_real_pixels"]:
                                     unblank = image.copy()
                                     best_metrics = state
                                     break
+                                # Do not exhaust the capture budget on rapid
+                                # repeated black-frame responses before Qt has
+                                # initialized its scenegraph under emulation.
+                                time.sleep(0.55)
                         if unblank is None and problem is None:
                             problem = "NO_NONBLANK_RFB_FRAME_RECEIVED"
                 elif problem is None:
@@ -275,6 +281,7 @@ def capture(root: Path, *, max_seconds: int = CAPTURE_SECONDS) -> tuple[dict, by
             "source_compiled_arm64_launcher": "/usr/bin/asteroid-launcher",
             "rfb_protocol_3_3_handshake_verified": handshake_proven,
             "raw_fb_rect_updates_received": frames,
+            "last_raw_frame_color_statistics": last_metrics,
             "runtime_seconds": runtime,
             "qt_image_format_errors": errors,
             "guest_aarch64_qsvg_decoder_present": bool(svg),
