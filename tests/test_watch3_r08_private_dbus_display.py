@@ -58,7 +58,7 @@ class DisplayWakeTests(unittest.TestCase):
             self.assertTrue(bus.send_display_update(address,False))
         cmd=runner.call_args.args[0]
         self.assertEqual(cmd[0],"dbus-send")
-        self.assertEqual(cmd[1],"--address="+address)
+        self.assertEqual(cmd[1],"--bus="+address)
         self.assertEqual(cmd[4],"--reply-timeout=1200")
         self.assertEqual(cmd[5],"--dest=org.nemomobile.compositor")
         self.assertEqual(cmd[6],"/")
