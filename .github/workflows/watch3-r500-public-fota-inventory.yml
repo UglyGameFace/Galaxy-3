@@ -76,7 +76,76 @@ jobs:
               'flash_allowed': False,
           },indent=2))
           PY
+      - name: List oldest public sibling FOTA archive contents without extraction
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq p7zip-full
+          curl --fail --location --silent --show-error --retry 2 \
+            --connect-timeout 10 --max-time 100 --max-filesize 37000000 \
+            -H 'User-Agent: UglyOS-public-firmware-reference' \
+            'https://raw.githubusercontent.com/lapinclown/SM-R500-TizenFOTA-pkgs/main/R500XXU1BSD3/R500XXU1BSD3-FOTA.7z' \
+            -o "$RUNNER_TEMP/reference-R500-BSD3.7z"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          tree = json.loads((root / 'r500-tree.json').read_text())
+          target = 'R500XXU1BSD3/R500XXU1BSD3-FOTA.7z'
+          matches = [x for x in tree['tree'] if x.get('path') == target and x.get('type') == 'blob']
+          if len(matches) != 1:
+              raise SystemExit('EXPECTED_OLD_REFERENCE_ARCHIVE_NOT_IN_GIT_TREE')
+          expected = matches[0]
+          p = root / 'reference-R500-BSD3.7z'
+          if p.stat().st_size != expected['size'] or not 1 <= p.stat().st_size <= 37_000_000:
+              raise SystemExit('REFERENCE_ARCHIVE_SIZE_MISMATCH')
+          blob = p.read_bytes()
+          github_sha = hashlib.sha1(b'blob ' + str(len(blob)).encode() + b'\\0' + blob).hexdigest()
+          if github_sha != expected['sha']:
+              raise SystemExit('REFERENCE_GIT_BLOB_HASH_MISMATCH')
+          run = subprocess.run(['7z','l','-slt',str(p)],text=True,capture_output=True,timeout=50,check=True)
+          out = run.stdout.split('----------',1)
+          if len(out) != 2:
+              raise SystemExit('ARCHIVE_MEMBER_LIST_NOT_FOUND')
+          members = []
+          for record in out[1].strip().split('\\n\\n'):
+              info = {}
+              for line in record.splitlines():
+                  if ' = ' in line:
+                      k,v=line.split(' = ',1)
+                      info[k]=v
+              name = info.get('Path')
+              if not name:
+                  continue
+              if (len(name)>220 or name.startswith('/') or '..' in name.split('/')
+                      or any(ord(ch)<32 for ch in name)):
+                  raise SystemExit('UNSAFE_ARCHIVE_MEMBER_NAME')
+              members.append({'name':name,'uncompressed_size':info.get('Size'),'folder':info.get('Folder')})
+          if not 1 <= len(members) <= 2500:
+              raise SystemExit('UNREASONABLE_ARCHIVE_MEMBER_COUNT')
+          print(json.dumps({
+              'reference_model': 'SM-R500 (NOT R840X)',
+              'reference_build': 'R500XXU1BSD3',
+              'archive_bytes': len(blob),
+              'github_verified_blob_sha1': github_sha,
+              'download_sha256': hashlib.sha256(blob).hexdigest(),
+              'archive_member_count':len(members),
+              'archive_members':members[:120],
+              'archive_list_truncated':len(members)>120,
+              'archive_extracted': False,
+              'archive_code_executed': False,
+              'watch_contacted':False,
+              'stock_r840x_rescue_verified':False,
+              'flash_allowed':False
+          },indent=2))
+          PY
       - name: Record research limitation
         run: |
-          echo 'No device communication, no firmware download, no executables or update scripts run.'
+          echo 'Downloaded one public SM-R500 archive in isolated runner, then listed members only; no watch communication, firmware execution or flashing.'
           echo 'Sibling SM-R500 filenames alone do NOT authenticate R840X stock rescue, signed images, PIT or custom boot.'
