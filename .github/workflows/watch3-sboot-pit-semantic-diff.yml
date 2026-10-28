@@ -177,10 +177,22 @@ jobs:
               assert 2048 <= parts[0]["end_exclusive"] < parts[1]["end_exclusive"] < 1_921_296
               footer_candidates=sum(len(x["candidates"])
                                     for x in data["stage2_signature_footer_pattern_hypotheses"])
+              boundaries=sorted({row["boundary_candidate"]
+                                 for group in data["stage2_signature_footer_pattern_hypotheses"]
+                                 for row in group["candidates"]})
+              assert boundaries==[0x40000, 0x115000, 0x155000, 0x1D5000], (
+                  "PINNED_ORIGINAL_SBOOT_STAGE_CANDIDATES_CHANGED:"+build)
+              pit=r["candidate_pit_code_regions"][build]
+              assert pit is not None and pit["candidate_region_index"]==1
+              assert (pit["start_file_offset"],pit["end_file_offset_exclusive"])==(
+                  0x40000,0x115000)
+              assert pit["code_reachable_from_wireless_odin_proven"] is False
               brief[build]={
                   "BL1_candidate_end":parts[0]["end_exclusive"],
                   "EPBL_candidate_end":parts[1]["end_exclusive"],
                   "footer_candidate_count_unverified":footer_candidates,
+                  "PIT_validator_candidate_interval":pit,
+                  "candidate_boundary_offsets":boundaries,
                   "footer_pattern_groups":[
                       {"assumed_signature_length":x["signature_bytes_hypothesis"],
                        "epbl_header_fields":x["epbl_marker_numeric_fields"],
@@ -196,6 +208,7 @@ jobs:
                   "signature_verified":data["signature_cryptographically_verified"],
                   "main_bootloader_stage_boundaries_verified":data["main_bootloader_stage_boundaries_proven"],
               }
+          assert r["pit_code_region_correspondence_hypothesis"] is True
           print("PINNED_SBOOT_STAGE_HEADER_METADATA")
           print(json.dumps(brief,indent=2))
           with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
