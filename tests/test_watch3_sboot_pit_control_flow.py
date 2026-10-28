@@ -144,5 +144,54 @@ class BoundedPITGuards(unittest.TestCase):
         self.assertFalse(graph["unresolved_worklist_at_budget"])
 
 
+    def test_inbound_direct_calls_into_candidate_region_not_function_proof(self):
+        anchor = 0x1000
+        blob = bytearray(synthetic(anchor))
+        def jump(pc, target, call):
+            assert (target - pc) % 4 == 0
+            return (0x94000000 if call else 0x14000000) | (
+                (target - pc) // 4 & 0x3FFFFFF)
+        # Two potential external entries; neither is a verified handler.
+        put(blob, 0x300, jump(0x300, 0xF80, True))
+        put(blob, 0x304, jump(0x304, 0x1040, False))
+        # B landing outside the 0xF00..0x1180 candidate window is ignored.
+        put(blob, 0x308, jump(0x308, 0xEFC, True))
+        # B landing inside itself is an internal edge, not a caller.
+        put(blob, 0x1010, jump(0x1010, 0x1040, True))
+        result = cfg.inbound_candidates(bytes(blob), anchor, start=0x200, end=0x2000)
+        edges = result["incoming_direct_edges"]
+        self.assertEqual([(e["source_file_offset"], e["source_op"]) for e in edges],
+                         [(0x300, "BL"), (0x304, "B")])
+        self.assertEqual(result["candidate_direct_call_count"], 1)
+        self.assertEqual(result["candidate_direct_branch_count"], 1)
+        self.assertFalse(result["call_chain_to_wireless_protocol_verified"])
+        self.assertFalse(result["function_entry_verified"])
+
+    def test_inbound_negative_offsets_and_boundaries_fail_closed(self):
+        data = synthetic()
+        for args in (
+            {"anchor": 0x1000, "start": -4, "end": 0x2000},
+            {"anchor": 0x1000, "start": 3, "end": 0x2000},
+            {"anchor": 0x1000, "start": 0, "end": 0x1000},
+            {"anchor": 0x1000, "start": 0, "end": len(data) + 4},
+            {"anchor": 0x1001, "start": 0, "end": len(data)},
+            {"anchor": 0x50, "start": 0, "end": len(data)},
+        ):
+            with self.subTest(args=args):
+                with self.assertRaises(ValueError):
+                    cfg.inbound_candidates(data, **args)
+        with self.assertRaises(ValueError):
+            cfg.inbound_candidates(data, 0x1000, start=0, end=0x2001)
+
+    def test_inbound_does_not_treat_conditional_or_indirect_branch_as_call(self):
+        data = bytearray(synthetic())
+        put(data, 0x300, cond(0x300, 0x1000, 0))
+        put(data, 0x304, 0xD63F0000)  # BLR X0: indirect, cannot resolve
+        found = cfg.inbound_candidates(bytes(data), 0x1000, start=0x200, end=0x2000)
+        self.assertFalse(found["incoming_direct_edges"])
+        self.assertFalse(found["indirect_callers_analyzed"])
+
+
+
 if __name__ == "__main__":
     unittest.main()

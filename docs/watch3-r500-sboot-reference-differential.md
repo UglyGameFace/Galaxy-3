@@ -125,6 +125,35 @@ bootloader vulnerability, a signature bypass, or an unlock. The real physical
 `SM-R840X / R840XXXU1AUA2` S-BOOT bytes are still missing. The scan
 does not contact the watch, execute boot code, or modify partitions.
 
+## Donor direct-call predecessor mapping
+
+An additional bounded review searches the **actual SHA-256-pinned historical
+SM-R500 S-BOOT bytes** for direct ARM64 `BL` and unconditional `B` branch
+candidates whose *file-relative targets* fall within 256 bytes before the
+previously established PIT xref through the 384-byte guarded region.
+Internal edges are filtered out. Conditional branches, register-indirect
+calls, and speculative cross-stage memory mappings are deliberately not
+treated as resolved callsites. Exact branch source offsets and counts are
+recorded by the existing real-archive GitHub Actions workflow.
+
+This is **not** function-boundary recovery, a proven wireless Odin caller,
+a recovered R840X bootloader, or vulnerability identification. A direct
+relative instruction in an archive may be embedded in non-executable bytes
+and the original memory mapping is unverified. Zero direct matches would not
+rule out indirect callers. Static code observations never authorize a live
+`param`/`recovery` write or a flash.
+
+## Exact-model original firmware remains missing
+
+Samsung's [official SM-R840X support page](
+https://www.samsung.com/ie/support/model/SM-R840XZKAEUA/)
+recognizes the distinct model but currently lists manuals, **not an
+original signed BL/AP/CSC recovery image** in its public download inventory.
+Samsung's [Korea service catalog](
+https://www.samsungsvc.co.kr/download?code=%EC%9B%A8%EC%96%B4%EB%9F%AC%EB%B8%94)
+similarly names SM-R840X. Neither evidence establishes full stock rescue.
+Third-party SM-R840 retail images must not be used to infer LDU compatibility.
+
 ## What the evidence actually changes
 
 **Established:** one authentic-to-public-repository pre/post
