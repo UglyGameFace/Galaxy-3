@@ -159,6 +159,36 @@ jobs:
               f.write('- Raw file-offset graph only. No runtime mapping, sender reachability, '
                       'CVE root cause, SM-R840X custom boot or full stock rescue proven. **NO_GO**.\n')
           PY
+      - name: Analyze real sibling PIT direct inbound control transfers without claiming loader reachability
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/watch3_sboot_pit_control_flow.py \
+            --older "$RUNNER_TEMP/older/reference-sboot.bin" \
+            --newer "$RUNNER_TEMP/newer/reference-sboot.bin" \
+            --output "$RUNNER_TEMP/pit-inbound-edges.json"
+          python3 - <<'PY'
+          import json,os,pathlib
+          result=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"pit-inbound-edges.json").read_text())
+          assert result["decision"]=="NO_GO" and not result["watch_contacted"]
+          for build, section in result["inbound_candidate_edges"].items():
+              edges=section["incoming_direct_edges"]
+              assert section["candidate_stage_only"] is True
+              assert section["function_entry_verified"] is False
+              assert section["call_chain_to_wireless_protocol_verified"] is False
+              assert section["candidate_direct_call_count"]+section["candidate_direct_branch_count"]==len(edges)
+              assert all(x["verified_external_wireless_caller"] is False for x in edges)
+              print(build, "inbound BL", section["candidate_direct_call_count"],
+                    "inbound B", section["candidate_direct_branch_count"],
+                    "sample file offsets", [hex(x["source_file_offset"]) for x in edges[:10]])
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
+              f.write("\n## Direct inbound branch candidates in historical SM-R500 firmware\n")
+              for name, r in result["inbound_candidate_edges"].items():
+                  f.write(f"- {name}: {r['candidate_direct_call_count']} candidate BL and "
+                          f"{r['candidate_direct_branch_count']} candidate B edges into PIT-vicinity window.\n")
+              f.write("- Potential code-reference evidence only; no verified caller, "
+                      "exact R840X bytes, wireless input reachability, unlock or stock rescue. **NO_GO**.\n")
+          PY
       - name: Map bounded S-BOOT stage header candidates from two original reference firmware files
         shell: bash
         run: |

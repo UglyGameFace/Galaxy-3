@@ -196,19 +196,83 @@ def branch_graph(blob: bytes, anchor: int) -> dict:
             "branch_target_addresses_are_runtime_addresses": False}
 
 
+# Region is a footer-derived candidate from SM-R500 S-BOOT, NOT a
+# source-authenticated executable map or proven function boundary.
+DONOR_STAGE_START = 0x40000
+DONOR_STAGE_END = 0x115000
+POSSIBLE_ENTRY_LOOKBACK_BYTES = 0x100
+MAX_DIRECT_INBOUND_CANDIDATES = 128
+
+
+def inbound_candidates(blob: bytes, anchor: int, *,
+                       start: int = DONOR_STAGE_START,
+                       end: int = DONOR_STAGE_END) -> dict:
+    """Scan donor-stage direct BL/B to the PIT anchor's candidate vicinity.
+
+    A branch target into this range is not a verified function entry:
+    some code/data is undecoded, cross-stage mapping is hypothetical,
+    indirect calls are invisible, and an incoming branch does not prove
+    Odin or external sender reachability.
+    """
+    if (not isinstance(blob, bytes) or not isinstance(anchor, int) or
+            not isinstance(start, int) or not isinstance(end, int) or
+            start < 0 or start % 4 or end % 4 or anchor % 4 or
+            anchor < start + POSSIBLE_ENTRY_LOOKBACK_BYTES or
+            anchor + WINDOW_BYTES > end or end > len(blob) or
+            end - start > 2 * 1024 * 1024):
+        raise ValueError("INVALID_DONOR_STAGE_OR_PIT_ANCHOR")
+    lower = anchor - POSSIBLE_ENTRY_LOOKBACK_BYTES
+    upper = anchor + WINDOW_BYTES
+    possible = []
+    for pc in range(start, end, 4):
+        # Only direct B/BL instructions. CBZ/TBZ/B.cond and branch-register
+        # instructions cannot independently identify the candidate caller.
+        found = branch(instruction(blob, pc), pc)
+        if not found or found["op"] not in ("B", "BL"):
+            continue
+        if not lower <= found["target"] < upper:
+            continue
+        if lower <= pc < upper:
+            continue  # Internal control edges are not incoming callers.
+        if len(possible) >= MAX_DIRECT_INBOUND_CANDIDATES:
+            raise ValueError("EXCESSIVE_INBOUND_CANDIDATE_MATCHES")
+        possible.append({
+            "source_file_offset": pc,
+            "target_file_offset_hypothesis": found["target"],
+            "source_op": found["op"],
+            "target_relative_to_pit_xref": found["target"] - anchor,
+            "possible_function_entry_only": True,
+            "verified_external_wireless_caller": False,
+        })
+    return {
+        "candidate_target_interval": [lower, upper],
+        "candidate_direct_call_count": sum(x["source_op"] == "BL" for x in possible),
+        "candidate_direct_branch_count": sum(x["source_op"] == "B" for x in possible),
+        "incoming_direct_edges": possible,
+        "candidate_stage_only": True,
+        "function_entry_verified": False,
+        "indirect_callers_analyzed": False,
+        "call_chain_to_wireless_protocol_verified": False,
+        "code_vs_data_all_offsets_verified": False,
+        "device_loader_runtime_map_verified": False,
+    }
+
+
 def compare(older: bytes, newer: bytes) -> dict:
     gates = {}
     graphs = {}
+    incoming = {}
     for build, blob in (("R500XXU1BSD3", older), ("R500XXU1GUJ2", newer)):
         anchor = REFERENCES[build][1]
         gates[build] = find_gates(blob, anchor)
         graphs[build] = branch_graph(blob, anchor)
+        incoming[build] = inbound_candidates(blob, anchor)
     patterns = [gates[x]["canonical_candidate_three_guards"] for x in REFERENCES]
     return {
         "schema": "uglyos-r500-sboot-pit-bounded-branch-graph-v1",
         "source_model": "SM-R500 only, NOT owner's SM-R840X",
         "reference_sha256": {k: v[0] for k, v in REFERENCES.items()},
-        "gates": gates, "graphs": graphs,
+        "gates": gates, "graphs": graphs, "inbound_candidate_edges": incoming,
         "both_reference_versions_match_canonical_three_guard_shape": all(patterns),
         "CVE_root_cause_located": False,
         "firmware_signature_policy_proven": False,
