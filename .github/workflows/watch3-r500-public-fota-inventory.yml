@@ -215,7 +215,7 @@ jobs:
                                    'EVP_DigestVerifyFinal','g_dbus_proxy_call_sync')
                           item['selected_dynamic_imports'] = sorted(
                               name for name in allow if re.search(
-                                  r'\\b'+re.escape(name)+r'(?:@|\\b)',result.stdout))
+                                  r'\b'+re.escape(name)+r'(?:@|\b)',result.stdout))
                       finally:
                           temp_elf.unlink(missing_ok=True)
                   fingerprints[name] = item
