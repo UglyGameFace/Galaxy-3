@@ -114,15 +114,40 @@ class RealPluginSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(probe.RuntimeFailure, "OUT_OF_BOUNDS"):
             probe.inspect(self.root, duration=99)
 
+    def test_excess_qt_output_preserves_prefix_and_tail_but_fails_closed(self):
+        (self.plugin_dir/"libqoffscreen.so").write_bytes(elf())
+        class Completed:
+            pid = 1011
+            returncode = 0
+            def wait(self, timeout):
+                return 0
+        def verbose(*args, **kwargs):
+            handle=kwargs["stdout"]
+            handle.write(trace().encode())
+            handle.write(b"q" * (probe.MAX_LOG_BYTES + 100))
+            handle.write(b"QML_END_DIAGNOSTIC")
+            return Completed()
+        with patch.object(probe.shutil, "which", return_value="/usr/bin/qemu-aarch64"), \
+             patch.object(probe.subprocess, "Popen", side_effect=verbose):
+            result, log = probe.inspect(self.root)
+        self.assertTrue(result["guest_log_truncated_for_analysis"])
+        self.assertEqual(result["reason"], "EXCESSIVE_QT_STARTUP_OUTPUT")
+        self.assertEqual(result["status"], "LAUNCHER_RUNTIME_NOT_PROVEN")
+        self.assertIn("QML_END_DIAGNOSTIC", log)
+        self.assertIn("compositor.qml", log)
+
     def test_bounded_actual_qemu_command_and_environment(self):
         (self.plugin_dir/"libqoffscreen.so").write_bytes(elf())
         class Completed:
             pid = 1010
             returncode = 0
-            def communicate(self, timeout):
-                return (trace().encode(), None)
+            def wait(self, timeout):
+                return self.returncode
+        def start(*args, **kwargs):
+            kwargs["stdout"].write(trace().encode())
+            return Completed()
         with patch.object(probe.shutil, "which", return_value="/usr/bin/qemu-aarch64"), \
-             patch.object(probe.subprocess, "Popen", return_value=Completed()) as popen:
+             patch.object(probe.subprocess, "Popen", side_effect=start) as popen:
             result, log = probe.inspect(self.root)
         self.assertEqual(result["status"], "QPA_AND_COMPOSITOR_QML_IMPORT_OBSERVED_OFF_DEVICE")
         args = popen.call_args.args[0]
