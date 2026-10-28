@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Read only kernel-exported Watch3 partition LABELS, never partition bytes.
 
-Uses exactly one opt-in fixed Tizen SDB shell operation to read text
-/sys/class/block/mmcblk0p[0-9]*/uevent. No PIT/Odin/raw-block access,
-factory reset, firmware modification or write authorization.
-
-This is a hypothesis: the shell glob and PARTNAME fields might not be
-available to the owner's unprivileged SM-R840X Tizen shell.
+Owner already verified three explicit /sys/class/block/mmcblk0pN/uevent
+reads (p1/p20/p21) on their SM-R840X. An opt-in follow-up uses a
+separate hardcoded six-file group for p2..p19, one group per run.
+The older wildcard probe remains available but is not automatically used.
+No PIT/Odin/raw-block access, reset, firmware modification or write approval.
 """
 from __future__ import annotations
 
