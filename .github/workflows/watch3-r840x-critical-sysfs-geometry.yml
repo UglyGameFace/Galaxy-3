@@ -1,0 +1,46 @@
+name: Watch3 R840X critical sysfs sector metadata (NO DEVICE)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/watch3_r08_android_sdb.py'
+      - 'tools/watch3_r840x_critical_sysfs_geometry.py'
+      - 'tests/test_watch3_r840x_critical_sysfs_geometry.py'
+      - 'docs/watch3-r840x-critical-sysfs-geometry.md'
+      - '.github/workflows/watch3-r840x-critical-sysfs-geometry.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-only:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check fixed SDB allowlist and completely fake critical partition geometry
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_watch3_r840x_critical_sysfs_geometry.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_android_sdb.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r840x_partition_sysfs_readonly.py' -v
+          python3 -m py_compile tools/watch3_r840x_critical_sysfs_geometry.py tools/watch3_r08_android_sdb.py
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('tools/watch3_r840x_critical_sysfs_geometry.py').read_text()
+          assert '"flash_allowed": False' in s
+          assert '"signed_stock_images_obtained": False' in s
+          assert '"stock_recovery_proven": False' in s
+          assert 'CRITICAL_GEOMETRY_PROBES' in s
+          assert 'b"ODIN"' not in s
+          assert '"/dev/mmcblk0"' not in s
+          print('PASS: synthetic only, NO SDB watch connection in CI, NO raw partitions or firmware writes.')
+          PY
+          git diff --check

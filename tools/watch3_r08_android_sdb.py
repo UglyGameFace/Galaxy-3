@@ -87,14 +87,29 @@ PARTITION_SYSFS_REMAINING_BATCH_PROBES = (
     "partition_p19_uevent": "cat /sys/class/block/mmcblk0p19/uevent",
 },
 )
+# Known physical R840X PARTNAMEs from owner's October 27 offline 21/21
+# sysfs merge: p10=param, p13=boot, p14=recovery. These are only
+# read-only pseudo-file scalar fields, never raw /dev/mmcblk0pN data.
+# Fixed geometry is deliberately scoped to three boot-research partitions.
+CRITICAL_GEOMETRY_PROBES = {
+    "critical_disk_sectors": "cat /sys/class/block/mmcblk0/size",
+    "critical_p10_start": "cat /sys/class/block/mmcblk0p10/start",
+    "critical_p10_size": "cat /sys/class/block/mmcblk0p10/size",
+    "critical_p13_start": "cat /sys/class/block/mmcblk0p13/start",
+    "critical_p13_size": "cat /sys/class/block/mmcblk0p13/size",
+    "critical_p14_start": "cat /sys/class/block/mmcblk0p14/start",
+    "critical_p14_size": "cat /sys/class/block/mmcblk0p14/size",
+}
 SYSFS_PROBE_SETS = (PARTITION_SYSFS_PROBES, PARTITION_SYSFS_FIXED_PROBES,
-                    *PARTITION_SYSFS_REMAINING_BATCH_PROBES)
+                    *PARTITION_SYSFS_REMAINING_BATCH_PROBES,
+                    CRITICAL_GEOMETRY_PROBES)
 
 # Explicit, fixed, read-only operations; storage and battery probe sets run
 # only when expressly requested. Normal boot collection stays unchanged.
 ALLOWED_PROBES = {**PROBES, **STORAGE_PROBES, **POWER_PROBES, **BEZEL_PROBES, **BOOT_MEMORY_PROBES, **PARTITION_SYSFS_PROBES, **PARTITION_SYSFS_FIXED_PROBES}
 for _fixed_sysfs_batch in PARTITION_SYSFS_REMAINING_BATCH_PROBES:
     ALLOWED_PROBES.update(_fixed_sysfs_batch)
+ALLOWED_PROBES.update(CRITICAL_GEOMETRY_PROBES)
 # Preserve the existing audited boot/power/bezel contract; root-path checks
 # are a separate, opt-in, fixed read-only set.
 ALLOWED_PROBES.update(ROOT_PATH_PROBES)
@@ -457,6 +472,7 @@ def collect(ip, key_path, timeout=8, probes=PROBES):
             probes is not BOOT_MEMORY_PROBES and probes is not ROOT_PATH_PROBES and
             probes is not FOTA_PATH_PROBES and probes is not PARTITION_SYSFS_PROBES and
             probes is not PARTITION_SYSFS_FIXED_PROBES and
+            probes is not CRITICAL_GEOMETRY_PROBES and
             not any(probes is batch for batch in PARTITION_SYSFS_REMAINING_BATCH_PROBES)):
         raise SdbError("Only predefined boot, storage, battery, bezel or boot-memory probe sets are allowed (plus the fixed root-path set)")
     for name in probes:
