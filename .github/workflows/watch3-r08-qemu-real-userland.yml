@@ -8,8 +8,10 @@ on:
       - 'tools/watch3_r08_select_derived_artifact.py'
       - 'tools/watch3_r08_qemu_userland_smoke.py'
       - 'tools/watch3_r08_qemu_launcher_closure.py'
+      - 'tools/watch3_r08_qml_module_closure.py'
       - 'tests/test_watch3_r08_qemu_userland_smoke.py'
       - 'tests/test_watch3_r08_qemu_launcher_closure.py'
+      - 'tests/test_watch3_r08_qml_module_closure.py'
   workflow_dispatch:
 
 permissions:
@@ -30,6 +32,7 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_userland_smoke.py' -v
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_launcher_closure.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_qml_module_closure.py' -v
           python3 -m py_compile tools/watch3_r08_select_derived_artifact.py tools/watch3_r08_qemu_userland_smoke.py
 
       - name: Find verified main-commit legacy ext4 artifact, not an unrelated run
@@ -186,6 +189,30 @@ jobs:
               out.write("- Qt6 libraries: "+", ".join(a["qt6_dependency_names"])+"\n")
               out.write("- Launcher main(), compositor, physical display, Watch3 bootloader: NOT executed or proven.\n")
               out.write("- Watch untouched; stock rescue unknown; NO_FLASH remains mandatory.\n")
+          PY
+
+      - name: Verify installed target ARM64 QML modules and plugin ELF binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/watch3_r08_qml_module_closure.py \
+            --extracted-rootfs extracted \
+            --output reports/real-arm64-qml-module-closure.json
+          python3 - <<'PY'
+          import json,os
+          result=json.load(open("reports/real-arm64-qml-module-closure.json"))
+          assert result["status"]=="REAL_ARM64_QML_MODULE_DEPLOYMENT_VERIFIED"
+          assert result["required_modules_present"]
+          assert not result["module_loading_at_runtime_tested"]
+          assert not result["physical_watch_contacted"] and not result["flashable"]
+          print("REAL_ARM64_QML_MODULES_VERIFIED",
+                [x["module"] for x in result["required_modules"]])
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
+              f.write("\n## ARM64 QML modules actually deployed in saved rootfs\n")
+              for item in result["required_modules"]:
+                  f.write("- "+item["module"]+": "+item["qmldir_path_in_guest"]+
+                          ", target AArch64 plugins inspected where declared.\n")
+              f.write("- Runtime QML import, GUI startup, framebuffer, device boot: NOT PROVEN.\n")
           PY
 
       - name: Publish ONLY small reports, no firmware or whole filesystem
