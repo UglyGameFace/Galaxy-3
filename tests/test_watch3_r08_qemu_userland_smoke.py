@@ -29,10 +29,12 @@ def fixture_run(runid=123):
 
 
 def fixture_artifacts(runid=123, expired=False):
-    return {runid: {"artifacts": [{
-        "id": 333, "name": selection.PREFIX + str(runid),
-        "size_in_bytes": 249_000_000, "expired": expired,
-    }]}}
+    return {runid: {"artifacts": [
+        {"id": 333, "name": selection.PREFIX + str(runid),
+         "size_in_bytes": 249_000_000, "expired": expired},
+        {"id": 334, "name": selection.PROOF_PREFIX + str(runid),
+         "size_in_bytes": 2_000, "expired": expired},
+    ]}}
 
 
 class ArtifactIdentityTests(unittest.TestCase):
@@ -40,6 +42,7 @@ class ArtifactIdentityTests(unittest.TestCase):
         result = selection.choose(fixture_run(), fixture_artifacts())
         self.assertEqual(result["run_id"], 123)
         self.assertEqual(result["artifact_id"], 333)
+        self.assertEqual(result["proof_artifact_id"], 334)
         self.assertFalse(result["flash_allowed"])
 
     def test_rejects_other_commit_even_if_artifact_matches(self):
@@ -58,6 +61,12 @@ class ArtifactIdentityTests(unittest.TestCase):
         a = fixture_artifacts()
         a[123]["artifacts"].append(a[123]["artifacts"][0].copy())
         with self.assertRaisesRegex(selection.ArtifactError, "ARTIFACT_NOT_VERIFIED"):
+            selection.choose(fixture_run(), a)
+
+    def test_rejects_missing_corresponding_report(self):
+        a = fixture_artifacts()
+        a[123]["artifacts"] = a[123]["artifacts"][:1]
+        with self.assertRaisesRegex(selection.ArtifactError, "MATCHING_DERIVATION_PROOF"):
             selection.choose(fixture_run(), a)
 
     def test_rejects_fake_undersized_artifact(self):
