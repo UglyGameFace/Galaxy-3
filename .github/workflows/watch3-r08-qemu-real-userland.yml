@@ -63,7 +63,7 @@ jobs:
               with private_system_bus(Path(folder)) as address:
                   print("ISOLATED_PRIVATE_DBUS_SOCKET_READY",address)
                   r=subprocess.run(
-                      ["dbus-send","--address="+address,"--print-reply",
+                      ["dbus-send","--bus="+address,"--print-reply",
                        "--reply-timeout=1200","--dest=org.freedesktop.DBus",
                        "/org/freedesktop/DBus","org.freedesktop.DBus.ListNames"],
                       capture_output=True,timeout=3,check=False)
