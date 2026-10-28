@@ -27,6 +27,44 @@ device-specific full rescue from boot failure and UgLy|OS kernel
 acceptance remain **unproven**. No new 1,024-byte protocol traffic
 is allowed on the only working watch.
 
+## October 27 physical kernel PARTNAME map: 21/21 text records reconciled
+
+Owner physically performed four bounded, read-only Tizen SDB
+`/sys/class/block/mmcblk0pN/uevent` text batches, then successfully
+ran **the offline report reconciler** from Android/Termux on the four
+original privacy-filtered JSON files. The resulting
+`watch3-r840x-all21-sysfs-evidence.json` records
+`ALL_21_KERNEL_TEXT_PARTNAME_FIELDS_RECONCILED` and
+`21/21` readable `uevent` files with `21/21` `PARTNAME` fields
+in the owner's supplied summaries.
+
+**Recognized labels:** `p5=module`, `p7=steady`,
+`p10=param`, `p11=up_param`, `p13=boot`,
+`p14=recovery`, `p18=csc`, `p20=rootfs`,
+`p21=user`. The **12 remaining observed labels** were redacted to
+`unclassified` by our privacy filter, not literally assigned that
+name by Samsung. Source and scope:
+[on-phone 21/21 evidence reconciliation](watch3-r840x-sysfs-partition-labels.md#completed-owner-run-offline-2121-merge-october-27-2026).
+
+**Newly established:** kernel-reported **number-to-name mappings for
+nine common partitions** on the installed stock R840X, including
+named `param` and `recovery` paths relevant to Samsung's
+2021 bootloader vulnerability disclosures. Do **not** infer that the
+exact LDU bootloader is exploitable or supports a different image.
+
+**Still absent:** an authenticated Samsung PIT containing the
+complete partition geometry; actual partition contents,
+bootloader identification, raw boot/recovery images,
+signature/rollback compatibility, complete OEM stock
+rescue data, tested recovery after damage, and an accepted
+UgLy|OS kernel. The offline merge made **no new watch contact**
+and the actual reports weren't independently cryptographically
+attested by Samsung. A named `rootfs` partition does not establish
+the kernel's root mount/device-mapper dependency by itself.
+
+No reason to repeat physical sysfs batches or issue 1024-byte Odin
+commands. **All write/install actions remain NO-GO.**
+
 ## Automated first-boot safety gate (2026-10-26)
 
 The **R08 first-boot readiness and recovery gate** is available at
@@ -180,7 +218,7 @@ audio. An ext4 integrity pass alone is not boot success.
 
 - No verified restorable stock firmware + actual recovery transport.
 - No demonstrated unsigned custom kernel support/unlock or signed boot route.
-- No verified R840X partition map, boot image format or recovery boundaries.
+- No authenticated R840X Samsung PIT/partition *geometry* or boot image format or recovery boundaries. Nine kernel-reported partition labels are now known; that does **not** satisfy this gate.
 - Mismatch between R840X and any firmware/tutorial aimed at R840,
   R845, Galaxy Watch FE/4, or other models.
 - No reliable way to connect to the watch after a failed boot.
