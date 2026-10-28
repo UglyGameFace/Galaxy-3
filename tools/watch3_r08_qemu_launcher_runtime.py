@@ -19,13 +19,15 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 from watch3_r08_qemu_userland_smoke import read_arm64, SmokeFailure
 from watch3_r08_qml_module_closure import ROOTS
 
 LIMIT_SECONDS = 9
-MAX_LOG_BYTES = 90_000
+MAX_LOG_BYTES = 8_000_000
+DIAGNOSTIC_EXCERPT_BYTES = 24_000
 PLATFORMS = ("offscreen", "minimal")
 PLATFORM_ROOTS = (
     "usr/lib/plugins/platforms",
@@ -145,29 +147,51 @@ def inspect(root: Path, *, emulator: str = "qemu-aarch64",
         "QT_LOGGING_TO_CONSOLE": "1",
     }
     started = time.monotonic()
-    try:
-        process = subprocess.Popen(
-            [emulator, "-L", str(root), str(launcher), "-platform", platform],
-            env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, start_new_session=True)
-    except OSError as error:
-        raise RuntimeFailure("QEMU_PROCESS_LAUNCH_FAILED") from error
-    timed_out = False
-    try:
-        output, _ = process.communicate(timeout=duration)
-    except subprocess.TimeoutExpired:
-        timed_out = True
+    # Redirect verbose Qt diagnostic output to an anonymous temporary FILE.
+    # Never buffer an unbounded stream in Python memory and never discard
+    # the diagnostic clues when it is large.
+    with tempfile.TemporaryFile() as transcript:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        output, _ = process.communicate(timeout=5)
-    elapsed = time.monotonic() - started
-    if len(output) > MAX_LOG_BYTES:
-        raise RuntimeFailure("UNBOUNDED_GUEST_STARTUP_LOG")
-    log = output.decode("utf-8", errors="replace")
+            process = subprocess.Popen(
+                [emulator, "-L", str(root), str(launcher), "-platform", platform],
+                env=env, stdin=subprocess.DEVNULL, stdout=transcript,
+                stderr=subprocess.STDOUT, start_new_session=True)
+        except OSError as error:
+            raise RuntimeFailure("QEMU_PROCESS_LAUNCH_FAILED") from error
+        timed_out = False
+        try:
+            process.wait(timeout=duration)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                raise RuntimeFailure("QEMU_PROCESS_GROUP_NOT_TERMINATED") from None
+        elapsed = time.monotonic() - started
+        transcript.seek(0, os.SEEK_END)
+        total_bytes = transcript.tell()
+        transcript.seek(0)
+        if total_bytes <= MAX_LOG_BYTES:
+            log = transcript.read().decode("utf-8", errors="replace")
+            excess = False
+        else:
+            prefix = transcript.read(DIAGNOSTIC_EXCERPT_BYTES)
+            transcript.seek(max(0, total_bytes - DIAGNOSTIC_EXCERPT_BYTES))
+            suffix = transcript.read()
+            log = (prefix + b"\n[...EXCESSIVE QT LOG OMITTED...]\n" +
+                   suffix).decode("utf-8", errors="replace")
+            excess = True
     outcome = analyze(log, platform=platform, returncode=process.returncode,
                       timed_out=timed_out, elapsed=elapsed)
+    outcome["guest_log_bytes"] = total_bytes
+    outcome["guest_log_truncated_for_analysis"] = excess
+    if excess:
+        outcome["status"] = "LAUNCHER_RUNTIME_NOT_PROVEN"
+        outcome["reason"] = "EXCESSIVE_QT_STARTUP_OUTPUT"
     outcome["selected_actual_aarch64_qpa_plugin"] = "/" + str(plugin.relative_to(root))
     outcome["target_qml_import_root_count"] = len(qmlpaths)
     return outcome, log
