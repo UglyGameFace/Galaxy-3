@@ -7,7 +7,9 @@ on:
       - '.github/workflows/watch3-r08-qemu-real-userland.yml'
       - 'tools/watch3_r08_select_derived_artifact.py'
       - 'tools/watch3_r08_qemu_userland_smoke.py'
+      - 'tools/watch3_r08_qemu_launcher_closure.py'
       - 'tests/test_watch3_r08_qemu_userland_smoke.py'
+      - 'tests/test_watch3_r08_qemu_launcher_closure.py'
   workflow_dispatch:
 
 permissions:
@@ -27,6 +29,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_userland_smoke.py' -v
+          python3 -m unittest discover -s tests -p 'test_watch3_r08_qemu_launcher_closure.py' -v
           python3 -m py_compile tools/watch3_r08_select_derived_artifact.py tools/watch3_r08_qemu_userland_smoke.py
 
       - name: Find verified main-commit legacy ext4 artifact, not an unrelated run
@@ -160,6 +163,29 @@ jobs:
               f.write("- QEMU linux-user with guest libraries: PASSED.\n")
               f.write("- Host kernel used, not Watch3 Linux 4.9. Hardware boot and stock recovery NOT proven.\n")
               f.write("- Flash/installation decision: NO_GO.\n")
+          PY
+
+      - name: Resolve real ARM64 Qt6 launcher dynamic-library closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/watch3_r08_qemu_launcher_closure.py \
+            --extracted-rootfs extracted \
+            --output reports/real-arm64-qt6-launcher-linker.json
+          python3 - <<'PY'
+          import json,os
+          a=json.load(open("reports/real-arm64-qt6-launcher-linker.json"))
+          assert a["result"]=="REAL_ARM64_LAUNCHER_DYNAMIC_DEPENDENCIES_RESOLVED"
+          assert a["qt6_dependency_count"]>0 and a["real_aarch64_glibc_linker_executed"]
+          assert not a["launchers_main_function_called"]
+          assert not a["physical_watch_contacted"] and not a["flash_allowed"]
+          print("REAL_ARM64_LAUNCHER_LINKER_LIBRARIES_RESOLVED",a["qt6_dependency_names"])
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as out:
+              out.write("\n## Target ARM64 Asteroid launcher linker closure\n")
+              out.write("- Actual dynamic linker and ELF: resolved target Qt6 libraries under QEMU.\n")
+              out.write("- Qt6 libraries: "+", ".join(a["qt6_dependency_names"])+"\n")
+              out.write("- Launcher main(), compositor, physical display, Watch3 bootloader: NOT executed or proven.\n")
+              out.write("- Watch untouched; stock rescue unknown; NO_FLASH remains mandatory.\n")
           PY
 
       - name: Publish ONLY small reports, no firmware or whole filesystem
