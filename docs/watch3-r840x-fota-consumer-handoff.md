@@ -778,7 +778,7 @@ this binary has PLT alignment/interworking padding.
 **Direct code evidence in Thumb function `launch_fota_consumer` at
 ELF address `0xa764`:**
 
-- `0xa7c4: movs r0,#1`, `0xa7c6` loads a PC-relative argument,
+- `0xa7c4: movs r0,#1`, `0xa7c6` stores the already-resolved object-path argument,
   and `0xa7ca: blx 0x4ce4`: this PLT stub resolves through
   GOT `0x2437c` to **`g_dbus_proxy_new_for_bus_sync`**.
   GLib defines bus enum `1=G_BUS_TYPE_SYSTEM` (the system bus),
@@ -796,7 +796,8 @@ ELF address `0xa764`:**
   **`g_dbus_proxy_call_sync`**. The method name is passed in from
   the original distinct callers (previously evidenced `Launch` and
   `DeleteTempFile`). Its timeout stack argument is `-1`
-  (`G_DBUS_TIMEOUT_INFINITE`), not a bounded request.
+  (the **proxy default**, typically 25 seconds, **not infinite**;
+  `G_MAXINT` would mean infinite).
   **This call was never made from the owner's phone or on the watch
   during this research.**
 - The proxy is an **outbound client** attempting to reach the
@@ -816,6 +817,7 @@ systemd unit equivalent to a D-Bus registration.
 Independent API references:
 - [GLib `GDBusProxy.new_for_bus_sync` signature](https://docs.gtk.org/gio/ctor.DBusProxy.new_for_bus_sync.html)
 - [GLib `GBusType` enum with SYSTEM=1 and SESSION=2](https://gnome.pages.gitlab.gnome.org/gtk/gio/enum.BusType.html)
+- [GLib call_sync timeout: -1 means default, G_MAXINT means infinite](https://docs.gtk.org/gio/method.DBusProxy.call_sync.html)
 
 **Remaining exact-model evidence gate:** the actual owner/implementation
 of `fota.consumer` and its credential, update-agent/signature and
