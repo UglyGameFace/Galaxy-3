@@ -2,11 +2,15 @@ name: Watch3 R08 Android SDB read-only socket tests (NO WATCH)
 
 # Synthetic in-memory SDB peer ONLY; no physical device connections,
 # network scanning, device boot, flashing, root or package installation.
+# A separate disposable private host D-Bus verifies registry behavior.
 on:
   pull_request:
     branches: [main]
     paths:
       - 'tools/watch3_r08_android_sdb.py'
+      - 'tools/watch3_r840x_fota_owner_readonly.py'
+      - 'tests/test_watch3_r840x_fota_owner_readonly.py'
+      - 'tests/test_watch3_r840x_fota_owner_real_dbus.py'
       - 'tools/watch3_r08_root_prereq.py'
       - 'tools/watch3_r08_fota_artifact_pull.py'
       - 'tools/watch3_r08_fota_consumer_inventory.py'
@@ -51,14 +55,14 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            python3-cryptography
+            python3-cryptography dbus
           python3 -c 'import cryptography'
 
       - name: Test Samsung SDB protocol parser, RSA, fake watch and privacy gates
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile tools/watch3_r08_android_sdb.py tools/watch3_r08_root_prereq.py tools/watch3_r08_fota_artifact_pull.py tools/watch3_r08_fota_consumer_inventory.py tools/watch3_r08_fota_manifest_probe.py tools/watch3_r08_fota_package_registration_pull.py tools/watch3_r08_fota_handoff_pull.py tools/watch3_r08_recovery_script_pull.py tools/analyze_watch3_r08_fota_handoff_offline.py tools/watch3_r08_fota_services.py tools/analyze_watch3_r08_fota_elf.py
+          python3 -m py_compile tools/watch3_r08_android_sdb.py tools/watch3_r08_root_prereq.py tools/watch3_r08_fota_artifact_pull.py tools/watch3_r08_fota_consumer_inventory.py tools/watch3_r08_fota_manifest_probe.py tools/watch3_r08_fota_package_registration_pull.py tools/watch3_r08_fota_handoff_pull.py tools/watch3_r08_recovery_script_pull.py tools/analyze_watch3_r08_fota_handoff_offline.py tools/watch3_r08_fota_services.py tools/analyze_watch3_r08_fota_elf.py tools/watch3_r840x_fota_owner_readonly.py
           python3 -m unittest discover -s tests -p test_watch3_r08_android_sdb.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_root_prereq.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_fota_artifact_pull.py -v
@@ -70,6 +74,8 @@ jobs:
           python3 -m unittest discover -s tests -p test_watch3_r08_fota_handoff_offline.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_fota_elf_offline.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_fota_services.py -v
+          python3 -m unittest discover -s tests -p test_watch3_r840x_fota_owner_readonly.py -v
+          WATCH3_REQUIRE_PRIVATE_DBUS=1 python3 -m unittest discover -s tests -p test_watch3_r840x_fota_owner_real_dbus.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_live_boot_probe.py -v
           python3 - <<'PY'
           from pathlib import Path

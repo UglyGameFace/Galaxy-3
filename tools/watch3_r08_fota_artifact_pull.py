@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 import socket
@@ -124,6 +125,48 @@ def pull_fota(sock, key_path: Path, outfile, *, component="fota-service") -> dic
     """Use only SDB OPEN sync:, WRTE RECV exact allowlisted path, OKAY/CLSE."""
     if component not in EXECUTABLES:
         raise ArtifactPullError("COMPONENT_NOT_ALLOWLISTED")
+    data = _receive_arm_elf(sock, key_path, outfile, EXECUTABLES[component])
+    return {
+        "schema": "uglyos-r840x-sdb-fota-artifact-v1",
+        "status": "READABLE_BINARY_COPIED_FROM_AUTHENTICATED_SDB",
+        "candidate": ("com.samsung.fota-consumer/fota-service" if component == "fota-service"
+                      else "com.samsung.tizen.update-client/updateclient"),
+        **data,
+        "target_model_authenticated": False,
+        "root_obtained": False,
+        "custom_kernel_boot_proven": False,
+        "stock_recovery_proven": False,
+        "watch_write_performed": False,
+        "notice": "A retrieved ELF is a research input, not a boot method or exploit.",
+    }
+
+
+def vendor_executable_path(raw: str) -> bytes:
+    """Validate a kernel proc-exe readout; not a new user-selected file interface."""
+    if not isinstance(raw, str):
+        raise ArtifactPullError("OWNER_EXECUTABLE_PATH_UNRECOGNIZED")
+    value = raw.removesuffix("\n").removesuffix("\r")
+    prefixes = ("/usr/bin/", "/usr/sbin/", "/usr/libexec/", "/usr/apps/", "/opt/usr/apps/")
+    if (not re.fullmatch(r"/[A-Za-z0-9_./-]{1,239}", value) or
+            not value.startswith(prefixes) or
+            any(p in ("", ".", "..") for p in value.split("/")[1:]) or
+            value.endswith("/")):
+        raise ArtifactPullError("OWNER_EXECUTABLE_PATH_UNRECOGNIZED")
+    return value.encode("ascii")
+
+
+def _receive_arm_elf(sock, key_path: Path, outfile, path: bytes) -> dict[str, object]:
+    """Authoritative bounded sync RECV reused for fixed and owner-observed files.
+
+    The owner collector supplies only a path obtained from a stable bus/PID
+    snapshot and proc-exe read. This helper never resolves user CLI paths.
+    """
+    if not isinstance(path, bytes):
+        raise ArtifactPullError("OWNER_EXECUTABLE_PATH_UNRECOGNIZED")
+    try:
+        vendor_executable_path(path.decode("ascii"))
+    except UnicodeDecodeError:
+        raise ArtifactPullError("OWNER_EXECUTABLE_PATH_UNRECOGNIZED") from None
     channel = Connection(sock, key_path)
     try:
         channel.handshake()
@@ -138,7 +181,6 @@ def pull_fota(sock, key_path: Path, outfile, *, component="fota-service") -> dic
         raise ArtifactPullError("SDB_SYNC_SERVICE_REFUSED")
     if (kind != b"OKAY" or local != LOCAL_STREAM or remote == 0 or body):
         raise ArtifactPullError("SDB_SYNC_OPEN_NOT_ACKNOWLEDGED")
-    path = EXECUTABLES[component]
     # RECV is read-only by specification. SEND/STAT/DELETE are never sent.
     try:
         channel.send(b"WRTE", LOCAL_STREAM, remote,
@@ -174,19 +216,9 @@ def pull_fota(sock, key_path: Path, outfile, *, component="fota-service") -> dic
         raise ArtifactPullError("SDB_SYNC_DID_NOT_COMPLETE")
     elf = decoder.elf_kind()
     return {
-        "schema": "uglyos-r840x-sdb-fota-artifact-v1",
-        "status": "READABLE_BINARY_COPIED_FROM_AUTHENTICATED_SDB",
-        "candidate": ("com.samsung.fota-consumer/fota-service" if component == "fota-service"
-                      else "com.samsung.tizen.update-client/updateclient"),
         "bytes": decoder.byte_count,
         "sha256": decoder.digest.hexdigest(),
         "elf_kind": elf,
-        "target_model_authenticated": False,
-        "root_obtained": False,
-        "custom_kernel_boot_proven": False,
-        "stock_recovery_proven": False,
-        "watch_write_performed": False,
-        "notice": "A retrieved ELF is a research input, not a boot method or exploit.",
     }
 
 

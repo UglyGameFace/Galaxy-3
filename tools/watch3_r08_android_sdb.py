@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Termux-to-Tizen read-only SDB, without a computer or Samsung SDK.
 
-Only fixed boot, storage or battery sysfs reads in explicit allowlists may run.
+Only explicitly allowlisted system metadata reads and FOTA registry queries run.
+The FOTA owner collector can also read one observed PID's proc-exe symlink.
 No root, reboot, device writes, partition reading, install or flashing.
 The battery sysfs uevent response is not yet verified on physical SM-R840X.
 """
@@ -120,6 +121,17 @@ ALLOWED_PROBES.update(CRITICAL_GEOMETRY_PROBES)
 # are a separate, opt-in, fixed read-only set.
 ALLOWED_PROBES.update(ROOT_PATH_PROBES)
 ALLOWED_PROBES.update(FOTA_PATH_PROBES)
+
+# The original owner-extracted fota-service ELF names fota.consumer on the
+# SYSTEM bus. Query the bus daemon's registry only, never that service itself.
+# In particular these cannot invoke Launch or auto-activate fota.consumer.
+FOTA_OWNER_REGISTRY_PROBES = {
+    "fota_registry_id": "dbus-send --system --print-reply --reply-timeout=1500 --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetId",
+    "fota_registry_owner": "dbus-send --system --print-reply --reply-timeout=1500 --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:fota.consumer",
+    "fota_registry_pid": "dbus-send --system --print-reply --reply-timeout=1500 --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetConnectionUnixProcessID string:fota.consumer",
+    "fota_registry_uid": "dbus-send --system --print-reply --reply-timeout=1500 --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetConnectionUnixUser string:fota.consumer",
+}
+ALLOWED_PROBES.update(FOTA_OWNER_REGISTRY_PROBES)
 
 PORT = 26101
 VERSION = 0x00100000
@@ -265,6 +277,20 @@ class Connection:
     def shell(self, operation, style="standard"):
         if operation not in ALLOWED_PROBES:
             raise SdbError("Operation not in the fixed read-only allowlist")
+        return self._shell_command(ALLOWED_PROBES[operation], style)
+
+    def process_executable(self, pid: int, style="standard"):
+        """Read one proc symlink for a registry-observed PID, never process memory.
+
+        The FOTA collector checks ownership before and after this read. No
+        caller-provided path or shell fragment is accepted by this interface.
+        """
+        if type(pid) is not int or not 1 <= pid <= 4194304:
+            raise SdbError("Invalid registry-observed process ID")
+        return self._shell_command(f"readlink /proc/{pid}/exe", style)
+
+    def _shell_command(self, command, style):
+        """Shared SDB framing for the two validated read-only entry points."""
         if style not in {"standard", "tizen-command"}:
             raise SdbError("Unknown read-only SDB shell service style")
         # Classic watch SDB uses "shell:cat ..."; Samsung's Tizen service
@@ -273,7 +299,7 @@ class Connection:
         destination = ("shell:" if style == "standard" else "shell:0 ")
         local = 2
         self.send(b"OPEN", local, 0,
-                  (destination + ALLOWED_PROBES[operation]).encode() + b"\x00")
+                  (destination + command).encode() + b"\x00")
         remote = None
         output = bytearray()
         payload_frames = 0
