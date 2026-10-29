@@ -95,6 +95,62 @@ handoff** between its accessory archive directory and recovery metadata.
 It does not supply `delta.ua`, a signed rescue image, original S-BOOT,
 authenticated PIT, writable attack surface or unsigned-kernel acceptance.
 
+## Crosscheck with the original accessory service
+
+After the preparation-script read failed, recovered the owner's earlier
+private `watch3-fota-service.bin` upload and independently reverified its
+87,036-byte length and SHA-256
+`008c67e782eb3d97b0ddb7abc7606b86dc493576c24de476a2110d6e5a681757`.
+This is the accessory service, distinct from the consumer above. No new
+watch request or vendor-code execution was involved.
+
+| Accessory-service stage | Original ELF-relative evidence | Bounded conclusion |
+| --- | --- | --- |
+| SAP connection admission | `0x6c24` calls `launch_fota_consumer("Launch")`; `0x6c3c` calls `acceptServiceConnection` on the accepted branch | The consumer launch attempt precedes accepting this connection. The library's peer authentication and actual caller policy are not established by this wrapper. |
+| File completion | `0x6732` calls `chmod` with mode `0x1b6` (0666); state comparison at `0x6754` is 30; success branch `0x680e` / `0x6810` sets state 50 | This callback changes ordinary mode bits before its status/state handling. Its success transition is 50, not the installation state 60. MAC policy and an attacker's write access are unknown. |
+| Request dispatch | Parser call `0x8632`; guarded TBH table at `0x866e`, indexed by parsed structure field `+0x34`; entry 8 resolves to `0x8838` | That branch loads 60 and calls `set_fota_consumer_state` at `0x883a`, then builds a response at `0x8842`. No protocol request was sent. |
+| Notification bridge | A successful `send_msg_to_sap` at `0x86de` reaches `_do_device_control` at `0x8754`; that routine compares states 60/65 | On its state-60 branch, `0x760a` calls `vconf_set_int` for `db/fotaconsumer/ui_state`. The state setter at `0xaaa4` uses `db/fotaconsumer/state`. |
+| Consumer-side continuation | The independently captured consumer registers its callback for the same `db/fotaconsumer/ui_state` key at `0xcc28` | This connects the two original wrappers' static handoff to the already reviewed update path. Runtime notification delivery, permissions and successful installation remain untested. |
+
+Verified 14 selected accessory calls with both the existing Thumb decoder
+and Capstone 5.0.6, six actual PLT/GOT jump-slot resolutions, seven control
+assertions and two state-key references. The earlier callback observations
+therefore do not imply that receiving a file automatically installs it.
+No archive-signature gate was observed **inside this completion callback**;
+upstream library/phone validation and later recovery checks remain unknown.
+The consumer's named download-completion check also inspects configured
+object size and actual file size; its name alone does not establish
+cryptographic verification.
+
+## The separate Install method reaches an imported implementation
+
+Further review of the same original consumer distinguishes its D-Bus
+`Install` branch from the accessory state-notification path above. The
+method comparison calls `g_strcmp0` at `0xbf62`. On the matching branch,
+after the visible storage-size checks, `0xc062` calls the helper at
+`0xb144`. That helper loads `(r0,r1,r2)=(4,1,0)` and calls
+`_IPC_interfaces` at `0xb2d2`.
+
+Inside `_IPC_interfaces`, `0x7d86` calls `sync_agent_dm_set_task_id`.
+The event dispatch subtracts one at `0x7da4`, bounds-checks at `0x7da6`,
+then uses the actual TBB table at `0x7daa`. Its event-4 entry at `0x7db1`
+contains `0x41`, resolving to `0x7e30`. That branch copies the retained
+argument 1 into `r0` and calls imported `sync_agent_dm_fota_install` at
+`0x7e32` through PLT `0x3a44`, GOT `0x252a8`.
+
+The original ELF's dynamic dependency list includes `libsync-agent.so.0`.
+The implementation of the imported call is not in the captured consumer;
+its runtime provider, installed file path and validation behavior remain
+unobserved. Thus a visible caller without a signature check cannot establish
+that the full installation pipeline omits one. This identifies a concrete
+missing implementation rather than another guessed script name.
+
+Independently matched six selected immediate calls with the existing
+standard-library decoder and Capstone, three actual PLT/GOT relocations,
+the TBB target and fixed argument loads. These additional manual checks
+are separate from the analyzer's existing 28-call report. No method was
+invoked and no vendor code was executed.
+
 ## Reproduce the offline review
 
 This extends the existing analyzer; its default accessory `fota-service`
@@ -113,32 +169,31 @@ evidence and limitations. No credentials, arbitrary strings, raw vendor
 code, network or watch interaction are involved. A changed/sibling image
 must receive a separate review and cannot inherit these findings.
 
-## Next evidence: the newly identified preparation script
+## Preparation-script acquisition result: blocked
 
 The actual original instruction at `0x63da` resolves the literal
 `/usr/bin/rw-update-prepare.sh FOTA` and passes it to `system_cmd` at
-`0x63de`. That establishes **one new exact file target**. Its contents and
-accessibility are not yet known. Do not repeat the previously denied
-`recovery-update.sh` or `rw-update-systemd.sh` reads.
+`0x63de`. The owner ran merged PR #121's exact `--component update-prepare`
+read on normal Tizen and received
+`RECOVERY_SCRIPT_ERROR: REMOTE_MISSING_DENIED_OR_UNREADABLE`.
 
-The existing fixed script reader now supports `--component update-prepare`:
+That category comes from the remote SDB sync FAIL after the bounded read
+request, not a local report collision or a successful capture. It does not
+distinguish absence from denied/unreadable content. No script bytes or JSON
+report were acquired. The local directory may exist empty; the owner's
+`&&` command chain stopped before packaging, so there is no new ZIP to send.
 
-```sh
-cd ~/Galaxy-3 && git switch main && git pull --ff-only
-python tools/watch3_r08_recovery_script_pull.py \
-  --watch-ip 10.115.12.131 --component update-prepare
-cat ~/watch3-r840x-update-prepare-evidence/update-prepare-report.json
-```
+Record this unsuccessful sync read alongside the earlier unsuccessful
+`recovery-update.sh` and `rw-update-systemd.sh` reads. Repeating the unchanged
+collector would not distinguish their causes: its shared decoder discards
+the remote FAIL text and emits the combined category. This is a limitation
+of the diagnosis, not proof of permanent inaccessibility or a restriction
+on the owner's authorized investigation. The installed ELF's literal remains
+evidence of intended behavior, not proof that the script exists on this
+installed image.
 
-Use normal Tizen and the current local watch IP. This performs a single
-authenticated `sync:RECV`, capped at 8 KiB, using the authoritative existing
-reader. **It does not run the script or pass `FOTA` to any command.** It
-creates a separate private no-overwrite directory containing the captured
-script and report. If denied/unavailable, preserve the categorical error;
-do not retry privileged paths or activate the consumer to make it work.
-
-If acquired, privately attach the script/report for offline inspection of
-the next trust boundary. Runtime privileges, bus/MAC access, prior package
-verification, the recovery verifier/update agent and exact-model signed
-stock rescue remain open. No live exploit, update, image write, reset or
-repartition is authorized by this evidence.
+Offline cross-artifact analysis above used the original files already
+captured. The remaining proof gates are runtime privileges/bus/MAC access,
+archive control and prior verification, the original recovery verifier and
+update agent, plus exact-model signed rescue/S-BOOT and tested return to
+stock. A working unlock or recovery procedure has not been established.
