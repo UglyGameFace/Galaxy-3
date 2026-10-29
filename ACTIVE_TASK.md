@@ -10,7 +10,8 @@ not an owner-permission decision.
 ## Current implementation
 
 Base main `518d9eb` includes PR #122. No overlapping open PR was present at
-the start. Current branch: `issue-47-sync-agent-install-implementation`.
+the start. Implementation: PR #123; source branch
+`issue-47-sync-agent-install-implementation`.
 
 The original consumer's separate Install path reaches imported
 `sync_agent_dm_fota_install`. Its actual ELF lists `libsync-agent.so.0`.
@@ -61,10 +62,12 @@ output; existing captures remain valid and do not need recapture.
 ## Validation and integration
 
 Local focused suite: 193 passing cases; one ARM cross-compiler fixture skipped
-because clang/lld are absent here. CI requires that compiled ARM fixture to
-run, alongside the complete 194-case guarded suite, two real private D-Bus
-tests and one real systemd test on both Ubuntu 22.04 and 24.04. The compiled
-fixture is original tiny test code and is never executed.
+because clang/lld are absent here. All seven CI workflows passed on production
+head `526eaabd`. The complete 194-case guarded suite, including the compiled
+ARM fixture, two real private D-Bus tests and one real systemd test passed
+without skips on both Ubuntu 22.04 and 24.04 (run 40945636834). The compiled
+fixture is original tiny test code and is never executed. The integration
+status-record update changes no production code.
 
 Both private original Samsung ELFs still pass their pinned offline analyses;
 the consumer's reviewed 28-call profile is unchanged. No original vendor
