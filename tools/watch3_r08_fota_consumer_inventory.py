@@ -82,6 +82,17 @@ SYSTEMD_FOTA_UNIT = re.compile(
 MAX_SYSTEMD_DENTS = 1024
 MAX_REPORTED_FOTA_UNITS = 32
 MAX_PACKAGE_INDEX_DENTS = 2048
+# The consumer's original DT_NEEDED names this exact SONAME. These are
+# standard 32-bit system-library roots, inspected via the already working
+# SDB LIST service; no command-line helper or arbitrary path is required.
+FOTA_LIBRARY_DIRECTORIES = {
+    "sync_agent_usr_lib": b"/usr/lib",
+    "sync_agent_base_lib": b"/lib",
+}
+SYNC_AGENT_SONAME = "libsync-agent.so.0"
+SYNC_AGENT_LIBRARY_NAME = re.compile(re.escape(SYNC_AGENT_SONAME) + r"(?:[.][0-9]+)*\Z")
+MAX_LIBRARY_DENTS = 8192
+MAX_REPORTED_LIBRARIES = 16
 CANDIDATE_NAME = re.compile(r"(?:fota|update)[a-z0-9._-]{0,63}\Z")
 EXACT_BIN_NAMES = frozenset((
     "fota-service", "fota-consumer", "fota_consumer",
@@ -156,7 +167,8 @@ class DirectoryDecoder:
             del self.buffer[:namelen]
             self.pending = None
             self.count += 1
-            if self.count > (MAX_PACKAGE_INDEX_DENTS
+            if self.count > (MAX_LIBRARY_DENTS if scope in FOTA_LIBRARY_DIRECTORIES else
+                             MAX_PACKAGE_INDEX_DENTS
                              if scope in PACKAGE_INDEX_DIRECTORIES else
                              MAX_SYSTEMD_DENTS if scope in SYSTEMD_DIRECTORIES else
                              MAX_DENTS):
@@ -206,6 +218,12 @@ class DirectoryDecoder:
                     "kind": mode_kind(mode),
                     "bytes": size if size <= 64 * 1024 else "OVER_64_KIB",
                 }
+            elif scope in FOTA_LIBRARY_DIRECTORIES and SYNC_AGENT_LIBRARY_NAME.fullmatch(name):
+                if len(self.candidates) < MAX_REPORTED_LIBRARIES:
+                    self.candidates[name] = {
+                        "kind": mode_kind(mode),
+                        "bytes": size if size <= 8 * 1024 * 1024 else "OVER_8_MIB",
+                    }
             elif scope == "fota_save_directory" and name == "delta.tar":
                 self.archive = {
                     "kind": mode_kind(mode),
@@ -218,6 +236,13 @@ class DirectoryDecoder:
     def report(self, scope: str) -> dict:
         if not self.finished:
             raise InventoryError("DIRECTORY_LIST_NOT_COMPLETED")
+        if scope in FOTA_LIBRARY_DIRECTORIES:
+            return {
+                "status": "LIST_COMPLETE" if self.count else "EMPTY_OR_INACCESSIBLE",
+                "matching_sync_agent_libraries": self.candidates,
+                "matching_names_truncated": len(self.candidates) >= MAX_REPORTED_LIBRARIES,
+                "other_or_unreported_entries": max(0, self.count - len(self.candidates)),
+            }
         if scope == "consumer_binary_directory":
             return {
                 "status": "LIST_COMPLETE" if self.count else "EMPTY_OR_INACCESSIBLE",
@@ -302,6 +327,8 @@ def list_one(sock, key_path: Path, scope: str) -> dict:
         path = PACKAGE_INDEX_DIRECTORIES[scope]
     elif scope in SYSTEMD_DIRECTORIES:
         path = SYSTEMD_DIRECTORIES[scope]
+    elif scope in FOTA_LIBRARY_DIRECTORIES:
+        path = FOTA_LIBRARY_DIRECTORIES[scope]
     else:
         raise InventoryError("SCOPE_NOT_ALLOWED")
     conn = Connection(sock, key_path)

@@ -147,8 +147,11 @@ missing implementation rather than another guessed script name.
 
 The [existing artifact reader](watch3-r08-fota-artifact-readonly.md) now has
 an explicit `sync-agent` mode that resolves this SONAME from the watch's
-linker cache, copies and identifies one library, and packages the result
-in a single Termux run. This collector has not yet been run on the watch.
+system-library directory metadata, copies and identifies one library, and
+packages the result in a single Termux run. The original cache-command
+variant ran on the watch and reported `DEPENDENCY_CACHE_TOOL_UNAVAILABLE`;
+its ZIP contained only a failure report. The corrected native LIST/RECV
+variant has not yet been run on the watch.
 
 Independently matched six selected immediate calls with the existing
 standard-library decoder and Capstone, three actual PLT/GOT relocations,
