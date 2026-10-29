@@ -159,14 +159,14 @@ service activation, firmware write, root or custom boot was reported.
 Live-owner UID remains unset, and `configured_user=fota` supplies neither
 a numeric runtime UID nor root access.
 
-The actual copied bytes have not yet been received for offline examination
-in this continuation. Preserve the phone's existing capture and attach
-`fota-configured-executable.bin`, preferably with `fota-unit-report.json`.
-No additional watch probe is needed. On receipt, independently verify the
-length/hash above before examining code for endpoint registration/caller
-checks, update validation and the recovery handoff. Keep the original ELF
-private and never execute it. Metadata and a reported hash alone do not
-establish a flaw or an accepted unsigned firmware path.
+The owner subsequently attached `watch3-fota-consumer-evidence.zip`.
+Independent byte/hash verification succeeded, and the original code has
+now been examined offline. The [consumer trust-boundary report](watch3-r840x-consumer-trust-boundaries.md)
+records the actual dispatcher, caller-classification behavior, nested
+pre-update program execution and recovery-preparation handoff. It includes
+the reproducible exact-file analyzer and one newly code-evidenced script
+read. The vendor ELF remains private and was never executed. No root,
+accepted unsigned firmware or stock restoration has been demonstrated.
 
 ## Source acquisition crosscheck
 

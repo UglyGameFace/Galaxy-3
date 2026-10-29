@@ -68,6 +68,54 @@ def sent_frames(sock):
 
 
 class RecoveryScriptTests(unittest.TestCase):
+    def test_update_prepare_reads_the_new_literal_proven_by_the_original_consumer_only(self):
+        remote = b"/usr/bin/rw-update-prepare.sh"
+        self.assertEqual(handoff.EVIDENCED_UPDATE_PREPARE_SCRIPT_PATH, remote)
+        sock = success()
+        with patch.object(script.socket, "create_connection", return_value=sock) as connect:
+            raw = script.read_fixed_script("10.0.0.65", Path("/unused"), component="update-prepare")
+        self.assertTrue(raw.startswith(b"#!/bin/sh"))
+        self.assertEqual(connect.call_count, 1)
+        frames = sent_frames(sock)
+        self.assertEqual(frames[2][3], SYNC_HDR.pack(b"RECV", len(remote)) + remote)
+        self.assertNotIn(b"recovery-update.sh", bytes(sock.sent))
+        for prohibited in (b"SEND", b"shell:", b"exec:", b"/dev/", b"FOTA"):
+            self.assertNotIn(prohibited, bytes(sock.sent))
+
+    def test_update_prepare_output_is_separate_private_and_exclusive(self):
+        with tempfile.TemporaryDirectory() as td, patch.object(script.Path, "home", return_value=Path(td)), \
+                patch.object(script.socket, "create_connection", return_value=success()) as connect:
+            args = ["--watch-ip", "10.0.0.65", "--component", "update-prepare"]
+            self.assertEqual(script.main(args), 0)
+            folder = Path(td) / "watch3-r840x-update-prepare-evidence"
+            report = folder / "update-prepare-report.json"
+            data = json.loads(report.read_text())
+            self.assertEqual(data["remote_path"], "/usr/bin/rw-update-prepare.sh")
+            self.assertEqual(data["status"], "UPDATE_PREPARE_SCRIPT_READ_ONLY_RETRIEVED")
+            self.assertFalse(data["script_executed"])
+            self.assertFalse(data["watch_write_performed"])
+            self.assertEqual(folder.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(report.stat().st_mode & 0o777, 0o600)
+            self.assertEqual((folder / "rw-update-prepare.sh").stat().st_mode & 0o777, 0o600)
+            before = report.read_bytes()
+            self.assertEqual(script.main(args), 1)
+            self.assertEqual(report.read_bytes(), before)
+            self.assertEqual(connect.call_count, 1)
+            self.assertFalse((Path(td) / "watch3-r840x-recovery-script-evidence").exists())
+
+    def test_update_prepare_denial_stops_and_unknown_component_cannot_connect(self):
+        with patch.object(script.socket, "create_connection", return_value=failure()) as connect:
+            with self.assertRaisesRegex(handoff.HandoffError, "REMOTE_MISSING_DENIED_OR_UNREADABLE"):
+                script.read_fixed_script("10.0.0.65", Path("/unused"), component="update-prepare")
+            self.assertEqual(connect.call_count, 1)
+        with patch.object(script.socket, "create_connection") as connect:
+            with self.assertRaisesRegex(handoff.HandoffError, "SCRIPT_COMPONENT_NOT_ALLOWLISTED"):
+                script.read_fixed_script("10.0.0.65", Path("/unused"), component="/etc/shadow")
+            connect.assert_not_called()
+        with patch.object(script.socket, "create_connection", return_value=success(b"x" * (handoff.MAX_FILE_BYTES + 1))):
+            with self.assertRaisesRegex(handoff.HandoffError, "REMOTE_FILE_EXCEEDS_EIGHT_KIB"):
+                script.read_fixed_script("10.0.0.65", Path("/unused"), component="update-prepare")
+
     def test_exact_observed_execstart_path_and_single_recv_only(self):
         self.assertEqual(handoff.EVIDENCED_RECOVERY_SCRIPT_PATH,
                          b"/usr/bin/recovery-update.sh")

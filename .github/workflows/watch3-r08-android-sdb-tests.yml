@@ -66,22 +66,31 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile tools/watch3_r08_android_sdb.py tools/watch3_r08_root_prereq.py tools/watch3_r08_fota_artifact_pull.py tools/watch3_r08_fota_consumer_inventory.py tools/watch3_r08_fota_manifest_probe.py tools/watch3_r08_fota_package_registration_pull.py tools/watch3_r08_fota_handoff_pull.py tools/watch3_r08_recovery_script_pull.py tools/analyze_watch3_r08_fota_handoff_offline.py tools/watch3_r08_fota_services.py tools/analyze_watch3_r08_fota_elf.py tools/watch3_r840x_fota_owner_readonly.py
-          python3 -m unittest discover -s tests -p test_watch3_r08_android_sdb.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r08_root_prereq.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r08_fota_artifact_pull.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r08_fota_consumer_inventory.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r08_fota_manifest_probe.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r08_fota_package_registration_pull.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r08_fota_handoff_pull.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r08_recovery_script_pull.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r08_fota_handoff_offline.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r08_fota_elf_offline.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r08_fota_services.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r840x_fota_owner_readonly.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r840x_fota_unit_readonly.py -v
+          python3 - <<'PY'
+          import socket
+          import unittest
+          from unittest.mock import patch
+          patterns = [
+              'test_watch3_r08_android_sdb.py', 'test_watch3_r08_root_prereq.py',
+              'test_watch3_r08_fota_*.py', 'test_watch3_r08_recovery_script_pull.py',
+              'test_watch3_r08_live_boot_probe.py',
+              'test_watch3_r840x_fota_owner_readonly.py',
+              'test_watch3_r840x_fota_unit_readonly.py',
+          ]
+          suite = unittest.TestSuite(unittest.defaultTestLoader.discover('tests', pattern=p)
+                                     for p in patterns)
+          # Actual older collision fixtures escaped their mock scopes and
+          # attempted a connection. Fix those fixtures and fail any future
+          # unmocked SDB connection before it can reach a network endpoint.
+          with patch.object(socket, 'create_connection',
+                            side_effect=AssertionError('Unmocked connection in NO WATCH fixtures')):
+              result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if not result.wasSuccessful():
+              raise SystemExit(1)
+          print('PASS: fake SDB suite passed with every unmocked connection rejected')
+          PY
           WATCH3_REQUIRE_PRIVATE_DBUS=1 python3 -m unittest discover -s tests -p test_watch3_r840x_fota_owner_real_dbus.py -v
           WATCH3_REQUIRE_SYSTEMD=1 python3 -m unittest discover -s tests -p test_watch3_r840x_fota_unit_real_systemd.py -v
-          python3 -m unittest discover -s tests -p test_watch3_r08_live_boot_probe.py -v
           python3 - <<'PY'
           from pathlib import Path
           workflow = Path('.github/workflows/watch3-r08-android-sdb-tests.yml').read_text()

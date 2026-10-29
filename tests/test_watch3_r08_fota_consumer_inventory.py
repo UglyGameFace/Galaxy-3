@@ -201,7 +201,8 @@ class FixedFotaDirectoryInventoryTests(unittest.TestCase):
                 self.assertEqual(main(), 0)
             old = target.read_bytes()
             self.assertEqual(target.stat().st_mode & 0o077, 0)
-            with patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+            with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                       return_value=peer([done()])), patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
                                             "--fota-package-root-only",
                                             "--report", str(target)]):
                 self.assertEqual(main(), 1)
@@ -280,7 +281,8 @@ class FixedFotaDirectoryInventoryTests(unittest.TestCase):
                 self.assertEqual(main(), 0)
             self.assertEqual(out.stat().st_mode & 0o077, 0)
             old = out.read_bytes()
-            with patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+            with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                       side_effect=[peer([done()]), peer([done()])]), patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
                                             "--fota-package-index-only",
                                             "--report", str(out)]):
                 self.assertEqual(main(), 1)
@@ -367,7 +369,8 @@ class FixedFotaDirectoryInventoryTests(unittest.TestCase):
                 self.assertEqual(main(), 0)
             before = output.read_bytes()
             self.assertEqual(output.stat().st_mode & 0o077, 0)
-            with patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+            with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                       side_effect=[peer([done()]) for _ in scopes]), patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
                                             "--fota-handoff-index-only",
                                             "--report", str(output)]):
                 self.assertEqual(main(), 1)
@@ -469,7 +472,8 @@ class FixedFotaDirectoryInventoryTests(unittest.TestCase):
                 self.assertEqual(main(), 0)
             self.assertEqual(out.stat().st_mode & 0o077, 0)
             old = out.read_bytes()
-            with patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
+            with patch("watch3_r08_fota_consumer_inventory.socket.create_connection",
+                       side_effect=[peer([done()]), peer([done()])]), patch.object(sys, "argv", ["tool", "--watch-ip", "10.0.0.65",
                                       "--report", str(out)]):
                 self.assertEqual(main(), 1)
             self.assertEqual(out.read_bytes(), old)

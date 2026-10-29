@@ -15,60 +15,67 @@ unsigned-kernel acceptance and a return-to-stock test are absent.
 
 ## Current continuation
 
-- Base: main `656f8a5`, PR #120 integrated, all seven workflows green.
-- Current work: record the successful physical configured-consumer capture;
-  offline analysis is waiting for the original captured bytes.
-- Owner supplied the physical PR #119 JSON: `NO_CURRENT_FOTA_OWNER`,
-  `watch_contacted=true`, no UID/executable/binary, no service activation.
-  This is an unowned name at that instant, not a transport failure or proof
-  of an absent consumer. Do not repeat that probe or start the consumer.
-- Owner ran PR #120's configured-unit mode successfully. The unit is
-  `Type=dbus`, `BusName=fota.consumer`, configured user/group `fota:fota`,
-  `ExecStart=/usr/bin/fota-consumer`, inactive/dead. Selected fields were
-  stable and the original ARM ELF reader copied 89,980 bytes to the phone.
-  Reported SHA-256:
+- Base: main `342eaa3`; PR #120 integrated and physically validated for a
+  read-only configured-consumer capture, not root or firmware operations.
+- Branch: `issue-47-original-consumer-trust-map`.
+- Owner attached the original consumer ELF and unit report in
+  `watch3-fota-consumer-evidence.zip`. Independently verified 89,980 bytes,
+  ARM ELF32 PIE, SHA-256
   `19ad8468c5e73821359b140cd99f8c3bc072b2d73ed7766b082b88f26c676a1a`.
-  No service activation, FOTA method or firmware write occurred.
-- This session has the report, not the copied ELF bytes. Verify size/hash
-  independently when the owner attaches the capture; do not claim to have
-  inspected its machine code or linked it to a vulnerability yet.
-- Configuration is distinct from live ownership/process UID. Manager/bus
-  and selected unit fields are rechecked before publishing a copy. No raw
-  responses, arguments, PIDs, timestamps or bus identities are saved.
-- Procedure and actual no-owner result:
-  `docs/watch3-r840x-existing-fota-owner.md`.
-- Samsung's exact R840X Korea detail page had no downloadable content;
-  unauthenticated detail API returned 401. No new signed rescue bytes.
-- Prior TV archive-root route was physically ruled out by missing
-  `sdbd-tarlauncher`; do not repeat it. Inaccessible scripts stay retired.
+  Build ID `bb62b3fe4f1f2ae02cd58c18dd39bff093a2a9cd`.
+- Original `/usr/bin/fota-consumer` registers the expected system-bus name
+  and object, callback code `0xba04`. Configured user/group `fota:fota`,
+  inactive/dead; no live UID or root access established.
+- The handler accepts a claimed PID, frees the supplied cookie, and uses
+  that PID's proc label to classify LaunchIp callers. It discards callback
+  sender/connection arguments. Bus policy and runtime access are unresolved;
+  no method was called and no exploitable authorization bypass is claimed.
+- Actual update entry is a vconf ui_state callback into do_device_control.
+  The original update wrapper extracts delta.ua, writes recovery DELTA.PATH,
+  extracts nested pre_update.tar and executes its pre_update_client_2 through
+  a shell-command helper, then calls rw-update-prepare.sh FOTA. No explicit
+  signature gate was observed inside this wrapper; earlier/later and library
+  checks remain unresolved. No target binary or script was run.
+- Extend the authoritative offline analyzer with a separate exact consumer
+  profile: 28 decoded calls, 15 relocation resolutions, 10 literal references,
+  eight control instructions, callback pointer and interface definitions.
+  Default accessory profile remains compatible; standard library only.
+- Extend the original bounded script reader for the newly code-evidenced
+  /usr/bin/rw-update-prepare.sh path, optional update-prepare component.
+  One read-only RECV, 8 KiB cap, separate private output; no script invocation.
+- Full evidence: `docs/watch3-r840x-consumer-trust-boundaries.md`.
+- Earlier no-current-owner query is preserved. Do not repeat it or start an
+  idle consumer. Prior TV tar route is ruled out by missing sdbd-tarlauncher.
+  Previously inaccessible recovery-update/rw-update-systemd scripts stay retired.
 
 ## Validation and integration
 
-Focused tests cover existing ownership, configured metadata, unsafe or
-multiple ExecStart records, private output, manager/bus changes, unit
-changes and denied copies. Real private D-Bus tests remain required.
-A separate required real systemd test passed against an inactive trap unit
-on disposable Ubuntu 22.04/24.04 runners, alongside the required real private
-D-Bus tests, without skips. PR #120's actual watch execution now confirms
-configured metadata and read-only ELF acquisition; no firmware acceptance,
-root or recovery behavior was tested. The uploaded bytes remain pending.
-Issue #47 stays open until physical restoration/custom boot are demonstrated.
+The exact uploaded original ELF passed the new semantic review locally;
+Capstone 5.0.6 independently matched all 28 selected call targets. All 180
+focused local regressions passed without skips. Mock tests
+cover decoder alignment/invalid inputs, strict profile pins, private output,
+fixed new RECV bytes, unknown component rejection, denial and byte cap.
+Five older collision fixtures had escaped their socket mock scopes; corrected
+those scopes. All 180 fixtures also passed with unmocked create_connection
+calls explicitly rejected, and CI now enforces that condition.
+Existing SDB/FOTA regression and real host integration checks remain required
+in CI. A green host test is not physical unlocking or restoration.
+The new update-prepare read has not run on the physical watch yet.
+Issue #47 stays open until stock restoration/custom boot are demonstrated.
 
 ## Decisive blockers and next step
 
 1. Authentic exact-R840X original S-BOOT and complete signed stock rescue set,
-   or an independently verified compatible signed replacement, remain missing.
+   or independently verified compatible signed replacement, remain missing.
 2. This host has no direct authenticated connection to the physical watch.
-3. Firmware-specific bootloader behavior, recovery after boot failure and
-   custom-kernel acceptance remain unverified.
+3. Bus/MAC policy, archive writability, runtime privileges, upstream verification
+   and later recovery/bootloader acceptance remain unverified.
 
-Next step: owner attaches the existing
-`~/watch3-r840x-fota-unit-evidence/fota-configured-executable.bin`, preferably
-packaged with `fota-unit-report.json`. No further watch query is needed.
-Verify 89,980 bytes and the reported hash, then inspect the original ELF
-offline for D-Bus registration/authorization, update-file validation,
-privilege transitions and recovery handoff. Never execute the vendor file
-or infer a signature bypass from strings/imports alone.
+Next normal-Tizen Termux read after validated integration:
+`python tools/watch3_r08_recovery_script_pull.py --watch-ip <current local IP>
+--component update-prepare`. Inspect the private script/report offline if
+acquired; if denied/unavailable, analyze that outcome before any new request.
+No default-mode rerun of recovery-update.sh and no FOTA/archive submission.
 Continue exact-model restoration sourcing when a concrete new lead exists.
 
 Do not repeat sibling scans or GUI builds as substitutes. Preserve the

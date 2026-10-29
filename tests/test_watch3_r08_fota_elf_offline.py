@@ -96,6 +96,53 @@ def fake_elf(*, with_sections=True, corrupt=None, private_marker=b"") -> bytes:
 
 
 class R840XFotaOfflineElfTests(unittest.TestCase):
+    def test_thumb_call_decoder_matches_independently_reviewed_calls_and_alignment(self):
+        # Instruction examples only, not a firmware image or an unlock test.
+        for address, encoded, expected in (
+            (0x6348, "fef718f8", ("BL", 0x437C)),
+            (0x6686, "fff7a3fd", ("BL", 0x61D0)),
+            (0x6216, "fdf7feed", ("BLX", 0x3E14)),
+            (0x1002, "00f000f8", ("BL", 0x1006)),
+            (0x1002, "00f000e8", ("BLX", 0x1004)),
+        ):
+            with self.subTest(address=address):
+                self.assertEqual(module.thumb_call_target(bytes.fromhex(encoded), address), expected)
+
+    def test_thumb_decoder_rejects_non_calls_truncation_odd_addresses_and_reserved_blx(self):
+        for instruction, address in ((b"\0\0", 0), (b"\0" * 4, 0),
+                                     (bytes.fromhex("00f001e8"), 0),
+                                     (bytes.fromhex("00f000f8"), 1)):
+            with self.assertRaises(module.OfflineELFError):
+                module.thumb_call_target(instruction, address)
+        self.assertEqual(module.arm_immediate(0x001), 1)
+        self.assertEqual(module.arm_immediate(0x401), 0x01000000)
+        self.assertEqual(module.arm_immediate(0xC80), 0x8000)
+
+    def test_consumer_profile_cannot_accept_a_sibling_or_caller_supplied_hash(self):
+        sample = fake_elf()
+        with self.assertRaisesRegex(module.OfflineELFError, "SOURCE_FILE_SIZE_MISMATCH"):
+            module.analyze(sample, component="fota-consumer")
+        padded = sample + b"\0" * (module.CONSUMER_BYTES - len(sample))
+        with self.assertRaisesRegex(module.OfflineELFError, "SOURCE_SHA256_MISMATCH"):
+            module.analyze(padded, component="fota-consumer")
+        with self.assertRaisesRegex(module.OfflineELFError, "COMPONENT_PROFILE_MISMATCH"):
+            module.analyze(sample, hashlib.sha256(sample).hexdigest(), len(sample), component="fota-consumer")
+        with self.assertRaisesRegex(module.OfflineELFError, "CONSUMER_REVIEW_REQUIRES_ORIGINAL_BYTES"):
+            module.reviewed_consumer(padded, [], [])
+        with self.assertRaisesRegex(module.OfflineELFError, "UNKNOWN_FOTA_COMPONENT"):
+            module.analyze(sample, component="arbitrary")
+
+    def test_consumer_default_uses_existing_phone_capture_and_rejects_wrong_bytes_before_output(self):
+        with tempfile.TemporaryDirectory() as td, patch.object(module.Path, "home", return_value=Path(td)):
+            folder = Path(td) / "watch3-r840x-fota-unit-evidence"
+            folder.mkdir()
+            original = folder / "fota-configured-executable.bin"
+            original.write_bytes(fake_elf())
+            before = original.read_bytes()
+            self.assertEqual(module.main(["--component", "fota-consumer"]), 1)
+            self.assertEqual(original.read_bytes(), before)
+            self.assertFalse((Path(td) / "watch3-r840x-fota-consumer-static-analysis.json").exists())
+
     def test_parses_dynamic_dependencies_and_allowlisted_imports(self):
         report = module.analyze(fake_elf())
         self.assertEqual(report["status"], "TEST_ELF_ANALYZED")
