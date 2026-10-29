@@ -37,6 +37,9 @@ OBSERVED_FILES = {
 # already downloaded 238-byte recovery-update.service unit. It has not
 # yet established whether SDB RECV permits access to the script itself.
 EVIDENCED_RECOVERY_SCRIPT_PATH = b"/usr/bin/recovery-update.sh"
+# Actual original consumer ELF SHA-256 19ad8468...c676a1a: literal resolved
+# at 0x63da and passed to system_cmd at 0x63de. Read only, never invoke.
+EVIDENCED_UPDATE_PREPARE_SCRIPT_PATH = b"/usr/bin/rw-update-prepare.sh"
 MAX_FILE_BYTES = 8 * 1024
 REPORT_NAME = "fota-handoff-report.json"
 SCHEMA = "uglyos-r840x-exact-fota-handoff-recv-v1"
@@ -60,6 +63,7 @@ def receive_one(sock, key_path: Path, remote_path: bytes) -> bytes:
     """Exactly one SDB OPEN sync: plus read-only RECV for a fixed-path caller."""
     permitted = {item[0] for item in OBSERVED_FILES.values()}
     permitted.add(EVIDENCED_RECOVERY_SCRIPT_PATH)
+    permitted.add(EVIDENCED_UPDATE_PREPARE_SCRIPT_PATH)
     if remote_path not in permitted:
         raise HandoffError("REMOTE_PATH_NOT_ALLOWLISTED")
     conn = Connection(sock, key_path)

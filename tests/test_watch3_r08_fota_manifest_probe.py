@@ -148,7 +148,8 @@ class ManifestReadOnlyTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o077, 0)
             raw = path.read_bytes()
             self.assertNotIn(b"private-watch", raw)
-            with patch.object(sys, "argv", ["script", "--watch-ip", "10.0.0.65",
+            with patch("watch3_r08_fota_manifest_probe.socket.create_connection",
+                       side_effect=[response(sample_xml())]), patch.object(sys, "argv", ["script", "--watch-ip", "10.0.0.65",
                                            "--report", str(path)]):
                 self.assertEqual(manifest.main(), 1)
             self.assertEqual(raw, path.read_bytes())
