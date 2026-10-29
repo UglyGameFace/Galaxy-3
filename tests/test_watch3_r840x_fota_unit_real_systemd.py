@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import watch3_r840x_fota_owner_readonly as owner
@@ -48,7 +49,19 @@ class RealSystemdPropertiesTests(unittest.TestCase):
                 bus = owner.parse_reply(self.command("fota_registry_id"), "id")
                 manager = owner.parse_reply(self.command("fota_unit_manager_owner"), "owner")
                 for _ in range(2):
-                    observed = owner.configured_unit(self.command("fota_unit_properties"))
+                    raw = self.command("fota_unit_properties")
+                    paths = [line.split("=", 1)[1] for line in raw.splitlines()
+                             if line.startswith("FragmentPath=")]
+                    self.assertEqual(len(paths), 1)
+                    # Ubuntu 22 may expose its /lib alias; Ubuntu 24 uses
+                    # /usr/lib. Verify the actual fixture inode first. Change
+                    # only the test's expected location, not the raw reply or
+                    # the production R840X exact-path policy.
+                    self.assertIn(paths[0], (str(fragment), "/lib/systemd/system/" + owner.UNIT_ID))
+                    self.assertTrue(Path(paths[0]).samefile(fragment))
+                    with patch.object(owner, "UNIT_FRAGMENT", paths[0]):
+                        observed = owner.configured_unit(raw)
+                    self.assertEqual(observed["fragment_path"], paths[0])
                     self.assertEqual(observed["unit_id"], owner.UNIT_ID)
                     self.assertEqual(observed["configured_executable"], "/usr/bin/touch")
                     self.assertEqual(observed["configured_user"], "root")
@@ -59,7 +72,8 @@ class RealSystemdPropertiesTests(unittest.TestCase):
                     self.assertFalse(marker.exists(), "show must never execute the trap unit")
                 self.assertEqual(owner.parse_reply(self.command("fota_registry_id"), "id"), bus)
                 self.assertEqual(owner.parse_reply(self.command("fota_unit_manager_owner"), "owner"), manager)
-                print("PASS: actual systemctl show parsed twice; trap unit stayed inactive, no start marker")
+                print("PASS: unmodified systemctl show parsed twice; fixture inode verified; "
+                      "trap unit stayed inactive, no start marker")
             finally:
                 remove = subprocess.run(["sudo", "-n", "rm", "--", str(fragment)],
                                         text=True, capture_output=True, timeout=8)

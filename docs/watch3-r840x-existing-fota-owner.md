@@ -105,7 +105,7 @@ Use the current local watch IP, with normal Tizen running. The mode:
    `fota-consumer.service`. It selects unit identity/state, configured
    user/group, bus name, fragment path and `ExecStart`. `show` may load
    configuration into manager memory; it does not start, enable, reload or
-   stop the unit. No journal or environment is read.
+   stop the unit. No journal or environment is included in its output.
 3. Accepts only the exact observed unit ID/fragment path, a loaded unit and
    a single safe vendor executable in `ExecStart`. Arguments are ignored;
    neither the configured executable nor its arguments are ever executed.
@@ -159,3 +159,7 @@ Configured-unit tests also run the literal show command against a real
 inactive disposable trap unit on Ubuntu 22.04/24.04. CI requires the real
 manager and tools; missing prerequisites fail rather than skip. Only that
 disposable host fixture is created/removed; no watch is connected.
+The host fixture verifies its actual inode before accommodating Ubuntu 22's
+`/lib` directory alias in the test's expected location. Its raw show output
+is parsed unmodified. Production still requires the exact physically listed
+R840X `/usr/lib/systemd/system/fota-consumer.service` path.

@@ -194,7 +194,7 @@ class ConfiguredUnitTests(unittest.TestCase):
                 self.assertIsNone(result["configured_unit"])
                 self.assertEqual([p.name for p in dest.iterdir()], [owner.UNIT_REPORT])
 
-    def test_denied_or_non_elf_copy_keeps_only_configured_metadata_and_failure(self):
+    def test_denied_copy_keeps_only_configured_metadata_and_failure(self):
         def denied(*args):
             raise ArtifactPullError("REMOTE_FILE_MISSING_DENIED_OR_UNREADABLE")
         with tempfile.TemporaryDirectory() as tmp:
