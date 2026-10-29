@@ -15,17 +15,23 @@ unsigned-kernel acceptance and a return-to-stock test are absent.
 
 ## Current continuation
 
-- Base: main `0f7d2ed`, PR #119 integrated, all seven workflows green.
-- Branch: `issue-47-configured-fota-unit`.
+- Base: main `656f8a5`, PR #120 integrated, all seven workflows green.
+- Current work: record the successful physical configured-consumer capture;
+  offline analysis is waiting for the original captured bytes.
 - Owner supplied the physical PR #119 JSON: `NO_CURRENT_FOTA_OWNER`,
   `watch_contacted=true`, no UID/executable/binary, no service activation.
   This is an unowned name at that instant, not a transport failure or proof
   of an absent consumer. Do not repeat that probe or start the consumer.
-- Earlier physical inventory listed the exact 386-byte
-  `/usr/lib/systemd/system/fota-consumer.service`; its RECV was unavailable
-  or denied. The new optional mode asks the existing systemd manager for
-  this known unit's configured properties, then uses the original bounded
-  ARM ELF reader for its observed ExecStart path. Never executes that path.
+- Owner ran PR #120's configured-unit mode successfully. The unit is
+  `Type=dbus`, `BusName=fota.consumer`, configured user/group `fota:fota`,
+  `ExecStart=/usr/bin/fota-consumer`, inactive/dead. Selected fields were
+  stable and the original ARM ELF reader copied 89,980 bytes to the phone.
+  Reported SHA-256:
+  `19ad8468c5e73821359b140cd99f8c3bc072b2d73ed7766b082b88f26c676a1a`.
+  No service activation, FOTA method or firmware write occurred.
+- This session has the report, not the copied ELF bytes. Verify size/hash
+  independently when the owner attaches the capture; do not claim to have
+  inspected its machine code or linked it to a vulnerability yet.
 - Configuration is distinct from live ownership/process UID. Manager/bus
   and selected unit fields are rechecked before publishing a copy. No raw
   responses, arguments, PIDs, timestamps or bus identities are saved.
@@ -41,10 +47,11 @@ unsigned-kernel acceptance and a return-to-stock test are absent.
 Focused tests cover existing ownership, configured metadata, unsafe or
 multiple ExecStart records, private output, manager/bus changes, unit
 changes and denied copies. Real private D-Bus tests remain required.
-A separate required real systemd test checks the exact show command
-against an inactive trap unit on disposable Ubuntu 22.04/24.04 runners.
-Local PID 1 is not systemd and sockets are denied; real tests must pass
-without skipping in CI before integration. Watch execution remains pending.
+A separate required real systemd test passed against an inactive trap unit
+on disposable Ubuntu 22.04/24.04 runners, alongside the required real private
+D-Bus tests, without skips. PR #120's actual watch execution now confirms
+configured metadata and read-only ELF acquisition; no firmware acceptance,
+root or recovery behavior was tested. The uploaded bytes remain pending.
 Issue #47 stays open until physical restoration/custom boot are demonstrated.
 
 ## Decisive blockers and next step
@@ -55,11 +62,13 @@ Issue #47 stays open until physical restoration/custom boot are demonstrated.
 3. Firmware-specific bootloader behavior, recovery after boot failure and
    custom-kernel acceptance remain unverified.
 
-Next normal-Tizen Termux command after green CI and merge:
-`python tools/watch3_r840x_fota_owner_readonly.py --watch-ip <current local IP>
---copy-configured-unit`, then inspect
-`~/watch3-r840x-fota-unit-evidence/fota-unit-report.json` and privately acquired
-ELF offline, if any. If denied/unavailable, analyze that outcome first.
+Next step: owner attaches the existing
+`~/watch3-r840x-fota-unit-evidence/fota-configured-executable.bin`, preferably
+packaged with `fota-unit-report.json`. No further watch query is needed.
+Verify 89,980 bytes and the reported hash, then inspect the original ELF
+offline for D-Bus registration/authorization, update-file validation,
+privilege transitions and recovery handoff. Never execute the vendor file
+or infer a signature bypass from strings/imports alone.
 Continue exact-model restoration sourcing when a concrete new lead exists.
 
 Do not repeat sibling scans or GUI builds as substitutes. Preserve the

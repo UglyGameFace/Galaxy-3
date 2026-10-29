@@ -136,6 +136,38 @@ and [systemd v219's property formatter](https://github.com/systemd/systemd/blob/
 The parser supports its older `{ path=... ; argv[]=... }` framing and current
 Ubuntu output. Watch3 tool support and policy remain unverified until run.
 
+## October 29 physical result: configured consumer captured
+
+The owner ran merged PR #120 and supplied the full redacted report. It
+returned `CONFIGURED_FOTA_UNIT_BINARY_COPIED_READONLY`, with
+`configured_fields_stable=true` and `binary_copied=true`:
+
+| Field | Actual reported value |
+| --- | --- |
+| Unit / fragment | `fota-consumer.service` / `/usr/lib/systemd/system/fota-consumer.service` |
+| State / type | `inactive` / `dead` / `dbus` |
+| Configured bus name | `fota.consumer` |
+| Configured user / group | `fota` / `fota` |
+| Configured executable | `/usr/bin/fota-consumer` |
+| Copied bytes / format | 89,980 / `ARM_ELF32` |
+| Reported SHA-256 | `19ad8468c5e73821359b140cd99f8c3bc072b2d73ed7766b082b88f26c676a1a` |
+
+This resolves the previously unknown **configured consumer path**. It is
+distinct from the earlier 87,036-byte accessory `fota-service` ELF and the
+445,524-byte `updateclient`. The unit stayed inactive; no FOTA method,
+service activation, firmware write, root or custom boot was reported.
+Live-owner UID remains unset, and `configured_user=fota` supplies neither
+a numeric runtime UID nor root access.
+
+The actual copied bytes have not yet been received for offline examination
+in this continuation. Preserve the phone's existing capture and attach
+`fota-configured-executable.bin`, preferably with `fota-unit-report.json`.
+No additional watch probe is needed. On receipt, independently verify the
+length/hash above before examining code for endpoint registration/caller
+checks, update validation and the recovery handoff. Keep the original ELF
+private and never execute it. Metadata and a reported hash alone do not
+establish a flaw or an accepted unsigned firmware path.
+
 ## Source acquisition crosscheck
 
 Samsung's [exact SM-R840X Korea download page](https://www.samsungsvc.co.kr/download/view?code=SM-R840X&prd1DepNm=%EB%AA%A8%EB%B0%94%EC%9D%BC&prd2DepNm=%EC%9B%A8%EC%96%B4%EB%9F%AC%EB%B8%94)
