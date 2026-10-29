@@ -27,7 +27,7 @@ from watch3_r08_fota_artifact_pull import (
     ArtifactPullError, _receive_arm_elf, _save_local_exclusive, vendor_executable_path,
 )
 
-SCHEMA = "uglyos-r840x-existing-fota-owner-v1"
+SCHEMA = "uglyos-r840x-existing-fota-owner-v2"
 REPORT = "fota-owner-report.json"
 BINARY = "fota-owner-readonly.bin"
 UNIT_REPORT = "fota-unit-report.json"
@@ -131,8 +131,7 @@ def base_report(copy_binary: bool) -> dict:
         "stock_recovery_proven": False,
         "custom_boot_proven": False,
         "firmware_written": False,
-        "flash_allowed": False,
-        "result": "NO_GO",
+        "result": "EVIDENCE_ONLY",
     }
 
 
@@ -205,7 +204,7 @@ def capture_configured_unit(ip: str, key: Path, destination: Path, *, timeout=8)
     ip = private_watch_ip(ip)
     destination.mkdir(mode=0o700, parents=False, exist_ok=False)
     result = base_report(True)
-    result.update(schema="uglyos-r840x-configured-fota-unit-v1",
+    result.update(schema="uglyos-r840x-configured-fota-unit-v2",
                   state="UNIT_NOT_YET_OBSERVED", evidence_kind="CONFIGURED_SYSTEMD_UNIT",
                   queried_destination="org.freedesktop.DBus / org.freedesktop.systemd1",
                   configured_unit=None, configured_fields_stable=False,
@@ -354,7 +353,7 @@ def main(argv=None) -> int:
     print(label + "_REPORT: " + str(args.output_dir / report_name))
     if result["binary_copied"]:
         print("PRIVATE_OFFLINE_ELF: " + str(args.output_dir / binary_name))
-    print("NO_GO: No root, firmware change, recovery or custom boot proved.")
+    print("EVIDENCE_ONLY: This collector does not assess bootloader unlock or recovery support.")
     return 0
 
 

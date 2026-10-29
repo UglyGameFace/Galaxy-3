@@ -59,6 +59,14 @@ Temporary binary bytes are discarded if ownership/path checks change.
 
 ## How to interpret the result
 
+The owner has authorized work on this watch. This collector reports evidence;
+it does not decide permission to investigate, root or unlock it. Version 1
+hard-coded `flash_allowed=false` and `result=NO_GO`, regardless of the watch's
+reply. Those fields were not bootloader measurements or an owner-authorization
+decision. Version 2 removes `flash_allowed`, uses `result=EVIDENCE_ONLY`, and
+keeps the actual observation in `state`. Previously captured reports remain
+valid records of their observations and do not need to be recaptured.
+
 | Result | Meaning and next step |
 | --- | --- |
 | `EXISTING_FOTA_OWNER_BINARY_COPIED_READONLY` | An existing service executable was retrieved through read-only SDB. Analyze `fota-owner-readonly.bin` offline to identify actual validation and privilege boundaries; do not execute it or commit it. |
@@ -72,7 +80,7 @@ Temporary binary bytes are discarded if ownership/path checks change.
 An owner UID of zero describes **the service**, not an elevated SDB shell or
 an exploitable permission. Even successful acquisition does not prove a
 signature bypass, bootloader code execution, exact-model rescue, custom boot
-or firmware write authorization. All physical boot/recovery gates remain open.
+or partition write access. Those technical capabilities remain unverified.
 
 ## October 29 physical result: no current owner
 

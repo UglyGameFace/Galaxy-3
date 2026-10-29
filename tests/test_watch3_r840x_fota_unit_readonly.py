@@ -140,8 +140,11 @@ class ConfiguredUnitTests(unittest.TestCase):
             self.assertIsNone(result["observed_executable"])
             self.assertFalse(result["owner_snapshot_stable"])
             for field in ("root_obtained", "service_activation_requested", "fota_method_called",
-                          "firmware_written", "flash_allowed", "stock_recovery_proven", "custom_boot_proven"):
+                          "firmware_written", "stock_recovery_proven", "custom_boot_proven"):
                 self.assertFalse(result[field], field)
+            self.assertNotIn("flash_allowed", result)
+            self.assertEqual(result["result"], "EVIDENCE_ONLY")
+            self.assertEqual(result["schema"], "uglyos-r840x-configured-fota-unit-v2")
             saved = (dest / owner.UNIT_REPORT).read_text()
             for private in (BUS_ID, ":1.1", "private-argument", "argv", "start_time"):
                 self.assertNotIn(private, saved)
