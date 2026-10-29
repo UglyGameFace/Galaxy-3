@@ -65,6 +65,7 @@ Temporary binary bytes are discarded if ownership/path checks change.
 | `EXISTING_FOTA_OWNER_EXECUTABLE_OBSERVED` | Registry and proc-link metadata identify a current owner. No binary was requested. |
 | `NO_CURRENT_FOTA_OWNER` | The bus has no current owner at this instant. This does not prove the consumer is absent or justify starting it. |
 | `REGISTRY_QUERY_DENIED` / `REGISTRY_TOOL_UNAVAILABLE` | This specific metadata route is denied or its command is unavailable. Preserve the report; do not add retries or alternate update calls. |
+| `OWNER_PROCESS_LINK_ACCESS_DENIED` / `OWNER_PROCESS_LINK_UNAVAILABLE` | The registry queries progressed but the proc-exe read was denied or unavailable; no binary copy was attempted. |
 | `FOTA_OWNER_CHANGED_DURING_OBSERVATION` / `FOTA_EXECUTABLE_CHANGED_DURING_COPY` | Identity changed; the collector withholds the binary and identity claim. |
 | `OWNER_ARTIFACT_READ_REJECTED` | Preserve the categorical `artifact_error`. Missing, denied or unreadable bytes are not a successful capture. |
 

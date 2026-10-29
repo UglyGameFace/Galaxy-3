@@ -101,6 +101,18 @@ class ExistingFotaOwnerTests(unittest.TestCase):
             with self.subTest(path=path):
                 with self.assertRaises(ArtifactPullError):vendor_executable_path(path)
 
+    def test_denied_or_missing_process_link_is_not_misreported_as_binary_failure(self):
+        for text,category in [('readlink: /proc/private/exe: Permission denied','OWNER_PROCESS_LINK_ACCESS_DENIED'),
+                              ('readlink: no such file or directory','OWNER_PROCESS_LINK_UNAVAILABLE'),
+                              ('private unexpected text','OWNER_PROCESS_LINK_UNRECOGNIZED')]:
+            q=Queries()
+            def observed(ip,key,operation,**kwargs):
+                return text if operation=='process_executable' else q(ip,key,operation,**kwargs)
+            with tempfile.TemporaryDirectory() as tmp,patch.object(owner,'query',observed),patch.object(owner,'_receive_arm_elf') as reader:
+                r=owner.capture('127.0.0.1',Path('/unused'),Path(tmp)/'evidence',copy_binary=True)
+                self.assertEqual(r['state'],category);self.assertNotIn('artifact_error',r)
+                self.assertNotIn('private',json.dumps(r));reader.assert_not_called()
+
     def test_shared_arm_reader_sends_exact_observed_recv_and_never_send_or_shell(self):
         binary=elf32(b'owner-fixture')
         sock=sdb_peer([SYNC_HDR.pack(b'DATA',len(binary))+binary,SYNC_HDR.pack(b'DONE',0)])

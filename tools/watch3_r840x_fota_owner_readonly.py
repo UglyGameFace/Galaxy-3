@@ -84,6 +84,20 @@ def query(ip: str, key: Path, operation: str, *, pid=None, timeout=8) -> str:
     raise OwnerError("OWNER_READONLY_SHELL_REFUSED_OR_TIMED_OUT")
 
 
+def process_link(raw: str) -> bytes:
+    """Keep denied/missing proc links distinct from a binary-copy failure."""
+    if isinstance(raw, str) and len(raw) <= 2048:
+        lower = raw.lower()
+        if "permission denied" in lower or "access denied" in lower:
+            raise OwnerError("OWNER_PROCESS_LINK_ACCESS_DENIED")
+        if "no such file" in lower or "not found" in lower:
+            raise OwnerError("OWNER_PROCESS_LINK_UNAVAILABLE")
+    try:
+        return vendor_executable_path(raw)
+    except ArtifactPullError:
+        raise OwnerError("OWNER_PROCESS_LINK_UNRECOGNIZED") from None
+
+
 def base_report(copy_binary: bool) -> dict:
     return {
         "schema": SCHEMA,
@@ -135,7 +149,7 @@ def capture(ip: str, key: Path, destination: Path, *, copy_binary=False, timeout
         pid = registry("pid")
         uid = registry("uid")
         phase = "process_link"
-        executable = vendor_executable_path(query(
+        executable = process_link(query(
             ip, key, "process_executable", pid=pid, timeout=timeout))
         ensure_same_owner(bus_id, owner)
         result.update(owner_snapshot_stable=True, owner_uid=uid,
@@ -152,7 +166,7 @@ def capture(ip: str, key: Path, destination: Path, *, copy_binary=False, timeout
                 temp.flush()
                 os.fsync(temp.fileno())
                 ensure_same_owner(bus_id, owner)
-                if vendor_executable_path(query(ip, key, "process_executable", pid=pid,
+                if process_link(query(ip, key, "process_executable", pid=pid,
                                                 timeout=timeout)) != executable:
                     raise OwnerError("FOTA_EXECUTABLE_CHANGED_DURING_COPY")
                 ensure_same_owner(bus_id, owner)
