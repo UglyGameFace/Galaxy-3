@@ -306,6 +306,8 @@ def parse_elf32(data: bytes, *, consumer_review=False) -> dict[str, object]:
 
     dependencies = set()
     symbols = set()
+    sonames = set()
+    exports = {}
     undefined_symbols_total = 0
     symbol_table_seen = False
     dynamic_pairs = []
@@ -359,6 +361,12 @@ def parse_elf32(data: bytes, *, consumer_review=False) -> dict[str, object]:
             name = c_string(dynstr, value)
             if name and SAFE_SONAME.fullmatch(name):
                 dependencies.add(name)
+        elif tag == 14 and dynstr is not None:  # DT_SONAME
+            name = c_string(dynstr, value)
+            if name and SAFE_SONAME.fullmatch(name):
+                sonames.add(name)
+    if len(sonames) > 1:
+        raise OfflineELFError("CONFLICTING_DYNAMIC_SONAMES")
 
     for s in sections:
         if s["type"] != 11:  # SHT_DYNSYM
@@ -374,12 +382,28 @@ def parse_elf32(data: bytes, *, consumer_review=False) -> dict[str, object]:
         symbol_table_seen = True
         for pos in range(s["off"], s["off"] + s["size"], SYMBOL_ENTRY.size):
             name_off, addr, size, info, other, shindex = SYMBOL_ENTRY.unpack_from(data, pos)
-            if shindex != 0 or name_off == 0:
+            if name_off == 0:
                 continue
-            undefined_symbols_total += 1
             name = c_string(names, name_off)
-            if name in ALLOWED_IMPORTS:
-                symbols.add(name)
+            if shindex == 0:
+                undefined_symbols_total += 1
+                if name in ALLOWED_IMPORTS:
+                    symbols.add(name)
+            elif (name in ALLOWED_IMPORTS and 0 < shindex < len(sections)
+                  and info >> 4 in (1, 2) and info & 15 == 2
+                  and other & 3 in (0, 3)):
+                # A public function definition must point into file-backed
+                # executable code. An undefined import or absolute symbol is
+                # not the implementation sought by the dependency collector.
+                code = addr & ~1
+                mapped = any(x["type"] == 1 and x["perms"] & 1 and
+                             x["vaddr"] <= code and
+                             max(size, 1) <= x["filesz"] - (code - x["vaddr"])
+                             for x in segments)
+                if mapped:
+                    exports[name] = {"name": name, "address_hex": f"0x{addr:08x}",
+                                     "code_address_hex": f"0x{code:08x}",
+                                     "bytes": size, "thumb": bool(addr & 1)}
 
     categories = {
         group: sorted(symbols.intersection(allowed))
@@ -410,6 +434,8 @@ def parse_elf32(data: bytes, *, consumer_review=False) -> dict[str, object]:
         "relro": ("FULL_RELRO_INDICATED" if relro and bind_now
                   else "RELRO_SEGMENT_PRESENT" if relro else "NOT_OBSERVED"),
         "dependencies": sorted(dependencies)[:80],
+        "soname": next(iter(sonames), None),
+        "allowlisted_function_exports": [exports[name] for name in sorted(exports)],
         "dependencies_status": ("OBSERVED" if dynstr is not None else "NO_DYNAMIC_STRING_TABLE"),
         "dynamic_symbols_status": "OBSERVED" if symbol_table_seen else "UNAVAILABLE",
         "undefined_dynamic_symbol_count": undefined_symbols_total if symbol_table_seen else None,

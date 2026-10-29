@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Read a selected allowlisted Watch3 update executable over authenticated SDB sync.
+"""Copy Watch3 update executables or the consumer's sync-agent dependency.
 
 This is a bounded, host-local *read* of a normal Tizen application file.
-No SDB push, shell, install, flash, bootloader mode, root or watch write exists.
+Existing executable profiles use only sync RECV. The sync-agent profile first
+queries the linker cache through one fixed read-only shell command, then copies
+the identified library. No install, flash, root or watch write exists.
 The updateclient path is from a public Tizen watch package inventory and
 the R840X's earlier update-client directory observation. Its readability
 and actual FOTA verification role are not yet proven.
@@ -23,9 +25,11 @@ import socket
 import struct
 import sys
 import tempfile
+import zipfile
 
 from watch3_r08_android_sdb import (
-    Connection, SdbError, PORT, private_watch_ip, receive,
+    Connection, SdbError, ShellCloseError, PORT, private_watch_ip, receive,
+    FOTA_SYNC_AGENT_CACHE_PROBE, FOTA_SYNC_AGENT_CACHE_END,
 )
 
 # Seen in a published Tizen wearable package inventory; exact R840X presence
@@ -41,10 +45,28 @@ MAX_BINARY_BYTES = 8 * 1024 * 1024
 MAX_SYNC_CHUNK = 256 * 1024
 MAX_STREAM_FRAMES = 1024
 SYNC_HDR = struct.Struct("<4sI")
+SYNC_AGENT_SONAME = "libsync-agent.so.0"
+SYNC_AGENT_INSTALL = "sync_agent_dm_fota_install"
+SYNC_AGENT_BINARY = "libsync-agent.so.0.bin"
+SYNC_AGENT_REPORT = "sync-agent-report.json"
 
 
 class ArtifactPullError(ValueError):
     """Categorical failure; never includes raw watch data or private addresses."""
+
+
+class RemoteFileReadError(ArtifactPullError):
+    """Keep the legacy message while retaining only a redacted errno category."""
+
+    def __init__(self, payload: bytes):
+        lower = payload.lower()
+        denied = any(x in lower for x in (b"permission denied", b"access denied",
+                                          b"operation not permitted"))
+        missing = b"no such file or directory" in lower
+        self.category = ("REMOTE_REPORTED_ACCESS_DENIED" if denied and not missing else
+                         "REMOTE_REPORTED_NO_SUCH_FILE" if missing and not denied else
+                         "REMOTE_FILE_MISSING_DENIED_OR_UNREADABLE")
+        super().__init__("REMOTE_FILE_MISSING_DENIED_OR_UNREADABLE")
 
 
 def _sdb_stage_error(stage: str, exc: Exception) -> ArtifactPullError:
@@ -99,8 +121,9 @@ class ReadOnlySyncDecoder:
             del self.buf[:size]
             self.pending = None
             if tag == b"FAIL":
-                # The response might contain system paths or private data.
-                raise ArtifactPullError("REMOTE_FILE_MISSING_DENIED_OR_UNREADABLE")
+                # Raw text is never retained, logged or serialized. Existing
+                # callers keep their established exception message.
+                raise RemoteFileReadError(part)
             if self.byte_count + len(part) > MAX_BINARY_BYTES:
                 raise ArtifactPullError("REMOTE_FILE_EXCEEDS_EIGHT_MIB")
             self.byte_count += len(part)
@@ -155,7 +178,18 @@ def vendor_executable_path(raw: str) -> bytes:
     return value.encode("ascii")
 
 
-def _receive_arm_elf(sock, key_path: Path, outfile, path: bytes) -> dict[str, object]:
+def sync_agent_library_path(raw: str) -> bytes:
+    """Only the evidenced SONAME family in system library directories."""
+    if (not isinstance(raw, str) or len(raw) > 240 or
+            not re.fullmatch(r"/(?:usr/)?lib/(?:[A-Za-z0-9_+.-]+/)*"
+                             r"libsync-agent[.]so[.]0(?:[.][0-9]+)*", raw) or
+            any(p in ("", ".", "..") for p in raw.split("/")[1:])):
+        raise ArtifactPullError("DEPENDENCY_CACHE_PATH_REJECTED")
+    return raw.encode("ascii")
+
+
+def _receive_arm_elf(sock, key_path: Path, outfile, path: bytes, *,
+                     library: bool = False) -> dict[str, object]:
     """Authoritative bounded sync RECV reused for fixed and owner-observed files.
 
     The owner collector supplies only a path obtained from a stable bus/PID
@@ -164,7 +198,7 @@ def _receive_arm_elf(sock, key_path: Path, outfile, path: bytes) -> dict[str, ob
     if not isinstance(path, bytes):
         raise ArtifactPullError("OWNER_EXECUTABLE_PATH_UNRECOGNIZED")
     try:
-        vendor_executable_path(path.decode("ascii"))
+        (sync_agent_library_path if library else vendor_executable_path)(path.decode("ascii"))
     except UnicodeDecodeError:
         raise ArtifactPullError("OWNER_EXECUTABLE_PATH_UNRECOGNIZED") from None
     channel = Connection(sock, key_path)
@@ -287,10 +321,177 @@ def capture(ip: str, key_path: Path, destination: Path, timeout: int = 12,
             os.unlink(temporary)
 
 
-def main() -> int:
+def parse_sync_agent_cache(raw: str) -> bytes:
+    """Resolve exactly one cache entry, without interpreting it as shell text."""
+    if not isinstance(raw, str) or not 1 <= len(raw) <= 64 * 1024:
+        raise ArtifactPullError("DEPENDENCY_CACHE_REPLY_UNRECOGNIZED")
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if (not lines or lines[-1] != FOTA_SYNC_AGENT_CACHE_END or
+            lines.count(FOTA_SYNC_AGENT_CACHE_END) != 1):
+        raise ArtifactPullError("DEPENDENCY_CACHE_REPLY_INCOMPLETE")
+    lower = "\n".join(lines[:-1]).lower()
+    if "permission denied" in lower or "access denied" in lower:
+        raise ArtifactPullError("DEPENDENCY_CACHE_QUERY_DENIED")
+    if "not found" in lower and any(x in lower for x in ("ldconfig", "grep", "printf")):
+        raise ArtifactPullError("DEPENDENCY_CACHE_TOOL_UNAVAILABLE")
+    if "no such file" in lower or "can't open cache" in lower or "cannot open cache" in lower:
+        raise ArtifactPullError("DEPENDENCY_LINKER_CACHE_UNAVAILABLE")
+    paths = set()
+    pattern = re.compile(r"libsync-agent[.]so[.]0\s+\([A-Za-z0-9_, .+/:=-]{1,128}\)\s+=>\s+(\S+)")
+    for line in lines[:-1]:
+        match = pattern.fullmatch(line)
+        if not match:
+            raise ArtifactPullError("DEPENDENCY_CACHE_REPLY_UNRECOGNIZED")
+        paths.add(sync_agent_library_path(match.group(1)))
+    if not paths:
+        raise ArtifactPullError("DEPENDENCY_NOT_IN_LINKER_CACHE")
+    if len(paths) != 1:
+        raise ArtifactPullError("DEPENDENCY_CACHE_ENTRY_AMBIGUOUS")
+    return paths.pop()
+
+
+def query_sync_agent_cache(ip: str, key_path: Path, timeout: int) -> str:
+    """Same fixed command in the two supported shell service encodings."""
+    for style in ("standard", "tizen-command"):
+        try:
+            with socket.create_connection((ip, PORT), timeout=timeout) as sock:
+                sock.settimeout(timeout)
+                channel = Connection(sock, key_path)
+                channel.handshake()
+                return channel.shell(FOTA_SYNC_AGENT_CACHE_PROBE, style=style)
+        except ShellCloseError:
+            if style == "tizen-command":
+                raise ArtifactPullError("DEPENDENCY_CACHE_SHELL_REFUSED_OR_TIMED_OUT") from None
+        except SdbError:
+            raise ArtifactPullError("DEPENDENCY_CACHE_SDB_AUTH_OR_PROTOCOL_FAILED") from None
+        except (OSError, TimeoutError):
+            raise ArtifactPullError("DEPENDENCY_CACHE_SDB_TRANSPORT_UNAVAILABLE") from None
+    raise ArtifactPullError("DEPENDENCY_CACHE_SHELL_REFUSED_OR_TIMED_OUT")
+
+
+def _sync_agent_archive(folder: Path, archive: Path, binary_copied: bool) -> None:
+    """Package only this capture's explicit files, including a failure report."""
+    descriptor = os.open(archive, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as target:
+            with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+                bundle.write(folder / SYNC_AGENT_REPORT, SYNC_AGENT_REPORT)
+                if binary_copied:
+                    bundle.write(folder / SYNC_AGENT_BINARY, SYNC_AGENT_BINARY)
+            target.flush()
+            os.fsync(target.fileno())
+    except BaseException:
+        archive.unlink(missing_ok=True)
+        raise
+
+
+def capture_sync_agent(ip: str, key_path: Path, folder: Path, *,
+                       consumer_input: Path | None = None,
+                       archive: Path | None = None, timeout: int = 12) -> dict:
+    """Acquire the actual missing implementation in one phone-side operation.
+
+    Verify the existing original consumer locally, resolve its evidenced
+    dependency from the watch's cache, copy one ARM library with our existing
+    RECV implementation, inspect it without loading it, and recheck the cache.
+    The cache identifies a candidate; no live runtime provider is claimed.
+    """
+    from analyze_watch3_r08_fota_elf import (
+        CONSUMER_BYTES, CONSUMER_SHA256, OfflineELFError, parse_elf32,
+    )
+
+    ip = private_watch_ip(ip)
+    folder = folder.expanduser()
+    if archive is not None:
+        archive = archive.expanduser()
+        if archive.exists() or archive.is_symlink():
+            raise ArtifactPullError("LOCAL_ARCHIVE_ALREADY_EXISTS")
+        if not archive.parent.is_dir():
+            raise ArtifactPullError("LOCAL_ARCHIVE_DIRECTORY_MISSING")
+    if not folder.parent.is_dir():
+        raise ArtifactPullError("LOCAL_OUTPUT_DIRECTORY_MISSING")
+    try:
+        folder.mkdir(mode=0o700)
+    except FileExistsError:
+        raise ArtifactPullError("LOCAL_OUTPUT_ALREADY_EXISTS") from None
+    source = (consumer_input.expanduser() if consumer_input is not None else
+              Path.home() / "watch3-r840x-fota-unit-evidence/fota-configured-executable.bin")
+    result = {
+        "schema": "uglyos-r840x-sync-agent-dependency-v1",
+        "state": "NOT_YET_CAPTURED", "stage": "local_consumer",
+        "dependency_soname": SYNC_AGENT_SONAME,
+        "source_consumer_verified": False, "source_consumer_sha256": None,
+        "cache_query_requested": False, "cache_query_completed": False,
+        "cache_path": None, "cache_entry_stable": False,
+        "binary_copied": False, "binary": None, "elf": None,
+        "runtime_provider_observed": False, "target_model_authenticated": False,
+        "fota_method_called": False, "binary_executed": False,
+        "watch_write_performed": False, "root_obtained": False,
+        "bootloader_unlock_proven": False, "stock_recovery_proven": False,
+        "result": "EVIDENCE_ONLY",
+    }
+    try:
+        try:
+            with source.open("rb") as stream:
+                original = stream.read(CONSUMER_BYTES + 1)
+        except FileNotFoundError:
+            raise ArtifactPullError("LOCAL_ORIGINAL_CONSUMER_MISSING") from None
+        if (len(original) != CONSUMER_BYTES or
+                hashlib.sha256(original).hexdigest() != CONSUMER_SHA256):
+            raise ArtifactPullError("LOCAL_ORIGINAL_CONSUMER_PIN_MISMATCH")
+        if SYNC_AGENT_SONAME not in parse_elf32(original)["dependencies"]:
+            raise ArtifactPullError("CONSUMER_DEPENDENCY_NOT_OBSERVED")
+        result.update(source_consumer_verified=True, source_consumer_sha256=CONSUMER_SHA256,
+                      stage="linker_cache", cache_query_requested=True)
+        reply = query_sync_agent_cache(ip, key_path, timeout)
+        result["cache_query_completed"] = True
+        path = parse_sync_agent_cache(reply)
+        result.update(cache_path=path.decode("ascii"), stage="library_copy")
+        with tempfile.NamedTemporaryFile(dir=folder, prefix=".sync-agent-", suffix=".tmp") as temp:
+            with socket.create_connection((ip, PORT), timeout=timeout) as sock:
+                sock.settimeout(timeout)
+                binary = _receive_arm_elf(sock, key_path, temp, path, library=True)
+            temp.flush()
+            os.fsync(temp.fileno())
+            temp.seek(0)
+            raw = temp.read(MAX_BINARY_BYTES + 1)
+            result["stage"] = "library_identity"
+            facts = parse_elf32(raw)
+            result["elf"] = facts
+            if facts["elf_type"] != "ET_DYN" or facts["soname"] != SYNC_AGENT_SONAME:
+                raise ArtifactPullError("DEPENDENCY_ELF_IDENTITY_MISMATCH")
+            if SYNC_AGENT_INSTALL not in {x["name"] for x in facts["allowlisted_function_exports"]}:
+                raise ArtifactPullError("DEPENDENCY_INSTALL_FUNCTION_NOT_DEFINED")
+            result["stage"] = "cache_recheck"
+            if parse_sync_agent_cache(query_sync_agent_cache(ip, key_path, timeout)) != path:
+                raise ArtifactPullError("DEPENDENCY_CACHE_ENTRY_CHANGED_DURING_COPY")
+            result["cache_entry_stable"] = True
+            result["stage"] = "local_save"
+            _save_local_exclusive(temp.name, folder / SYNC_AGENT_BINARY, binary["bytes"])
+        result.update(binary_copied=True, binary=binary, stage="complete",
+                      state="SYNC_AGENT_LIBRARY_COPIED")
+    except RemoteFileReadError as exc:
+        result["state"] = exc.category
+    except (ArtifactPullError, OfflineELFError) as exc:
+        result["state"] = str(exc)
+    except SdbError:
+        result["state"] = "DEPENDENCY_SDB_PROTOCOL_OR_CONFIGURATION_ERROR"
+    except (OSError, TimeoutError):
+        result["state"] = "DEPENDENCY_LOCAL_OR_NETWORK_IO_ERROR"
+    payload = (json.dumps(result, indent=2) + "\n").encode("utf-8")
+    descriptor = os.open(folder / SYNC_AGENT_REPORT, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "wb") as target:
+        target.write(payload)
+        target.flush()
+        os.fsync(target.fileno())
+    if archive is not None:
+        _sync_agent_archive(folder, archive, result["binary_copied"])
+    return result
+
+
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--watch-ip", required=True, help="Current local Watch3 Wi-Fi IP")
-    parser.add_argument("--component", choices=tuple(EXECUTABLES),
+    parser.add_argument("--component", choices=(*EXECUTABLES, "sync-agent"),
                         default="fota-service",
                         help="Fixed read-only source; default preserves original behavior")
     parser.add_argument("--key-path", type=Path,
@@ -298,7 +499,33 @@ def main() -> int:
     parser.add_argument("--output", type=Path,
                         default=None,
                         help="Private phone file, defaults to component-specific filename")
-    args = parser.parse_args()
+    parser.add_argument("--output-dir", type=Path,
+                        help="sync-agent only: new private directory for binary and report")
+    parser.add_argument("--consumer-input", type=Path,
+                        help="sync-agent only: existing original configured-consumer capture")
+    parser.add_argument("--archive", type=Path,
+                        help="sync-agent only: new local ZIP for private analysis, also on failure")
+    args = parser.parse_args(argv)
+    if args.component == "sync-agent":
+        if args.output is not None:
+            parser.error("sync-agent uses --output-dir, not --output")
+        folder = args.output_dir or Path.home() / "watch3-r840x-sync-agent-evidence"
+        try:
+            report = capture_sync_agent(args.watch_ip, args.key_path, folder,
+                                        consumer_input=args.consumer_input, archive=args.archive)
+        except (ArtifactPullError, SdbError, OSError) as exc:
+            reason = str(exc) if isinstance(exc, ArtifactPullError) else "LOCAL_OR_SDB_CONFIGURATION_ERROR"
+            print("DEPENDENCY_CAPTURE_ERROR: " + reason, file=sys.stderr)
+            return 1
+        print("DEPENDENCY_STATE: " + report["state"])
+        print("DEPENDENCY_REPORT: " + str(folder.expanduser() / SYNC_AGENT_REPORT))
+        if report["binary_copied"]:
+            print("PRIVATE_OFFLINE_ELF: " + str(folder.expanduser() / SYNC_AGENT_BINARY))
+        if args.archive is not None:
+            print("PRIVATE_EVIDENCE_ZIP: " + str(args.archive.expanduser()))
+        return 0 if report["binary_copied"] else 1
+    if any(x is not None for x in (args.output_dir, args.consumer_input, args.archive)):
+        parser.error("--output-dir, --consumer-input and --archive require --component sync-agent")
     output = (args.output if args.output is not None else
               Path.home() / f"watch3-r840x-{args.component}-readonly.bin")
     try:

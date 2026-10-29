@@ -1,99 +1,91 @@
 # UgLy|OS R840X bootloader and recovery
 
-Updated October 29, 2026. Active scope: Issue #47, boot/recovery only.
+Updated October 29, 2026. Active objective: Issue #47, restore stock reliably
+and boot UgLy|OS on the owner's SM-R840X / NOBLESSE-LARGE-BT R08,
+installed R840XXXU1AUA2, CSC candidate PAP.
+Root, bootloader unlock, custom boot and tested stock restoration remain
+unverified. The owner has authorized this work; unverified capability is
+not an owner-permission decision.
 
-## Objective and current state
+## Current implementation
 
-Reproducibly restore stock firmware and boot UgLy|OS on the owner's
-SM-R840X / NOBLESSE-LARGE-BT R08, installed R840XXXU1AUA2, CSC candidate PAP.
-**Physical unlocking and recovery remain unverified; neither is demonstrated.**
-The owner has authorized this work. Lack of a demonstrated technique is a
-technical unknown, not a permission refusal or a reason to end investigation.
+Base main `518d9eb` includes PR #122. No overlapping open PR was present at
+the start. Current branch: `issue-47-sync-agent-install-implementation`.
 
-Preserved physical evidence: authenticated non-root Tizen SDB, 21 partition
-names and critical sysfs geometry, original FOTA userspace artifacts, and the
-owner's completed four-byte ODIN/LOKE exchange. Physical boot/recovery bytes,
-unsigned-kernel acceptance and a return-to-stock test are absent.
+The original consumer's separate Install path reaches imported
+`sync_agent_dm_fota_install`. Its actual ELF lists `libsync-agent.so.0`.
+The missing implementation is now the target of one complete acquisition
+mode in the existing `tools/watch3_r08_fota_artifact_pull.py`:
 
-## Current continuation
+- Verify the existing 89,980-byte original consumer/hash locally.
+- Resolve the evidenced SONAME from the watch's existing linker cache using
+  one fixed `ldconfig -p` query; no guessed remote path or library loading.
+- Copy exactly one resolved system-library path with the existing bounded
+  SDB RECV reader, check ARM ELF32/ET_DYN/DT_SONAME and an exported install
+  function in mapped executable bytes, then recheck the cache.
+- Save a private binary/report and optional ZIP in one run. A denied or
+  missing read also produces a report-only ZIP; raw error text stays private.
+- Keep earlier executable profiles, path validation and error strings
+  compatible. New ELF facts are additive. No duplicate transport exists.
 
-- Base main `6b6a8b5`, PR #121 integrated. This continuation corrects misleading
-  collector output and records further analysis of the original artifacts.
-- The owner collector's version-1 `flash_allowed=false` and `NO_GO` were
-  hard-coded, not watch/bootloader findings. Remove the permission-like field;
-  version 2 reports EVIDENCE_ONLY and retains all actual observation states.
-  Existing evidence does not need to be acquired again for this output fix.
-- Owner ran the exact update-prepare reader on normal Tizen. Result:
-  `RECOVERY_SCRIPT_ERROR: REMOTE_MISSING_DENIED_OR_UNREADABLE`.
-  Remote sync FAIL does not distinguish missing from denied content.
-  No script/JSON acquired; the && chain stopped before packaging a ZIP.
-  Do not rerun the unchanged sync read expecting a different diagnosis. The
-  decoder discarded the remote error text; the result cannot establish
-  permanent inaccessibility. No transport failure was demonstrated.
-- Recovered the earlier private original accessory service upload without a
-  watch read; independently verified 87,036 bytes, SHA-256
-  `008c67e782eb3d97b0ddb7abc7606b86dc493576c24de476a2110d6e5a681757`.
-- Crosschecked the actual accessory-to-consumer state handoff: file completion
-  in state 30 with status 0 sets state 50. A separate parsed request's case 8
-  sets state 60. On response success its control routine writes
-  db/fotaconsumer/ui_state, matching the original consumer's registered key.
-  File receipt is not by itself proof of installation or a validation bypass.
-- Verified 14 selected accessory calls with the existing decoder and Capstone,
-  six PLT/GOT resolutions, seven control assertions and two key literals.
-  The completion callback calls chmod(0666) before status/state handling;
-  actual caller privilege, MAC policy and writable attack surface are unknown.
-- Original consumer remains verified: 89,980-byte ARM ELF32 PIE, SHA-256
-  `19ad8468c5e73821359b140cd99f8c3bc072b2d73ed7766b082b88f26c676a1a`,
-  build ID bb62b3fe4f1f2ae02cd58c18dd39bff093a2a9cd. Configured fota:fota,
-  inactive/dead; no observed live UID or phone root access.
-- Its reviewed wrapper executes archive-supplied pre_update_client_2 through
-  a shell helper before recovery preparation. No explicit signature gate was
-  observed inside that wrapper; earlier/later and library checks remain open.
-- Independently traced Install's separate path: 0xbf62 compares the method;
-  0xc062 enters the installation helper, which calls _IPC_interfaces(4,1,0)
-  at 0xb2d2. The actual TBB table maps event 4 to 0x7e30, where 0x7e32
-  calls the imported sync_agent_dm_fota_install. libsync-agent.so.0 is an
-  actual DT_NEEDED dependency; its installed path and implementation are
-  not captured. Verified six additional calls and three PLT/GOT resolutions.
-- Original vendor files remain private and were never executed or modified.
-  Details: docs/watch3-r840x-consumer-trust-boundaries.md.
+Phone instructions and failure states:
+[artifact capture](docs/watch3-r08-fota-artifact-readonly.md).
+Physical sync-agent acquisition and implementation analysis are still pending.
+A stable cache entry is a candidate, not proof of an observed runtime provider.
+
+## Preserved original evidence
+
+- Authenticated non-root Tizen Wi-Fi SDB; ARMv7 userspace, Linux 4.9.59.
+- 21 partition names and critical sysfs geometry; physical original
+  S-BOOT/boot/recovery bytes have not been acquired.
+- Owner's four-byte ODIN/LOKE exchange; no subsequent Odin operation.
+- Actual 87,036-byte accessory fota-service and 89,980-byte configured
+  consumer were privately captured and independently hash-verified.
+- Consumer configured fota:fota, inactive/dead; live-owner query returned
+  NO_CURRENT_FOTA_OWNER at that snapshot.
+- Accessory success in state 30 sets 50; a separate parsed request sets 60
+  and signals db/fotaconsumer/ui_state, matching the consumer callback.
+- Consumer wrappers execute archive-supplied pre_update_client_2 before
+  preparation. Earlier/library/later validation and runtime access are open.
+- Update-prepare SDB RECV returned an ambiguous remote FAIL. No script,
+  JSON or ZIP resulted. Repeating that unchanged read is not the next step.
+  The consumer literal does not prove that the script exists/read access.
+- Earlier TV tar route lacks sdbd-tarlauncher. R500 donor observations and
+  retail/combination listings are not exact-R840X compatibility evidence.
+
+Detailed original-byte findings:
+[consumer trust boundaries](docs/watch3-r840x-consumer-trust-boundaries.md).
+PR #122 removed the hard-coded flash_allowed=false/NO_GO permission-like
+output; existing captures remain valid and do not need recapture.
 
 ## Validation and integration
 
-PR #121 passed 180 guarded fake-SDB fixtures plus two required real private
-D-Bus and one required real systemd test on both Ubuntu 22.04/24.04 without
-skips (run 40927170402). The consumer's 28 selected instruction targets were
-independently matched locally on the actual original ELF.
-This continuation independently verified the older original ELF, selected
-cross-artifact edges and the consumer's imported installation boundary.
-The collector's report wording changes; its outgoing requests and device
-behavior do not change. No target binary/script, update RPC or firmware write
-was run.
-Issue #47 stays open: the physical unlock/restoration objective is unfulfilled.
+Local focused suite: 193 passing cases; one ARM cross-compiler fixture skipped
+because clang/lld are absent here. CI requires that compiled ARM fixture to
+run, alongside the complete 194-case guarded suite, two real private D-Bus
+tests and one real systemd test on both Ubuntu 22.04 and 24.04. The compiled
+fixture is original tiny test code and is never executed.
 
-## Decisive blockers and next step
+Both private original Samsung ELFs still pass their pinned offline analyses;
+the consumer's reviewed 28-call profile is unchanged. No original vendor
+binary is committed or uploaded to CI. Current production validation is
+pending the owner's phone run; host/fake-peer tests do not establish watch
+tool availability, library readability or unlocking.
 
-1. Authentic exact-R840X original S-BOOT and a complete signed stock rescue set,
-   or independently verified compatible signed replacement, remain missing.
-2. This host has no direct authenticated connection to the physical watch.
-3. Runtime bus/MAC permissions, archive control, upstream verification and
-   recovery/bootloader acceptance remain unverified. Intended code paths do
-   not establish an exploitable route or usable recovery on this device.
+## Remaining work and cleanup
 
-The next missing implementation is the imported sync-agent installation code,
-not another guessed preparation-script name. Its SONAME is observed in the
-original ELF; its actual installed path must be established before acquisition.
-Continue original-code and exact-model firmware research. No working
-unlock/recovery procedure is verified, and no new permission question is needed
-to continue work already authorized by the owner.
-A fresh public exact-build/model lookup yielded no new verified rescue bytes;
-retail or combination image listings are not compatibility evidence.
+Obtain the original sync-agent implementation, trace its actual installation
+and validation boundary, and establish a real privilege/boot route. Exact
+R840X S-BOOT, a complete signed rescue set (or verified compatible signed
+replacement), unsigned-kernel acceptance and a tested return path remain
+missing. Issue #47 stays open.
 
-Previously closed routes remain closed: idle fota.consumer owner query,
-TV tar route (missing sdbd-tarlauncher), inaccessible recovery-update.sh,
-rw-update-systemd.sh, and now rw-update-prepare.sh. Do not repeat sibling
-scans or GUI builds as substitutes. Preserve the no-experimental-flashing
-constraint: no reset, repartition, archive/image write, update activation
-or exploit traffic on the only working watch. No hardware purchases.
-Older merged source branches remain retained because direct Git branch
-retirement lacks authentication and no delete-ref connector is available.
+Android/Termux only, free only, no hardware purchases. Protect the only
+functional watch: the current operation copies ordinary userspace files and
+does not run an update, write a partition, reset, repartition or flash.
+This host has no authenticated direct connection to the watch; collection
+runs through the owner's already-authorized phone SDB connection.
+
+Older merged source branches remain preserved: direct Git branch deletion
+has no authentication and the connector exposes no delete-ref capability.
+Do not retry failed deletion or discard unpreserved owner work.
