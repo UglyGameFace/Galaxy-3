@@ -2,9 +2,9 @@
 """Copy Watch3 update executables or the consumer's sync-agent dependency.
 
 This is a bounded, host-local *read* of a normal Tizen application file.
-Existing executable profiles use only sync RECV. The sync-agent profile first
-queries the linker cache through one fixed read-only shell command, then copies
-the identified library. No install, flash, root or watch write exists.
+Existing executable profiles use only sync RECV. The sync-agent profile uses
+the existing sync LIST inventory to locate the library, then copies it.
+No watch shell, install, flash, root or device write exists.
 The updateclient path is from a public Tizen watch package inventory and
 the R840X's earlier update-client directory observation. Its readability
 and actual FOTA verification role are not yet proven.
@@ -28,8 +28,10 @@ import tempfile
 import zipfile
 
 from watch3_r08_android_sdb import (
-    Connection, SdbError, ShellCloseError, PORT, private_watch_ip, receive,
-    FOTA_SYNC_AGENT_CACHE_PROBE, FOTA_SYNC_AGENT_CACHE_END,
+    Connection, SdbError, PORT, private_watch_ip, receive,
+)
+from watch3_r08_fota_consumer_inventory import (
+    FOTA_LIBRARY_DIRECTORIES, InventoryError, SYNC_AGENT_SONAME, list_one,
 )
 
 # Seen in a published Tizen wearable package inventory; exact R840X presence
@@ -45,7 +47,6 @@ MAX_BINARY_BYTES = 8 * 1024 * 1024
 MAX_SYNC_CHUNK = 256 * 1024
 MAX_STREAM_FRAMES = 1024
 SYNC_HDR = struct.Struct("<4sI")
-SYNC_AGENT_SONAME = "libsync-agent.so.0"
 SYNC_AGENT_INSTALL = "sync_agent_dm_fota_install"
 SYNC_AGENT_BINARY = "libsync-agent.so.0.bin"
 SYNC_AGENT_REPORT = "sync-agent-report.json"
@@ -184,7 +185,7 @@ def sync_agent_library_path(raw: str) -> bytes:
             not re.fullmatch(r"/(?:usr/)?lib/(?:[A-Za-z0-9_+.-]+/)*"
                              r"libsync-agent[.]so[.]0(?:[.][0-9]+)*", raw) or
             any(p in ("", ".", "..") for p in raw.split("/")[1:])):
-        raise ArtifactPullError("DEPENDENCY_CACHE_PATH_REJECTED")
+        raise ArtifactPullError("DEPENDENCY_LIBRARY_PATH_REJECTED")
     return raw.encode("ascii")
 
 
@@ -321,52 +322,40 @@ def capture(ip: str, key_path: Path, destination: Path, timeout: int = 12,
             os.unlink(temporary)
 
 
-def parse_sync_agent_cache(raw: str) -> bytes:
-    """Resolve exactly one cache entry, without interpreting it as shell text."""
-    if not isinstance(raw, str) or not 1 <= len(raw) <= 64 * 1024:
-        raise ArtifactPullError("DEPENDENCY_CACHE_REPLY_UNRECOGNIZED")
-    lines = [line.strip() for line in raw.splitlines() if line.strip()]
-    if (not lines or lines[-1] != FOTA_SYNC_AGENT_CACHE_END or
-            lines.count(FOTA_SYNC_AGENT_CACHE_END) != 1):
-        raise ArtifactPullError("DEPENDENCY_CACHE_REPLY_INCOMPLETE")
-    lower = "\n".join(lines[:-1]).lower()
-    if "permission denied" in lower or "access denied" in lower:
-        raise ArtifactPullError("DEPENDENCY_CACHE_QUERY_DENIED")
-    if "not found" in lower and any(x in lower for x in ("ldconfig", "grep", "printf")):
-        raise ArtifactPullError("DEPENDENCY_CACHE_TOOL_UNAVAILABLE")
-    if "no such file" in lower or "can't open cache" in lower or "cannot open cache" in lower:
-        raise ArtifactPullError("DEPENDENCY_LINKER_CACHE_UNAVAILABLE")
-    paths = set()
-    pattern = re.compile(r"libsync-agent[.]so[.]0\s+\([A-Za-z0-9_, .+/:=-]{1,128}\)\s+=>\s+(\S+)")
-    for line in lines[:-1]:
-        match = pattern.fullmatch(line)
-        if not match:
-            raise ArtifactPullError("DEPENDENCY_CACHE_REPLY_UNRECOGNIZED")
-        paths.add(sync_agent_library_path(match.group(1)))
-    if not paths:
-        raise ArtifactPullError("DEPENDENCY_NOT_IN_LINKER_CACHE")
-    if len(paths) != 1:
-        raise ArtifactPullError("DEPENDENCY_CACHE_ENTRY_AMBIGUOUS")
-    return paths.pop()
+def sync_agent_listing(ip: str, key_path: Path, scope: str, timeout: int) -> dict:
+    """Reuse the authoritative LIST transport, with no on-watch helper."""
+    with socket.create_connection((ip, PORT), timeout=timeout) as sock:
+        sock.settimeout(timeout)
+        return list_one(sock, key_path, scope)
 
 
-def query_sync_agent_cache(ip: str, key_path: Path, timeout: int) -> str:
-    """Same fixed command in the two supported shell service encodings."""
-    for style in ("standard", "tizen-command"):
+def resolve_sync_agent(ip: str, key_path: Path, timeout: int, attempts: list) -> tuple:
+    """Select an actually listed SONAME link or a unique versioned candidate."""
+    for scope, directory in FOTA_LIBRARY_DIRECTORIES.items():
+        record = {"directory": directory.decode("ascii")}
+        attempts.append(record)
         try:
-            with socket.create_connection((ip, PORT), timeout=timeout) as sock:
-                sock.settimeout(timeout)
-                channel = Connection(sock, key_path)
-                channel.handshake()
-                return channel.shell(FOTA_SYNC_AGENT_CACHE_PROBE, style=style)
-        except ShellCloseError:
-            if style == "tizen-command":
-                raise ArtifactPullError("DEPENDENCY_CACHE_SHELL_REFUSED_OR_TIMED_OUT") from None
-        except SdbError:
-            raise ArtifactPullError("DEPENDENCY_CACHE_SDB_AUTH_OR_PROTOCOL_FAILED") from None
-        except (OSError, TimeoutError):
-            raise ArtifactPullError("DEPENDENCY_CACHE_SDB_TRANSPORT_UNAVAILABLE") from None
-    raise ArtifactPullError("DEPENDENCY_CACHE_SHELL_REFUSED_OR_TIMED_OUT")
+            listing = sync_agent_listing(ip, key_path, scope, timeout)
+        except InventoryError as exc:
+            record["status"] = str(exc)
+            if str(exc) == "DIRECTORY_LIST_DENIED_OR_UNSUPPORTED":
+                continue
+            raise
+        record.update(listing)
+        if listing["matching_names_truncated"]:
+            raise ArtifactPullError("DEPENDENCY_DIRECTORY_MATCHES_TRUNCATED")
+        candidates = {name: info for name, info in listing["matching_sync_agent_libraries"].items()
+                      if info["kind"] in ("REGULAR_FILE", "SYMLINK")}
+        if not candidates:
+            continue
+        name = SYNC_AGENT_SONAME if SYNC_AGENT_SONAME in candidates else next(iter(candidates))
+        if name != SYNC_AGENT_SONAME and len(candidates) != 1:
+            raise ArtifactPullError("DEPENDENCY_DIRECTORY_ENTRY_AMBIGUOUS")
+        if candidates[name]["bytes"] == "OVER_8_MIB":
+            raise ArtifactPullError("DEPENDENCY_EXCEEDS_EIGHT_MIB")
+        path = sync_agent_library_path(directory.decode("ascii") + "/" + name)
+        return path, scope, candidates[name]
+    raise ArtifactPullError("DEPENDENCY_NOT_OBSERVED_IN_LIBRARY_DIRECTORIES")
 
 
 def _sync_agent_archive(folder: Path, archive: Path, binary_copied: bool) -> None:
@@ -391,9 +380,9 @@ def capture_sync_agent(ip: str, key_path: Path, folder: Path, *,
     """Acquire the actual missing implementation in one phone-side operation.
 
     Verify the existing original consumer locally, resolve its evidenced
-    dependency from the watch's cache, copy one ARM library with our existing
-    RECV implementation, inspect it without loading it, and recheck the cache.
-    The cache identifies a candidate; no live runtime provider is claimed.
+    dependency through existing SDB directory inventory, copy one ARM library
+    with our existing RECV implementation, inspect it without loading it,
+    and recheck the selected directory entry. No live provider is claimed.
     """
     from analyze_watch3_r08_fota_elf import (
         CONSUMER_BYTES, CONSUMER_SHA256, OfflineELFError, parse_elf32,
@@ -416,12 +405,12 @@ def capture_sync_agent(ip: str, key_path: Path, folder: Path, *,
     source = (consumer_input.expanduser() if consumer_input is not None else
               Path.home() / "watch3-r840x-fota-unit-evidence/fota-configured-executable.bin")
     result = {
-        "schema": "uglyos-r840x-sync-agent-dependency-v1",
+        "schema": "uglyos-r840x-sync-agent-dependency-v2",
         "state": "NOT_YET_CAPTURED", "stage": "local_consumer",
         "dependency_soname": SYNC_AGENT_SONAME,
         "source_consumer_verified": False, "source_consumer_sha256": None,
-        "cache_query_requested": False, "cache_query_completed": False,
-        "cache_path": None, "cache_entry_stable": False,
+        "resolution_method": "SDB_SYNC_LIST", "resolution_attempts": [],
+        "observed_path": None, "directory_entry_stable": False,
         "binary_copied": False, "binary": None, "elf": None,
         "runtime_provider_observed": False, "target_model_authenticated": False,
         "fota_method_called": False, "binary_executed": False,
@@ -441,11 +430,9 @@ def capture_sync_agent(ip: str, key_path: Path, folder: Path, *,
         if SYNC_AGENT_SONAME not in parse_elf32(original)["dependencies"]:
             raise ArtifactPullError("CONSUMER_DEPENDENCY_NOT_OBSERVED")
         result.update(source_consumer_verified=True, source_consumer_sha256=CONSUMER_SHA256,
-                      stage="linker_cache", cache_query_requested=True)
-        reply = query_sync_agent_cache(ip, key_path, timeout)
-        result["cache_query_completed"] = True
-        path = parse_sync_agent_cache(reply)
-        result.update(cache_path=path.decode("ascii"), stage="library_copy")
+                      stage="library_directory")
+        path, scope, entry = resolve_sync_agent(ip, key_path, timeout, result["resolution_attempts"])
+        result.update(observed_path=path.decode("ascii"), stage="library_copy")
         with tempfile.NamedTemporaryFile(dir=folder, prefix=".sync-agent-", suffix=".tmp") as temp:
             with socket.create_connection((ip, PORT), timeout=timeout) as sock:
                 sock.settimeout(timeout)
@@ -461,17 +448,20 @@ def capture_sync_agent(ip: str, key_path: Path, folder: Path, *,
                 raise ArtifactPullError("DEPENDENCY_ELF_IDENTITY_MISMATCH")
             if SYNC_AGENT_INSTALL not in {x["name"] for x in facts["allowlisted_function_exports"]}:
                 raise ArtifactPullError("DEPENDENCY_INSTALL_FUNCTION_NOT_DEFINED")
-            result["stage"] = "cache_recheck"
-            if parse_sync_agent_cache(query_sync_agent_cache(ip, key_path, timeout)) != path:
-                raise ArtifactPullError("DEPENDENCY_CACHE_ENTRY_CHANGED_DURING_COPY")
-            result["cache_entry_stable"] = True
+            result["stage"] = "directory_recheck"
+            recheck = sync_agent_listing(ip, key_path, scope, timeout)
+            name = path.rsplit(b"/", 1)[1].decode("ascii")
+            if (recheck["matching_names_truncated"] or
+                    recheck["matching_sync_agent_libraries"].get(name) != entry):
+                raise ArtifactPullError("DEPENDENCY_DIRECTORY_ENTRY_CHANGED_DURING_COPY")
+            result["directory_entry_stable"] = True
             result["stage"] = "local_save"
             _save_local_exclusive(temp.name, folder / SYNC_AGENT_BINARY, binary["bytes"])
         result.update(binary_copied=True, binary=binary, stage="complete",
                       state="SYNC_AGENT_LIBRARY_COPIED")
     except RemoteFileReadError as exc:
         result["state"] = exc.category
-    except (ArtifactPullError, OfflineELFError) as exc:
+    except (ArtifactPullError, OfflineELFError, InventoryError) as exc:
         result["state"] = str(exc)
     except SdbError:
         result["state"] = "DEPENDENCY_SDB_PROTOCOL_OR_CONFIGURATION_ERROR"

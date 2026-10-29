@@ -1,124 +1,100 @@
 # SM-R840X: original FOTA artifacts for offline analysis
 
 Issue #47. October 29, 2026. Android/Termux only; no PC or paid tools.
-The objective remains a working bootloader/recovery route. Artifact acquisition
-does not demonstrate root, an unlocked bootloader or stock restoration.
+The objective remains working recovery and UgLy|OS boot. This operation
+acquires the missing installation implementation for offline examination.
 
-## Evidence already obtained
+## Actual previous result
 
-The owner's authenticated Wi-Fi SDB successfully copied these originals:
+The owner's `watch3-sync-agent-evidence.zip` contains only a 782-byte report.
+Its state is `DEPENDENCY_CACHE_TOOL_UNAVAILABLE` at `linker_cache`.
+The original consumer pin was verified and the watch answered, but no path
+or library was acquired. The report cannot identify which shell helper was
+unavailable. ZIP SHA-256:
+`b13d005fb5432e3cbe0c4ca41de682c9901ac276fa9eecc504b6f51f4a8161f4`.
 
-| Artifact | Bytes | SHA-256 |
-| --- | ---: | --- |
-| Accessory `fota-service` | 87,036 | `008c67e782eb3d97b0ddb7abc7606b86dc493576c24de476a2110d6e5a681757` |
-| Configured `/usr/bin/fota-consumer` | 89,980 | `19ad8468c5e73821359b140cd99f8c3bc072b2d73ed7766b082b88f26c676a1a` |
+The collector now reuses the existing SDB directory LIST implementation,
+followed by the existing RECV reader. It does not use a watch shell,
+`ldconfig`, `grep`, a linker-cache command or an SDK executable.
 
-Their [reviewed handoff](watch3-r840x-consumer-trust-boundaries.md) connects
-the accessory's state notifications to archive processing. The consumer's
-separate `Install` branch calls imported `sync_agent_dm_fota_install`.
-Its ELF names `libsync-agent.so.0` as a dependency. The dependency's bytes
-and runtime implementation have not yet been obtained.
+## Run the corrected capture
 
-The failed `rw-update-prepare.sh` read did not produce a new script or ZIP.
-It does not need to be repeated for the operation below. The original
-consumer capture on the phone is reused.
-
-## One-run sync-agent capture
-
-After the integrated change is available on main, run in Termux:
+The new directory and ZIP names preserve the earlier failure evidence:
 
 ```sh
-cd ~/Galaxy-3 && git switch main && git pull --ff-only
+cd ~/Galaxy-3 && git switch main && git pull --ff-only &&
 python tools/watch3_r08_fota_artifact_pull.py \
   --component sync-agent --watch-ip 10.115.12.131 \
-  --archive ~/storage/downloads/watch3-sync-agent-evidence.zip
+  --output-dir ~/watch3-r840x-sync-agent-native-evidence \
+  --archive ~/storage/downloads/watch3-sync-agent-native-evidence.zip
 ```
 
-Use the watch's current local Wi-Fi IP if it has changed. This uses the
-existing SDB key; no Android `sdb` executable or SDK installation is needed.
-The Downloads directory must already be available through Termux storage.
+Use the current watch IP if it changed. The existing SDB key and original
+consumer capture are reused. Attach `watch3-sync-agent-native-evidence.zip`
+from Downloads for analysis; the original vendor library remains private.
 
-One run:
+## Native discovery and identity checks
 
-1. Verifies the original consumer's exact hash/length locally at
-   `~/watch3-r840x-fota-unit-evidence/fota-configured-executable.bin` and
-   confirms its recorded dependency. It does not recopy the consumer.
-2. Runs a fixed `ldconfig -p` query and filters the cache for the exact
-   SONAME. This prints the existing cache; it does not rebuild it or load
-   either vendor executable. There is no `ldd` or arbitrary shell input.
-3. Accepts exactly one observed system-library path in that SONAME family.
-   Missing tools, denied queries, absent entries and ambiguity get distinct
-   report states. It does not guess another path when resolution fails.
-4. Reuses the existing bounded SDB RECV implementation to copy one library.
-   Checks ARM ELF32, ET_DYN, the actual DT_SONAME, and a public defined
+1. Verify the original 89,980-byte consumer's local SHA-256
+   `19ad8468c5e73821359b140cd99f8c3bc072b2d73ed7766b082b88f26c676a1a`
+   and its actual DT_NEEDED dependency `libsync-agent.so.0`.
+2. Use authenticated SDB LIST for `/usr/lib`; if no candidate is listed or
+   that directory denies LIST, inspect `/lib`. These are standard
+   [system-library roots](https://man7.org/linux/man-pages/man8/ldconfig.8.html),
+   not an attestation of the actual loaded provider. Discovery is limited
+   to those two directories and the exact evidenced SONAME/version family.
+3. Prefer an actually listed `libsync-agent.so.0` file/link. Without that
+   name, accept only one listed versioned candidate. Ambiguity is reported.
+   No file path is copied merely because a directory is a standard location.
+4. Copy the selected path using the original bounded SDB RECV transport.
+   Check ARM ELF32, ET_DYN, DT_SONAME and a public defined
    `sync_agent_dm_fota_install` function in mapped executable bytes.
-5. Rechecks the same cache entry before publishing the private copy.
-6. Saves a report and creates the requested ZIP. A denied/missing read also
-   produces a report-only ZIP, with a nonzero exit status.
+5. Recheck the selected directory entry's name/kind/byte count, save the
+   private original and report, and package the explicit files into a ZIP.
 
-The upstream [ldconfig manual](https://man7.org/linux/man-pages/man8/ldconfig.8.html)
-defines `-p` as printing candidate libraries in the existing cache. Its
-availability on this installed watch is still to be established by this run.
+Directory processing is bounded to 8,192 entries and 512 KiB per library
+directory. Only matching library names and aggregate counts are reported;
+other names stay private. Original inventory modes retain their smaller limits.
+The binary transfer remains bounded to 8 MiB.
 
-Attach `watch3-sync-agent-evidence.zip` here for examination. It is an
-original vendor artifact for private analysis; keep it out of GitHub.
-It is not an executable update or a file to send back to the watch.
+The report schema is `uglyos-r840x-sync-agent-dependency-v2`. It records
+`resolution_method=SDB_SYNC_LIST`, attempts and `observed_path`. The obsolete
+cache-query fields are removed. A stable entry is a metadata observation;
+it does not establish unchanged file contents or an active loaded provider.
+`runtime_provider_observed` remains false.
 
-## Outputs and failures
+## Files and failures
 
-The new private folder is `~/watch3-r840x-sync-agent-evidence` (0700).
-Files are 0600, never overwritten:
+The selected new folder is private (0700), with 0600 files:
 
-- `sync-agent-report.json`: state/stage, source pin, observed cache path,
-  hash/length, selected ELF facts and public function definition addresses.
-- `libsync-agent.so.0.bin`: present only after identity/export checks and
-  the cache recheck succeed.
+- `sync-agent-report.json`: state/stage, original-consumer pin, directory
+  observations, selected path, binary hash/length and selected ELF facts.
+- `libsync-agent.so.0.bin`: published only after identity and recheck succeed.
 
-The ZIP contains only those explicitly named files. Raw cache output,
-arbitrary library strings, credentials and SDB authorization material are
-not included in the report. Existing files or a ZIP name collision stop
-before contacting the watch. Pre-existing evidence is preserved.
+The ZIP contains only the report and validated library. After output-folder
+creation, a failed read also produces a report-only ZIP whenever local
+storage permits it, and the command returns nonzero. No extra packaging
+command chained with `&&` is needed. Existing folders/files/ZIPs are preserved.
 
-`SYNC_AGENT_LIBRARY_COPIED` proves a readable candidate with the expected
-SONAME/function was obtained from the observed cache path. A stable cache
-entry does not prove that an active consumer loaded this file: no process
-was started, and `runtime_provider_observed` remains false.
-
-For this mode, an explicit remote RECV error is retained categorically as
-`REMOTE_REPORTED_ACCESS_DENIED` or `REMOTE_REPORTED_NO_SUCH_FILE` when
-recognized. Unrecognized or conflicting text stays ambiguous. Raw error
-text is never exposed. Earlier collectors retain their established error
-messages; no repeat denied-script read is requested.
-
-Failure to create the output directory/ZIP destination is a local setup
-error. A failure after directory creation preserves a JSON report whenever
-local storage allows it. The firmware remains unchanged by this collector.
+A reported remote read denial or missing file is retained categorically
+without exposing its raw text. Empty/denied directory results do not prove
+the library is absent from the whole device. A copied candidate does not
+demonstrate root, an unlocked bootloader, signature bypass or stock recovery.
 
 ## Compatibility and validation
 
-The original `fota-service` and `updateclient` CLI profiles, default paths,
-single-RECV requests, privacy behavior and legacy error strings are preserved.
-The new dependency mode is explicit. There are no arbitrary remote filename
-or shell command options. Executable-path validation is unchanged; the
-library reader accepts only the evidenced SONAME family under system library
-directories after cache resolution.
+Existing `fota-service` and `updateclient` profiles, default paths,
+executable-path validation and legacy remote-error strings are unchanged.
+No arbitrary remote path or shell command argument is exposed.
 
-The offline ELF parser now also reports DT_SONAME and allowlisted public
-function definitions. An undefined import, hidden/local symbol or address
-outside file-backed executable memory is not reported as an implementation.
-Its existing exact-original consumer review is unchanged.
+Tests exercise complete native LIST/RECV capture and ZIP packaging, large
+library inventories, filtered names, SONAME preference, ambiguous versions,
+the second system-library root, denied reads, wrong identity, undefined
+functions, changed entry metadata, output collisions and diagnostic ZIPs.
+The compiled ARM Thumb ELF/readelf comparison remains required in CI.
+No Samsung binary is executed or sent to CI.
 
-Tests cover the complete fake-SDB flow, both shell encodings, cache errors,
-wrong library identity, undefined functions, cache changes, output collisions,
-failure packaging and a real POSIX shell query fixture. CI additionally
-cross-compiles an original tiny ARM Thumb library and compares its parsed
-function definition with GNU readelf; it never executes the generated code.
-Original Samsung binaries remain private and are not sent to CI.
-
-## Android/Termux local save compatibility
-
-The earlier Termux `os.link` failure was a local save portability bug.
-Both existing profiles and the dependency mode use exclusive O_CREAT/O_EXCL
-local copies, not hard links. Temporary partial transfers are removed;
-existing owner files are preserved. No SDB SEND, package install, FOTA
-request, root-mode change, reboot or partition write is performed.
+The earlier Termux `os.link` portability repair is preserved: validated
+local files use exclusive O_CREAT/O_EXCL copies. This collector performs no
+SDB SEND, service activation, update request, root-mode change, reboot or
+partition write. Physical validation of this corrected capture is pending.
