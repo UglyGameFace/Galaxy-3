@@ -145,6 +145,11 @@ unobserved. Thus a visible caller without a signature check cannot establish
 that the full installation pipeline omits one. This identifies a concrete
 missing implementation rather than another guessed script name.
 
+The [existing artifact reader](watch3-r08-fota-artifact-readonly.md) now has
+an explicit `sync-agent` mode that resolves this SONAME from the watch's
+linker cache, copies and identifies one library, and packages the result
+in a single Termux run. This collector has not yet been run on the watch.
+
 Independently matched six selected immediate calls with the existing
 standard-library decoder and Capstone, three actual PLT/GOT relocations,
 the TBB target and fixed argument loads. These additional manual checks

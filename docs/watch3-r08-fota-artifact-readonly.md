@@ -1,56 +1,124 @@
-# SM-R840X: read-only FOTA executable extraction
+# SM-R840X: original FOTA artifacts for offline analysis
 
-**Active task:** Issue #47, UgLy|OS boot and recovery. This is an exploratory data-collection method, NOT a custom-boot method.
+Issue #47. October 29, 2026. Android/Termux only; no PC or paid tools.
+The objective remains a working bootloader/recovery route. Artifact acquisition
+does not demonstrate root, an unlocked bootloader or stock restoration.
 
-## Why
+## Evidence already obtained
 
-The live R840X established that the Samsung TV archive-root method cannot work in its published form because the required sdbd-tarlauncher binary is absent. Samsung's July 2021 advisory (https://security.samsungmobile.com/serviceWeb.smsb?month=7&year=2021) explicitly identifies two **Watch3** FOTA vulnerabilities, CVE-2021-25436 (Samsung Accessory Protocol processing) and CVE-2021-25437 (replacement of FOTA update files).
+The owner's authenticated Wi-Fi SDB successfully copied these originals:
 
-A separate first-hand Tizen watch package inventory (https://gist.github.com/avipars/bf4ebf3efa1bcceb77025b8b9159a6df) identifies the executable /usr/apps/com.samsung.fota-consumer/bin/fota-service. **Its existence and readability on the owner's R840X are NOT established.**
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Accessory `fota-service` | 87,036 | `008c67e782eb3d97b0ddb7abc7606b86dc493576c24de476a2110d6e5a681757` |
+| Configured `/usr/bin/fota-consumer` | 89,980 | `19ad8468c5e73821359b140cd99f8c3bc072b2d73ed7766b082b88f26c676a1a` |
 
-We can investigate an exact-watch binary instead of hunting for leaked public firmware, if unprivileged SDB access permits the read.
+Their [reviewed handoff](watch3-r840x-consumer-trust-boundaries.md) connects
+the accessory's state notifications to archive processing. The consumer's
+separate `Install` branch calls imported `sync_agent_dm_fota_install`.
+Its ELF names `libsync-agent.so.0` as a dependency. The dependency's bytes
+and runtime implementation have not yet been obtained.
 
-## Read-only operation
+The failed `rw-update-prepare.sh` read did not produce a new script or ZIP.
+It does not need to be repeated for the operation below. The original
+consumer capture on the phone is reused.
 
-Run the script ONLY after its PR's synthetic CI passes and it is merged:
+## One-run sync-agent capture
 
-    cd ~/Galaxy-3 && git pull --ff-only
-    python tools/watch3_r08_fota_artifact_pull.py --watch-ip 10.0.0.65
+After the integrated change is available on main, run in Termux:
 
-Replace the IP if the watch has changed Wi-Fi networks.
+```sh
+cd ~/Galaxy-3 && git switch main && git pull --ff-only
+python tools/watch3_r08_fota_artifact_pull.py \
+  --component sync-agent --watch-ip 10.115.12.131 \
+  --archive ~/storage/downloads/watch3-sync-agent-evidence.zip
+```
 
-The script reuses already authorized SDB and sends exactly one fixed sync: RECV request for the path above. It has no remote filename input, no package installation, shell command, SEND/push, root operation, raw partition access, reboot or flash. It streams at most 8 MiB; refuses malformed packets, failures and unexpected ELF architecture; and removes incomplete files.
+Use the watch's current local Wi-Fi IP if it has changed. This uses the
+existing SDB key; no Android `sdb` executable or SDK installation is needed.
+The Downloads directory must already be available through Termux storage.
 
-On success, it writes only two LOCAL Termux files:
-- ~/watch3-r840x-fota-service-readonly.bin: the executable to analyze offline. Do not run, share publicly, or commit to GitHub.
-- ~/watch3-r840x-fota-artifact-evidence.json: SHA-256, byte count, ELF architecture, and explicit unproven-boot flags. No device IP, keys, hardware serial or private process data.
+One run:
 
-On failure, NO_ARTIFACT means no readable binary was collected. A missing/unreadable target can reflect permission and SMACK restrictions; it is not proof that the vulnerability was patched. Do not attempt to bypass permissions with raw partition writes.
+1. Verifies the original consumer's exact hash/length locally at
+   `~/watch3-r840x-fota-unit-evidence/fota-configured-executable.bin` and
+   confirms its recorded dependency. It does not recopy the consumer.
+2. Runs a fixed `ldconfig -p` query and filters the cache for the exact
+   SONAME. This prints the existing cache; it does not rebuild it or load
+   either vendor executable. There is no `ldd` or arbitrary shell input.
+3. Accepts exactly one observed system-library path in that SONAME family.
+   Missing tools, denied queries, absent entries and ambiguity get distinct
+   report states. It does not guess another path when resolution fails.
+4. Reuses the existing bounded SDB RECV implementation to copy one library.
+   Checks ARM ELF32, ET_DYN, the actual DT_SONAME, and a public defined
+   `sync_agent_dm_fota_install` function in mapped executable bytes.
+5. Rechecks the same cache entry before publishing the private copy.
+6. Saves a report and creates the requested ZIP. A denied/missing read also
+   produces a report-only ZIP, with a nonzero exit status.
 
-## Evidence and safety
+The upstream [ldconfig manual](https://man7.org/linux/man-pages/man8/ldconfig.8.html)
+defines `-p` as printing candidate libraries in the existing cache. Its
+availability on this installed watch is still to be established by this run.
 
-- Samsung's official SDB documentation explicitly supports pulling files from a device **only when permissions allow**: https://github.com/Samsung/tizen-docs/blob/master/docs/sdk-tools/baseline-sdk/common-tools/smart-development-bridge.md
-- A separate wire-level study confirms SDB sync framing and adb compatibility on its tested setup: https://github.com/RoboA-PLAYZ/blue-penny/blob/main/docs/tizen-sdb-protocol.md . This does not establish the R840X's sync service behavior.
-- No exploit payloads, update-file substitutions, crafted FOTA requests, or firmware writes are in scope. The owner's only working watch has no proven rescue image or custom-boot support.
+Attach `watch3-sync-agent-evidence.zip` here for examination. It is an
+original vendor artifact for private analysis; keep it out of GitHub.
+It is not an executable update or a file to send back to the watch.
 
-After an authentic binary is retrieved, analyze its headers and service parsing logic OFFLINE, compare with an independently authenticated later version if available, and independently establish whether any execution primitive crosses root/kernel and bootloader signature boundaries. A retrieved file is research evidence, not a bootloader unlock.
+## Outputs and failures
+
+The new private folder is `~/watch3-r840x-sync-agent-evidence` (0700).
+Files are 0600, never overwritten:
+
+- `sync-agent-report.json`: state/stage, source pin, observed cache path,
+  hash/length, selected ELF facts and public function definition addresses.
+- `libsync-agent.so.0.bin`: present only after identity/export checks and
+  the cache recheck succeed.
+
+The ZIP contains only those explicitly named files. Raw cache output,
+arbitrary library strings, credentials and SDB authorization material are
+not included in the report. Existing files or a ZIP name collision stop
+before contacting the watch. Pre-existing evidence is preserved.
+
+`SYNC_AGENT_LIBRARY_COPIED` proves a readable candidate with the expected
+SONAME/function was obtained from the observed cache path. A stable cache
+entry does not prove that an active consumer loaded this file: no process
+was started, and `runtime_provider_observed` remains false.
+
+For this mode, an explicit remote RECV error is retained categorically as
+`REMOTE_REPORTED_ACCESS_DENIED` or `REMOTE_REPORTED_NO_SUCH_FILE` when
+recognized. Unrecognized or conflicting text stays ambiguous. Raw error
+text is never exposed. Earlier collectors retain their established error
+messages; no repeat denied-script read is requested.
+
+Failure to create the output directory/ZIP destination is a local setup
+error. A failure after directory creation preserves a JSON report whenever
+local storage allows it. The firmware remains unchanged by this collector.
+
+## Compatibility and validation
+
+The original `fota-service` and `updateclient` CLI profiles, default paths,
+single-RECV requests, privacy behavior and legacy error strings are preserved.
+The new dependency mode is explicit. There are no arbitrary remote filename
+or shell command options. Executable-path validation is unchanged; the
+library reader accepts only the evidenced SONAME family under system library
+directories after cache resolution.
+
+The offline ELF parser now also reports DT_SONAME and allowlisted public
+function definitions. An undefined import, hidden/local symbol or address
+outside file-backed executable memory is not reported as an implementation.
+Its existing exact-original consumer review is unchanged.
+
+Tests cover the complete fake-SDB flow, both shell encodings, cache errors,
+wrong library identity, undefined functions, cache changes, output collisions,
+failure packaging and a real POSIX shell query fixture. CI additionally
+cross-compiles an original tiny ARM Thumb library and compares its parsed
+function definition with GNU readelf; it never executes the generated code.
+Original Samsung binaries remain private and are not sent to CI.
 
 ## Android/Termux local save compatibility
 
-On the owner's actual Termux Python runtime, `os.link` was unavailable, causing
-`AttributeError` **after** the bounded SDB transfer and ELF validation returned
-from `pull_fota()` but before the local binary was published. This is a
-phone-side artifact-save portability bug, NOT evidence of an SDB permission
-denial or an executed exploit.
-
-The implementation now uses standard `os.open(O_CREAT | O_EXCL, 0o600)`
-to reserve a new local destination exclusively, copies from the already
-validated temporary file, syncs it, checks its byte count, and deletes any
-partial destination on failure. This does **not** overwrite an existing
-file and never writes to the watch. Synthetic CI covers Android's missing
-`os.link` behavior, an existing destination, copy failures and size mismatch.
-
-After merging this fix, rerun the original one-command pull from the
-current Wi-Fi watch IP. Check the JSON evidence only after a success message.
-The filename ending in `.bin` refers to a **local ELF research artifact**;
-do not execute, upload or flash it.
+The earlier Termux `os.link` failure was a local save portability bug.
+Both existing profiles and the dependency mode use exclusive O_CREAT/O_EXCL
+local copies, not hard links. Temporary partial transfers are removed;
+existing owner files are preserved. No SDB SEND, package install, FOTA
+request, root-mode change, reboot or partition write is performed.

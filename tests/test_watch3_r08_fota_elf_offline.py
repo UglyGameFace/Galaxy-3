@@ -15,17 +15,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import analyze_watch3_r08_fota_elf as module
 
 
-def fake_elf(*, with_sections=True, corrupt=None, private_marker=b"") -> bytes:
+def fake_elf(*, with_sections=True, corrupt=None, private_marker=b"",
+             needed="libc.so.6", soname=None, export=None,
+             export_info=18, export_other=0, export_addr=0x1011,
+             export_shindex=1) -> bytes:
     """Minimal structurally consistent ARM ELF32 with section AND segment views."""
     phcount = 4
     payload = bytearray(module.ELF_HDR.size + phcount * module.PROGRAM_HDR.size)
     payload.extend(b"\0" * (192 - len(payload)))
 
-    dynstr = b"\0libc.so.6\0system\0rename\0internal_secret_9876\0"
-    lib_name = dynstr.index(b"libc.so.6")
+    dynstr = b"\0" + needed.encode() + b"\0system\0rename\0internal_secret_9876\0"
+    lib_name = dynstr.index(needed.encode())
     system_name = dynstr.index(b"system")
     rename_name = dynstr.index(b"rename")
     secret_name = dynstr.index(b"internal_secret")
+    soname_name = len(dynstr)
+    if soname is not None:
+        dynstr += soname.encode() + b"\0"
+    export_name = len(dynstr)
+    if export is not None:
+        dynstr += export.encode() + b"\0"
     str_off = len(payload)
     payload.extend(dynstr)
     symbol_off = len(payload)
@@ -35,6 +44,9 @@ def fake_elf(*, with_sections=True, corrupt=None, private_marker=b"") -> bytes:
         (rename_name, 0, 0, 18, 0, 0),
         (secret_name, 0, 0, 18, 0, 0),
     ]
+    if export is not None:
+        symbols.append((export_name, export_addr, 2, export_info,
+                        export_other, export_shindex))
     for values in symbols:
         payload.extend(module.SYMBOL_ENTRY.pack(*values))
     symbol_size = len(payload) - symbol_off
@@ -42,8 +54,11 @@ def fake_elf(*, with_sections=True, corrupt=None, private_marker=b"") -> bytes:
     dynamic_off = len(payload)
     dynamics = [
         (1, lib_name), (5, 0x1000 + str_off),
-        (10, len(dynstr)), (24, 0), (0, 0),
+        (10, len(dynstr)), (24, 0),
     ]
+    if soname is not None:
+        dynamics.append((14, soname_name))
+    dynamics.append((0, 0))
     for values in dynamics:
         payload.extend(module.DYNAMIC_ENTRY.pack(*values))
     dynamic_size = len(payload) - dynamic_off
@@ -96,6 +111,31 @@ def fake_elf(*, with_sections=True, corrupt=None, private_marker=b"") -> bytes:
 
 
 class R840XFotaOfflineElfTests(unittest.TestCase):
+    def test_library_soname_and_defined_install_function_are_distinct_from_imports(self):
+        facts = module.parse_elf32(fake_elf(soname="libsync-agent.so.0",
+                                          export="sync_agent_dm_fota_install"))
+        self.assertEqual(facts["soname"], "libsync-agent.so.0")
+        self.assertEqual(facts["allowlisted_function_exports"], [{
+            "name": "sync_agent_dm_fota_install", "address_hex": "0x00001011",
+            "code_address_hex": "0x00001010", "bytes": 2, "thumb": True}])
+        self.assertNotIn("sync_agent_dm_fota_install",
+                         facts["allowlisted_imports_by_category"]["update_agent"])
+        stripped = module.parse_elf32(fake_elf(with_sections=False,
+                                               soname="libsync-agent.so.0"))
+        self.assertEqual(stripped["soname"], "libsync-agent.so.0")
+        self.assertEqual(stripped["allowlisted_function_exports"], [])
+
+    def test_hidden_local_undefined_and_unmapped_symbols_are_not_function_implementations(self):
+        cases = ({"export_other": 2}, {"export_info": 2}, {"export_info": 17},
+                 {"export_shindex": 0}, {"export_shindex": 0xFFF1},
+                 {"export_addr": 0x900001})
+        for kwargs in cases:
+            with self.subTest(kwargs=kwargs):
+                facts = module.parse_elf32(fake_elf(export="sync_agent_dm_fota_install", **kwargs))
+                self.assertEqual(facts["allowlisted_function_exports"], [])
+        facts = module.parse_elf32(fake_elf(export="internal_secret_9876"))
+        self.assertEqual(facts["allowlisted_function_exports"], [])
+
     def test_thumb_call_decoder_matches_independently_reviewed_calls_and_alignment(self):
         # Instruction examples only, not a firmware image or an unlock test.
         for address, encoded, expected in (

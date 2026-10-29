@@ -142,6 +142,18 @@ FOTA_UNIT_METADATA_PROBES = {
 }
 ALLOWED_PROBES.update(FOTA_UNIT_METADATA_PROBES)
 
+# The original consumer imports sync_agent_dm_fota_install and DT_NEEDED
+# libsync-agent.so.0. Query the existing linker cache without loading the
+# consumer/library or rebuilding the cache. Keep stderr outside the filter;
+# the terminator distinguishes no matching entry from a refused empty stream.
+FOTA_SYNC_AGENT_CACHE_PROBE = "fota_sync_agent_cache"
+FOTA_SYNC_AGENT_CACHE_END = "SYNC_AGENT_CACHE_QUERY_COMPLETE"
+FOTA_SYNC_AGENT_CACHE_COMMAND = (
+    "LC_ALL=C ldconfig -p | grep -F 'libsync-agent.so.0'; "
+    "printf '\\nSYNC_AGENT_CACHE_QUERY_COMPLETE\\n'"
+)
+ALLOWED_PROBES[FOTA_SYNC_AGENT_CACHE_PROBE] = FOTA_SYNC_AGENT_CACHE_COMMAND
+
 PORT = 26101
 VERSION = 0x00100000
 MAX_PAYLOAD = 256 * 1024
