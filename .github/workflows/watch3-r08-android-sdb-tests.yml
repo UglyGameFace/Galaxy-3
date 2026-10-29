@@ -3,6 +3,7 @@ name: Watch3 R08 Android SDB read-only socket tests (NO WATCH)
 # Synthetic in-memory SDB peer ONLY; no physical device connections,
 # network scanning, device boot, flashing, root or package installation.
 # A separate disposable private host D-Bus verifies registry behavior.
+# A real host systemd fixture verifies show does not start its inactive unit.
 on:
   pull_request:
     branches: [main]
@@ -11,6 +12,8 @@ on:
       - 'tools/watch3_r840x_fota_owner_readonly.py'
       - 'tests/test_watch3_r840x_fota_owner_readonly.py'
       - 'tests/test_watch3_r840x_fota_owner_real_dbus.py'
+      - 'tests/test_watch3_r840x_fota_unit_readonly.py'
+      - 'tests/test_watch3_r840x_fota_unit_real_systemd.py'
       - 'tools/watch3_r08_root_prereq.py'
       - 'tools/watch3_r08_fota_artifact_pull.py'
       - 'tools/watch3_r08_fota_consumer_inventory.py'
@@ -75,7 +78,9 @@ jobs:
           python3 -m unittest discover -s tests -p test_watch3_r08_fota_elf_offline.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_fota_services.py -v
           python3 -m unittest discover -s tests -p test_watch3_r840x_fota_owner_readonly.py -v
+          python3 -m unittest discover -s tests -p test_watch3_r840x_fota_unit_readonly.py -v
           WATCH3_REQUIRE_PRIVATE_DBUS=1 python3 -m unittest discover -s tests -p test_watch3_r840x_fota_owner_real_dbus.py -v
+          WATCH3_REQUIRE_SYSTEMD=1 python3 -m unittest discover -s tests -p test_watch3_r840x_fota_unit_real_systemd.py -v
           python3 -m unittest discover -s tests -p test_watch3_r08_live_boot_probe.py -v
           python3 - <<'PY'
           from pathlib import Path
@@ -85,5 +90,5 @@ jobs:
                              if line.lstrip().startswith('python tools/')]
           assert all('--watch-ip' not in line for line in executed_python)
           assert 'NO WATCH' in workflow
-          print('PASS: only in-memory fake SDB server used; no watch or LAN access')
+          print('PASS: fake SDB and disposable host metadata fixtures only; no watch or LAN access')
           PY

@@ -133,6 +133,15 @@ FOTA_OWNER_REGISTRY_PROBES = {
 }
 ALLOWED_PROBES.update(FOTA_OWNER_REGISTRY_PROBES)
 
+# The physical watch listed this exact system unit (386 bytes), but RECV
+# could not read it. Read only its manager properties; show may load unit
+# metadata into memory, but does not start, enable, reload or stop the unit.
+FOTA_UNIT_METADATA_PROBES = {
+    "fota_unit_manager_owner": "dbus-send --system --print-reply --reply-timeout=1500 --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.systemd1",
+    "fota_unit_properties": "systemctl --system --no-pager --no-ask-password show --all --property=Id --property=LoadState --property=ActiveState --property=SubState --property=Type --property=BusName --property=User --property=Group --property=FragmentPath --property=ExecStart fota-consumer.service",
+}
+ALLOWED_PROBES.update(FOTA_UNIT_METADATA_PROBES)
+
 PORT = 26101
 VERSION = 0x00100000
 MAX_PAYLOAD = 256 * 1024

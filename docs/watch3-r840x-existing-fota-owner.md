@@ -74,6 +74,68 @@ an exploitable permission. Even successful acquisition does not prove a
 signature bypass, bootloader code execution, exact-model rescue, custom boot
 or firmware write authorization. All physical boot/recovery gates remain open.
 
+## October 29 physical result: no current owner
+
+The owner ran merged PR #119 on the physical watch and supplied the complete
+redacted JSON: `watch_contacted=true`, `state=NO_CURRENT_FOTA_OWNER`, no
+UID/executable/binary, and `service_activation_requested=false`. This is an
+unowned name at that instant, not a transport failure. The collector did
+not independently re-read model/firmware (`device_identity_attested=false`).
+Do not repeat the probe or start the consumer just to make an owner exist.
+
+The earlier physical inventory listed the exact 386-byte
+`/usr/lib/systemd/system/fota-consumer.service`; its SDB RECV was denied or
+unavailable. That supports a **different metadata read**: ask the existing
+systemd manager for this known unit's configuration, without guessing an
+executable or retrying the unreadable file. The separate optional mode in
+the existing collector reuses its original SDB transport and ARM ELF reader:
+
+```sh
+cd ~/Galaxy-3 && git switch main && git pull --ff-only
+python tools/watch3_r840x_fota_owner_readonly.py \
+  --watch-ip 10.115.12.131 --copy-configured-unit
+cat ~/watch3-r840x-fota-unit-evidence/fota-unit-report.json
+```
+
+Use the current local watch IP, with normal Tizen running. The mode:
+
+1. Queries the bus daemon for its ID and the existing systemd manager owner.
+   If the manager name is unowned, stops before running systemctl.
+2. Runs only a literal `systemctl ... show --all --property=...` command for
+   `fota-consumer.service`. It selects unit identity/state, configured
+   user/group, bus name, fragment path and `ExecStart`. `show` may load
+   configuration into manager memory; it does not start, enable, reload or
+   stop the unit. No journal or environment is read.
+3. Accepts only the exact observed unit ID/fragment path, a loaded unit and
+   a single safe vendor executable in `ExecStart`. Arguments are ignored;
+   neither the configured executable nor its arguments are ever executed.
+4. Copies that configured path through bounded read-only SDB RECV, accepting
+   ARM ELF only. A script or denied file is a failure. Rechecks selected
+   unit fields and manager/bus identity before publishing the copy.
+5. Creates a separate new mode-0700 directory and mode-0600 JSON plus, on
+   success, `fota-configured-executable.bin` for private offline analysis.
+   It preserves the earlier no-owner report. Raw responses, arguments, PIDs,
+   timestamps and bus identities are not saved.
+
+`CONFIGURED_FOTA_UNIT_BINARY_COPIED_READONLY` means the configured program
+was copied. It **does not establish a live `fota.consumer` owner**: owner
+UID, observed live executable and owner stability remain unset. Even
+`configured_user=root` describes configuration, not a running process's
+credentials or phone root access. A wrapper may not implement the endpoint.
+Inspect the copied bytes offline before drawing that connection.
+`configured_fields_stable` covers only the selected redacted fields at the
+observations, not arguments or every intervening process/filesystem state.
+
+If properties are denied, a unit/path is unavailable, or copying fails,
+preserve the report and analyze that result first. No automatic service
+start, update call, path scan, privilege attempt or firmware change follows.
+
+Primary references: [systemctl show](https://www.freedesktop.org/software/systemd/man/latest/systemctl.html),
+[systemd manager API](https://www.freedesktop.org/software/systemd/man/latest/org.freedesktop.systemd1.html),
+and [systemd v219's property formatter](https://github.com/systemd/systemd/blob/v219/src/systemctl/systemctl.c).
+The parser supports its older `{ path=... ; argv[]=... }` framing and current
+Ubuntu output. Watch3 tool support and policy remain unverified until run.
+
 ## Source acquisition crosscheck
 
 Samsung's [exact SM-R840X Korea download page](https://www.samsungsvc.co.kr/download/view?code=SM-R840X&prd1DepNm=%EB%AA%A8%EB%B0%94%EC%9D%BC&prd2DepNm=%EC%9B%A8%EC%96%B4%EB%9F%AC%EB%B8%94)
@@ -93,3 +155,7 @@ integration test registers a disposable owner process, queries its actual
 PID/UID and proc-exe link, and verifies an activatable service is **not**
 started when no owner exists. CI requires this test on Ubuntu 22.04/24.04.
 Host tests establish neither watch tool availability nor physical recovery.
+Configured-unit tests also run the literal show command against a real
+inactive disposable trap unit on Ubuntu 22.04/24.04. CI requires the real
+manager and tools; missing prerequisites fail rather than skip. Only that
+disposable host fixture is created/removed; no watch is connected.
