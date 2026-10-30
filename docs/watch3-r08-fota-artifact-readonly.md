@@ -1,8 +1,21 @@
 # SM-R840X: original FOTA artifacts for offline analysis
 
 Issue #47. October 29, 2026. Android/Termux only; no PC or paid tools.
-The objective remains working recovery and UgLy|OS boot. This operation
-acquires the missing installation implementation for offline examination.
+The objective remains working recovery and UgLy|OS boot. The corrected
+library capture has now succeeded. The original implementation has been
+examined; [its IPC path and next receiver-context capture](watch3-r840x-sync-agent-install-path.md)
+are documented separately. Do not repeat the completed library capture.
+
+## Successful native capture
+
+`watch3-sync-agent-native-evidence.zip`, SHA-256
+`331b97505a06dc0a3c8dd45cf08b3e42d269151f9e1dd1f756818eb5c8ba374e`,
+contains the report and the 647,076-byte original ARM ELF32 library.
+Library SHA-256:
+`3fbebb3d55a7e6a132f3516af88280e63278a4b3bf51cb61cca194614b605a97`.
+State `SYNC_AGENT_LIBRARY_COPIED`; selected directory metadata was stable.
+The new ZIP was independently inspected, and the private original was
+checked against `readelf` and an independent instruction decoder.
 
 ## Actual previous result
 
@@ -17,7 +30,7 @@ The collector now reuses the existing SDB directory LIST implementation,
 followed by the existing RECV reader. It does not use a watch shell,
 `ldconfig`, `grep`, a linker-cache command or an SDK executable.
 
-## Run the corrected capture
+## Completed capture command (reference only)
 
 The new directory and ZIP names preserve the earlier failure evidence:
 
@@ -97,4 +110,4 @@ No Samsung binary is executed or sent to CI.
 The earlier Termux `os.link` portability repair is preserved: validated
 local files use exclusive O_CREAT/O_EXCL copies. This collector performs no
 SDB SEND, service activation, update request, root-mode change, reboot or
-partition write. Physical validation of this corrected capture is pending.
+partition write. Physical capture succeeded; unlock and recovery remain unproven.

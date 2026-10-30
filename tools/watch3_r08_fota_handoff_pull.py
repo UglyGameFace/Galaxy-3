@@ -53,9 +53,14 @@ class HandoffError(ValueError):
 
 
 class CappedBytes(io.BytesIO):
+    def __init__(self, max_bytes: int = MAX_FILE_BYTES):
+        super().__init__()
+        self.max_bytes = max_bytes
+
     def write(self, part: bytes) -> int:
-        if self.tell() + len(part) > MAX_FILE_BYTES:
-            raise HandoffError("REMOTE_FILE_EXCEEDS_EIGHT_KIB")
+        if self.tell() + len(part) > self.max_bytes:
+            raise HandoffError("REMOTE_FILE_EXCEEDS_EIGHT_KIB" if self.max_bytes == MAX_FILE_BYTES
+                               else "REMOTE_FILE_EXCEEDS_CONTEXT_LIMIT")
         return super().write(part)
 
 
@@ -66,6 +71,13 @@ def receive_one(sock, key_path: Path, remote_path: bytes) -> bytes:
     permitted.add(EVIDENCED_UPDATE_PREPARE_SCRIPT_PATH)
     if remote_path not in permitted:
         raise HandoffError("REMOTE_PATH_NOT_ALLOWLISTED")
+    return _receive_bounded_file(sock, key_path, remote_path, MAX_FILE_BYTES)
+
+
+def _receive_bounded_file(sock, key_path: Path, remote_path: bytes, max_bytes: int) -> bytes:
+    """Shared RECV transport; callers must validate their own fixed/declared paths."""
+    if not 1 <= max_bytes <= 8 * 1024 * 1024:
+        raise HandoffError("INVALID_LOCAL_BYTE_LIMIT")
     conn = Connection(sock, key_path)
     try:
         conn.handshake()
@@ -82,7 +94,7 @@ def receive_one(sock, key_path: Path, remote_path: bytes) -> bytes:
                   SYNC_HDR.pack(b"RECV", len(remote_path)) + remote_path)
     except (OSError, SdbError, TimeoutError):
         raise HandoffError("SDB_RECV_REQUEST_FAILED") from None
-    buffer = CappedBytes()
+    buffer = CappedBytes(max_bytes)
     decoder = ReadOnlySyncDecoder(buffer)
     for _ in range(MAX_STREAM_FRAMES):
         try:

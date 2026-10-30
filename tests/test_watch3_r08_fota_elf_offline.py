@@ -111,6 +111,23 @@ def fake_elf(*, with_sections=True, corrupt=None, private_marker=b"",
 
 
 class R840XFotaOfflineElfTests(unittest.TestCase):
+    def test_digest_imports_are_distinct_from_signature_checks_and_md5_export_is_visible(self):
+        facts = module.parse_elf32(fake_elf(export="gcry_md_open", export_shindex=0))
+        self.assertEqual(facts["allowlisted_imports_by_category"]["other_crypto"], ["gcry_md_open"])
+        self.assertEqual(facts["allowlisted_imports_by_category"]["crypto_verification"], [])
+        facts = module.parse_elf32(fake_elf(export="sync_agent_file_md5_validation"))
+        self.assertEqual(facts["allowlisted_function_exports"][0]["name"], "sync_agent_file_md5_validation")
+
+    def test_sync_agent_profile_is_pinned_and_cannot_accept_a_sibling_or_supplied_pin(self):
+        sample = fake_elf(soname="libsync-agent.so.0")
+        with self.assertRaisesRegex(module.OfflineELFError, "SOURCE_FILE_SIZE_MISMATCH"):
+            module.analyze(sample, component="sync-agent")
+        padded = sample + b"\0" * (module.SYNC_AGENT_BYTES - len(sample))
+        with self.assertRaisesRegex(module.OfflineELFError, "SOURCE_SHA256_MISMATCH"):
+            module.analyze(padded, component="sync-agent")
+        with self.assertRaisesRegex(module.OfflineELFError, "COMPONENT_PROFILE_MISMATCH"):
+            module.analyze(sample, hashlib.sha256(sample).hexdigest(), len(sample), component="sync-agent")
+
     def test_library_soname_and_defined_install_function_are_distinct_from_imports(self):
         facts = module.parse_elf32(fake_elf(soname="libsync-agent.so.0",
                                           export="sync_agent_dm_fota_install"))
