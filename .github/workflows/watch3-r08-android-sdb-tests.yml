@@ -74,6 +74,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Disposable host filesystem: reproduce execve(EACCES) from noexec.
+          # No physical watch or existing host mount is changed.
+          uglyos_noexec_dir=$(mktemp -d /tmp/uglyos-noexec-fixture.XXXXXX)
+          trap 'sudo umount "$uglyos_noexec_dir"; rmdir "$uglyos_noexec_dir"' EXIT
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,size=1m,mode=1777 tmpfs "$uglyos_noexec_dir"
+          export WATCH3_NOEXEC_FIXTURE="$uglyos_noexec_dir"
           python3 -m py_compile tools/watch3_r08_fota_framework_context.py
           python3 -m py_compile tools/watch3_r840x_native_root.py
           python3 -m py_compile tools/watch3_r840x_security_metadata.py

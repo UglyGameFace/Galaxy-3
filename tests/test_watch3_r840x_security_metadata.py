@@ -51,209 +51,259 @@ def upload_peer(reply=b'OKAY'+b'\0'*4):
                       frame(b'OKAY', 42, 2) + frame(b'WRTE', 42, 2, reply))
 
 
+CAPABILITIES = 'sdk_toolpath:/home/owner/share/tmp/sdk_tools\n'
+BASES = metadata.stage_bases(CAPABILITIES)
+MOUNTINFO = ('11 1 1:1 / / ro,relatime - ext4 /dev/root ro\n'
+             '12 11 1:2 / /opt rw,nosuid - ext4 /dev/data rw\n'
+             '13 11 0:1 / /tmp rw,nosuid,nodev,noexec - tmpfs tmpfs rw\n')
+
+
+def preflight_fixture(*, bases=BASES, records=None, mountinfo=MOUNTINFO):
+    records = records or {base: ('/opt/home/owner/share', True) if base == '/home/owner/share'
+                         else ('MISSING', False) for base in bases}
+    lines = ['UGLYOS_PREFLIGHT_V1']
+    for base in bases:
+        resolved, access = records[base]
+        lines += ['UGLYOS_DIR '+base, resolved, 'ACCESS_OK' if access else 'ACCESS_DENIED', 'UGLYOS_DIR_END']
+    return ('\n'.join([*lines,'UGLYOS_MOUNTINFO',mountinfo.rstrip('\n'),'UGLYOS_PREFLIGHT_END'])+'\n').encode()
+
+
+def initial_sockets(raw=None):
+    return [FakeSocket(peer(CAPABILITIES)),FakeSocket(peer((raw if raw is not None else preflight_fixture()).decode()))]
+
+
 class SecurityMetadataTests(unittest.TestCase):
     def test_upload_is_exact_bounded_send_into_validated_sdk_stage(self):
-        raw = elf_fixture(); sock = upload_peer()
-        with patch.object(socket, 'create_connection', return_value=sock):
-            metadata.send_probe('10.0.0.65', Path('/unused'), STAGE, raw)
-        frames = decode_all(bytes(sock.sent))
-        self.assertEqual([f[3] for f in frames if f[0]==b'OPEN'], [b'sync:\0'])
-        path = (STAGE+'/probe,'+str(0o100700)).encode()
-        expected = (metadata.SYNC.pack(b'SEND', len(path))+path+metadata.SYNC.pack(b'DATA', len(raw))+
-                    raw+metadata.SYNC.pack(b'DONE', 0))
-        self.assertEqual([f[3] for f in frames if f[0]==b'WRTE'], [expected])
-        self.assertNotIn(b'/dev/', bytes(sock.sent))
+        raw=elf_fixture();sock=upload_peer()
+        with patch.object(socket,'create_connection',return_value=sock):
+            metadata.send_probe('10.0.0.65',Path('/unused'),STAGE,raw)
+        frames=decode_all(bytes(sock.sent))
+        self.assertEqual([f[3] for f in frames if f[0]==b'OPEN'],[b'sync:\0'])
+        path=(STAGE+'/probe,'+str(0o100700)).encode()
+        expected=(metadata.SYNC.pack(b'SEND',len(path))+path+metadata.SYNC.pack(b'DATA',len(raw))+
+                  raw+metadata.SYNC.pack(b'DONE',0))
+        self.assertEqual([f[3] for f in frames if f[0]==b'WRTE'],[expected])
+        self.assertNotIn(b'/dev/',bytes(sock.sent))
+
+    def test_fragmented_upload_failure_preserves_exact_bounded_diagnostic(self):
+        reply=b'FAIL\4\0\0\0nope'
+        sock=FakeSocket(frame(b'CNXN',VERSION,262144,b'device::\0')+frame(b'OKAY',42,2)+
+                        frame(b'WRTE',42,2,reply[:8])+frame(b'WRTE',42,2,reply[8:]))
+        with patch.object(socket,'create_connection',return_value=sock),self.assertRaises(metadata.MetadataError) as cm:
+            metadata.send_probe('10.0.0.65',Path('/unused'),STAGE,elf_fixture())
+        self.assertEqual(str(cm.exception),'PROBE_UPLOAD_DENIED')
+        self.assertEqual(cm.exception.upload_response,reply)
 
     def test_stage_paths_reject_firmware_traversal_shell_and_nonrandom_destinations(self):
-        for p in ('/usr/bin/uglyos-metadata-'+'a'*32, STAGE+'/probe', STAGE+';id',
-                  '/tmp/../tmp/uglyos-metadata-'+'a'*32, '/tmp/uglyos-metadata-short'):
-            with self.subTest(path=p), self.assertRaises(metadata.MetadataError):
-                metadata.validate_stage(p)
-        self.assertEqual(metadata.sdk_stage('sdk_toolpath:/tmp/sdk_tools\n', 'a'*32), STAGE)
+        for p in ('/usr/bin/uglyos-metadata-'+'a'*32,STAGE+'/probe',STAGE+';id',
+                  '/tmp/../tmp/uglyos-metadata-'+'a'*32,'/tmp/uglyos-metadata-short'):
+            with self.subTest(path=p),self.assertRaises(metadata.MetadataError):metadata.validate_stage(p)
+        for base in ('/home/owner/share','/opt/home/owner/share','/opt/usr/home/owner/share'):
+            self.assertEqual(metadata.validate_stage(base+'/uglyos-metadata-'+'a'*32),base+'/uglyos-metadata-'+'a'*32)
         with self.assertRaises(metadata.MetadataError):
-            metadata.sdk_stage('sdk_toolpath:/tmp/a\nsdk_toolpath:/tmp/b\n', 'a'*32)
+            metadata.sdk_stage('sdk_toolpath:/tmp/a\nsdk_toolpath:/tmp/b\n','a'*32)
 
-    def test_stage_candidates_include_missing_sdk_parent_then_tmp_without_ancestor_walk(self):
-        suffix='/uglyos-metadata-'+'a'*32
-        self.assertEqual(metadata.sdk_stages('sdk_toolpath:/home/owner/share/tmp/sdk_tools\n','a'*32),
-                         [p+suffix for p in ('/home/owner/share/tmp/sdk_tools','/home/owner/share/tmp','/tmp')])
-        self.assertEqual(metadata.sdk_stages('sdk_toolpath:/tmp\n','a'*32), ['/tmp'+suffix])
-        self.assertEqual(metadata.sdk_stages('sdk_toolpath:/home/owner/other\n','a'*32),
-                         ['/home/owner/other'+suffix,'/tmp'+suffix])
+    def test_fixed_preflight_candidates_do_not_walk_ancestors_or_add_tmp(self):
+        self.assertEqual(BASES,('/home/owner/share/tmp/sdk_tools','/home/owner/share',
+                                '/opt/home/owner/share','/opt/usr/home/owner/share'))
+        self.assertNotIn('/tmp',BASES)
+        for bases in (('/tmp;id',),('/tmp',)*2,('/usr/bin',),()):
+            with self.assertRaises(metadata.MetadataError):metadata.preflight_command(bases)
+
+    def test_preflight_resolves_owner_share_onto_writable_exec_mount(self):
+        value=metadata.parse_preflight(preflight_fixture(),BASES)
+        self.assertEqual(value['selected_base'],'/opt/home/owner/share')
+        self.assertEqual(value['candidates'][0]['reason'],'MISSING')
+        selected=value['candidates'][1]
+        self.assertEqual(selected['mount']['point'],'/opt')
+        self.assertIn('nosuid',selected['mount']['options'])
+        self.assertTrue(selected['eligible'])  # nosuid does not prevent this ordinary program.
+
+    def test_noexec_readonly_denied_and_unsafe_resolutions_are_not_selected(self):
+        for resolved,access,flags,reason in (
+                ('/tmp',True,'rw','MOUNT_NOEXEC'),
+                ('/opt/home/owner/share',True,'ro','MOUNT_READ_ONLY'),
+                ('/opt/home/owner/share',False,'rw','ACCESS_DENIED'),
+                ('/usr/bin',True,'rw','SDK_STAGE_PATH_REJECTED')):
+            with self.subTest(reason=reason):
+                raw=preflight_fixture(bases=('/tmp',),records={'/tmp':(resolved,access)},
+                                      mountinfo=MOUNTINFO.replace('/opt rw,nosuid','/opt '+flags+',nosuid'))
+                value=metadata.parse_preflight(raw,('/tmp',))
+                self.assertIsNone(value['selected_base'])
+                self.assertEqual(value['candidates'][0]['reason'],reason)
+
+    def test_mount_parser_uses_deepest_bind_and_rejects_ambiguous_stacked_mounts(self):
+        mounts=metadata.parse_mountinfo(MOUNTINFO+'14 12 1:2 / /opt/home rw,noexec - ext4 /dev/data rw\n')
+        self.assertEqual(metadata.containing_mount('/opt/home/owner/share',mounts)['id'],14)
+        self.assertEqual(metadata.containing_mount('/opt/homeother',mounts)['id'],12)
+        mounts+= [dict(mounts[-1],id=15,parent=14)]
+        with self.assertRaisesRegex(metadata.MetadataError,'AMBIGUOUS'):
+            metadata.containing_mount('/opt/home/owner/share',mounts)
+        escaped=metadata.parse_mountinfo('11 1 1:1 / /with\\040space rw - ext4 /dev/root rw\n')
+        self.assertEqual(escaped[0]['point'],'/with space')
+
+    def test_malformed_or_truncated_preflight_never_produces_a_stage(self):
+        raw=preflight_fixture()
+        for value in (raw[:-30],raw.replace(b'UGLYOS_DIR /home/owner/share\n',b'UGLYOS_DIR /usr/bin\n'),
+                      raw.replace(b'/opt rw,nosuid',b'/opt invalid'),raw+b'x',b'x'*(metadata.MAX_PREFLIGHT+1)):
+            with self.assertRaises(metadata.MetadataError):metadata.parse_preflight(value,BASES)
+        for value in ('','bogus',MOUNTINFO+MOUNTINFO):
+            with self.assertRaises(metadata.MetadataError):metadata.parse_mountinfo(value)
+
+    def test_real_shell_preflight_resolves_existing_symlink_without_creating_parents(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);directory=root/'existing';directory.mkdir();alias=root/'alias';alias.symlink_to(directory)
+            bases=(str(root/'missing'),str(alias))
+            raw=subprocess.check_output(['sh','-c',metadata.preflight_command(bases)])
+            value=metadata.parse_preflight(raw,bases)
+            self.assertEqual(value['candidates'][0]['reason'],'MISSING')
+            self.assertEqual(value['candidates'][1]['resolved'],str(directory.resolve()))
+            self.assertFalse((root/'missing').exists())
+            self.assertEqual(set(root.iterdir()),{directory,alias})
 
     def test_real_shell_missing_parent_is_not_created_and_existing_stage_is_not_claimed(self):
         with tempfile.TemporaryDirectory() as td:
-            root=Path(td); suffix='/uglyos-metadata-'+'b'*32
+            root=Path(td);suffix='/uglyos-metadata-'+'b'*32
             stage=str(root/'missing')+suffix
             raw=subprocess.check_output(['sh','-c',metadata.stage_command('create',stage)])
-            self.assertEqual(raw,b'UGLYOS_STAGE_PARENT_MISSING\n')
-            self.assertFalse((root/'missing').exists())
+            self.assertEqual(raw,b'UGLYOS_STAGE_PARENT_MISSING\n');self.assertFalse((root/'missing').exists())
             stage=str(root)+suffix
             raw=subprocess.check_output(['sh','-c',metadata.stage_command('create',stage)])
-            self.assertEqual(raw,b'UGLYOS_STAGE_CREATED\n')
-            self.assertEqual(Path(stage).stat().st_mode & 0o777,0o700)
+            self.assertEqual(raw,b'UGLYOS_STAGE_CREATED\n');self.assertEqual(Path(stage).stat().st_mode&0o777,0o700)
             Path(stage,'existing').write_bytes(b'preserve')
             raw=subprocess.check_output(['sh','-c',metadata.stage_command('create',stage)],stderr=subprocess.STDOUT)
             self.assertTrue(raw.endswith(b'UGLYOS_STAGE_NOT_CREATED\n'))
             self.assertEqual(Path(stage,'existing').read_bytes(),b'preserve')
 
     def test_probe_parser_rejects_synthetic_truncated_or_unbounded_attribute_data(self):
-        value = probe_fixture()
-        self.assertEqual(metadata.parse_probe(json.dumps(value).encode()), value)
-        cases = [dict(value, test_fixture=True), dict(value, groups=[0, 100]), dict(value, uid=-1)]
-        bad = copy.deepcopy(value); bad['files'][0]['attrs'][0].update(rc=20, hex='00'); cases.append(bad)
-        bad = copy.deepcopy(value); bad['files'][0]['path']='/etc/shadow'; cases.append(bad)
+        value=probe_fixture();self.assertEqual(metadata.parse_probe(json.dumps(value).encode()),value)
+        cases=[dict(value,test_fixture=True),dict(value,groups=[0,100]),dict(value,uid=-1)]
+        bad=copy.deepcopy(value);bad['files'][0]['attrs'][0].update(rc=20,hex='00');cases.append(bad)
+        bad=copy.deepcopy(value);bad['files'][0]['path']='/etc/shadow';cases.append(bad)
         for case in cases:
-            with self.assertRaises(metadata.MetadataError): metadata.parse_probe(json.dumps(case).encode())
+            with self.assertRaises(metadata.MetadataError):metadata.parse_probe(json.dumps(case).encode())
 
-    def test_complete_capture_cleans_up_and_creates_private_zip_without_firmware_action(self):
-        value = probe_fixture()
-        sockets = [FakeSocket(peer('sdk_toolpath:/tmp/sdk_tools\n')), FakeSocket(peer('UGLYOS_STAGE_CREATED\n')),
-                   upload_peer(), FakeSocket(peer(json.dumps(value))), FakeSocket(peer('UGLYOS_STAGE_REMOVED\n'))]
-        with tempfile.TemporaryDirectory() as td, contextlib.ExitStack() as stack:
-            root = Path(td)
-            stack.enter_context(patch.object(metadata, 'build_probe', return_value=(elf_fixture(), {'test_build':True})))
-            connect = stack.enter_context(patch.object(socket, 'create_connection', side_effect=sockets))
-            report = metadata.capture('10.0.0.65', Path('/unused'), root/'evidence', archive=root/'evidence.zip')
-            self.assertEqual(report['state'], 'NATIVE_SECURITY_METADATA_CAPTURED')
-            self.assertTrue(report['stage_cleanup_verified'])
-            self.assertFalse(report['firmware_written'])
-            self.assertFalse(report['existing_security_attributes_modified'])
-            self.assertFalse(report['vendor_script_executed'])
-            self.assertEqual(connect.call_count, 5)
+    def test_complete_capture_uses_one_checked_canonical_stage_and_private_zip(self):
+        sockets=initial_sockets()+[FakeSocket(peer('UGLYOS_STAGE_CREATED\n')),upload_peer(),
+                                  FakeSocket(peer(json.dumps(probe_fixture()))),FakeSocket(peer('UGLYOS_STAGE_REMOVED\n'))]
+        with tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets) as connect:
+            root=Path(td);report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip')
+            self.assertEqual(report['state'],'NATIVE_SECURITY_METADATA_CAPTURED')
+            self.assertTrue(report['stage_cleanup_verified']);self.assertEqual(connect.call_count,6)
+            self.assertEqual(len(report['stage_attempts']),1)
+            self.assertTrue(report['stage_attempts'][0]['stage'].startswith('/opt/home/owner/share/uglyos-metadata-'))
+            for field in ('firmware_written','vendor_script_executed','existing_security_attributes_modified','root_mode_requested'):
+                self.assertFalse(report[field])
             with zipfile.ZipFile(root/'evidence.zip') as z:
-                self.assertEqual(set(z.namelist()), {metadata.REPORT_NAME, 'probe-output.response',
-                                                    'stage-create.response','stage-cleanup.response'})
-            for path in [root/'evidence', root/'evidence.zip', *(root/'evidence').iterdir()]:
-                self.assertEqual(path.stat().st_mode & 0o077, 0)
+                self.assertEqual(set(z.namelist()),{metadata.REPORT_NAME,'stage-preflight.response',
+                                                    'probe-output.response','stage-create.response','stage-cleanup.response'})
+            for path in [root/'evidence',root/'evidence.zip',*(root/'evidence').iterdir()]:
+                self.assertEqual(path.stat().st_mode&0o077,0)
+        commands=[f[3] for s in sockets for f in decode_all(bytes(s.sent)) if f[0]==b'OPEN']
+        self.assertIn(b'/proc/self/mountinfo',commands[1])
+        self.assertIn(b'shell:rm -f ',commands[-1]);self.assertNotIn(b'rm -rf',commands[-1])
         self.assertTrue(all(b'root:on' not in s.sent and b'FOTA' not in s.sent for s in sockets))
-        commands = [f[3] for s in sockets for f in decode_all(bytes(s.sent)) if f[0]==b'OPEN']
-        self.assertIn(b'shell:rm -f ', commands[-1])
-        self.assertNotIn(b'rm -rf', commands[-1])
 
-    def test_upload_or_probe_failure_still_cleans_only_our_stage(self):
-        for failure in ('upload', 'run'):
-            sockets = [FakeSocket(peer('sdk_toolpath:/tmp\n')), FakeSocket(peer('UGLYOS_STAGE_CREATED\n'))]
-            sockets += [upload_peer(b'FAIL'+(4).to_bytes(4,'little')+b'nope')] if failure=='upload' else [upload_peer(), FakeSocket(peer('Permission denied\n'))]
-            sockets += [FakeSocket(peer('UGLYOS_STAGE_REMOVED\n')),FakeSocket(peer('fixture stage context'))]
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as td, patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})), patch.object(socket,'create_connection',side_effect=sockets):
-                root=Path(td)
-                report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip')
-                self.assertTrue(report['stage_cleanup_verified'])
-                self.assertIn(report['state'], ('PROBE_UPLOAD_DENIED','PROBE_OUTPUT_INVALID'))
-                if failure=='run':
-                    self.assertEqual((root/'evidence/probe-output.response').read_bytes(),b'Permission denied\n')
-                else:
-                    self.assertEqual((root/'evidence/probe-upload.response').read_bytes(),b'FAIL\4\0\0\0nope')
+    def test_no_eligible_mount_or_invalid_preflight_makes_no_upload_or_mkdir(self):
+        for raw,state in ((preflight_fixture(records={b:('MISSING',False) for b in BASES}),'NO_WRITABLE_EXECUTABLE_STAGE'),
+                          (b'cat: Permission denied\n','STAGING_PREFLIGHT_INVALID')):
+            sockets=initial_sockets(raw)
+            with self.subTest(state=state),tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets) as connect:
+                root=Path(td);report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip')
+                self.assertEqual(report['state'],state);self.assertEqual(connect.call_count,2)
+                self.assertFalse(report['temporary_sdk_write_requested']);self.assertEqual(report['stage_attempts'],[])
+                self.assertEqual((root/'evidence/stage-preflight.response').read_bytes(),raw)
+                self.assertTrue(all(b'mkdir ' not in s.sent and b'sync:' not in s.sent for s in sockets))
 
-    def test_real_report_missing_sdk_directory_falls_back_and_captures_in_one_run(self):
-        sockets=[FakeSocket(peer('sdk_toolpath:/home/owner/share/tmp/sdk_tools\n')),
-                 FakeSocket(peer('UGLYOS_STAGE_PARENT_MISSING\n')),
-                 FakeSocket(peer('UGLYOS_STAGE_CREATED\n')),upload_peer(),
-                 FakeSocket(peer(json.dumps(probe_fixture()))),FakeSocket(peer('UGLYOS_STAGE_REMOVED\n'))]
-        with tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets):
-            root=Path(td);report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip')
-            self.assertEqual(report['state'],'NATIVE_SECURITY_METADATA_CAPTURED')
-            self.assertEqual(len(report['stage_attempts']),2)
-            self.assertFalse(report['stage_attempts'][0]['created'])
-            self.assertTrue(report['stage_attempts'][1]['cleanup_verified'])
-            commands=[f[3] for s in sockets for f in decode_all(bytes(s.sent)) if f[0]==b'OPEN']
-            self.assertTrue(commands[2].startswith(b'shell:if [ ! -d /home/owner/share/tmp ]'))
-            self.assertNotIn(b'mkdir -p',b''.join(commands))
-            self.assertNotIn(b'/sdk_tools/',commands[-1])
-
-    def test_execution_refusal_is_cleaned_before_retry_and_diagnostics_are_preserved(self):
-        sockets=[FakeSocket(peer('sdk_toolpath:/tmp/sdk_tools\n')),FakeSocket(peer('UGLYOS_STAGE_CREATED\n')),
-                 upload_peer(),FakeSocket(peer('Permission denied\n')),FakeSocket(peer('UGLYOS_STAGE_REMOVED\n')),
-                 FakeSocket(peer('UGLYOS_STAGE_CREATED\n')),upload_peer(),FakeSocket(peer(json.dumps(probe_fixture()))),
-                 FakeSocket(peer('UGLYOS_STAGE_REMOVED\n'))]
-        with tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets):
-            root=Path(td);report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip')
-            self.assertEqual(report['state'],'NATIVE_SECURITY_METADATA_CAPTURED')
-            self.assertEqual(report['stage_attempts'][0]['error'],'PROBE_OUTPUT_INVALID')
-            self.assertTrue(all(a['cleanup_verified'] for a in report['stage_attempts']))
-            self.assertEqual((root/'evidence/probe-output.response').read_bytes(),b'Permission denied\n')
-            self.assertTrue((root/'evidence/attempt-2-probe-output.response').exists())
-
-    def test_all_unavailable_stages_keep_fixed_mount_context_without_upload_or_cleanup(self):
-        sockets=[FakeSocket(peer('sdk_toolpath:/tmp/sdk_tools\n')),
-                 FakeSocket(peer('UGLYOS_STAGE_PARENT_MISSING\n')),
-                 FakeSocket(peer('mkdir: Permission denied\nUGLYOS_STAGE_NOT_CREATED\n')),
-                 FakeSocket(peer('fixture mount context'))]
-        with tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets):
-            root=Path(td);report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip')
-            self.assertEqual(report['state'],'SDK_STAGE_UNAVAILABLE')
-            self.assertFalse(report['probe_uploaded'])
-            self.assertNotIn('unverified_sdk_stage',report)
-            self.assertEqual((root/'evidence/stage-context.response').read_bytes(),b'fixture mount context')
-            self.assertTrue(all(b'rm -f' not in s.sent and b'sync:' not in s.sent for s in sockets))
-
-    def test_transport_failure_or_unverified_cleanup_stops_fallback(self):
-        for phase in ('upload_transport','cleanup'):
-            sockets=[FakeSocket(peer('sdk_toolpath:/tmp/sdk_tools\n')),
-                     FakeSocket(peer('UGLYOS_STAGE_CREATED\n'))]
-            sockets += [OSError('connection lost')] if phase=='upload_transport' else [upload_peer(),FakeSocket(peer('Permission denied\n'))]
-            sockets += [FakeSocket(peer('UGLYOS_STAGE_REMOVED\n' if phase=='upload_transport' else 'cleanup failed\n')),
-                        FakeSocket(peer('fixture context'))]
-            with self.subTest(phase=phase),tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets):
-                root=Path(td);report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence')
+    def test_upload_or_execution_failure_preserves_context_then_cleans_without_retry(self):
+        for failure,state in (('upload','PROBE_UPLOAD_DENIED'),('run','PROBE_EXECUTION_DENIED'),('invalid','PROBE_OUTPUT_INVALID')):
+            sockets=initial_sockets()+[FakeSocket(peer('UGLYOS_STAGE_CREATED\n'))]
+            sockets += [upload_peer(b'FAIL\4\0\0\0nope')] if failure=='upload' else [upload_peer(),FakeSocket(peer('Permission denied\n' if failure=='run' else 'invalid\n'))]
+            sockets += [FakeSocket(peer('700 5001 100 probe-label')),FakeSocket(peer('UGLYOS_STAGE_REMOVED\n')),
+                        FakeSocket(peer('fixture stage context'))]
+            with self.subTest(failure=failure),tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets):
+                root=Path(td);report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip')
+                self.assertEqual(report['state'],state);self.assertTrue(report['stage_cleanup_verified'])
                 self.assertEqual(len(report['stage_attempts']),1)
-                self.assertEqual(report['state'],'LOCAL_OR_SDB_IO_ERROR' if phase=='upload_transport' else 'SDK_STAGE_CLEANUP_UNVERIFIED')
+                self.assertEqual((root/'evidence/probe-context.response').read_bytes(),b'700 5001 100 probe-label')
+                if failure=='upload':self.assertEqual((root/'evidence/probe-upload.response').read_bytes(),b'FAIL\4\0\0\0nope')
+                else:self.assertTrue((root/'evidence/probe-output.response').exists())
+
+    def test_unverified_creation_never_uploads_removes_or_retries_unknown_directory(self):
+        for creation,state in (('mkdir: File exists\n','SDK_STAGE_CREATION_NOT_VERIFIED'),
+                               ('UGLYOS_STAGE_NOT_CREATED\n','SDK_STAGE_UNAVAILABLE')):
+            sockets=initial_sockets()+[FakeSocket(peer(creation)),FakeSocket(peer('fixture context'))]
+            with self.subTest(creation=creation),tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets) as connect:
+                report=metadata.capture('10.0.0.65',Path('/unused'),Path(td)/'evidence')
+                self.assertEqual(report['state'],state);self.assertEqual(connect.call_count,4)
+                self.assertFalse(report['probe_uploaded']);self.assertEqual(len(report['stage_attempts']),1)
+                self.assertEqual('unverified_sdk_stage' in report,state=='SDK_STAGE_CREATION_NOT_VERIFIED')
+                self.assertTrue(all(b'rm -f' not in s.sent and b'sync:' not in s.sent for s in sockets))
+
+    def test_cleanup_failure_is_explicit_and_retains_successful_metadata(self):
+        sockets=initial_sockets()+[FakeSocket(peer('UGLYOS_STAGE_CREATED\n')),upload_peer(),
+                                  FakeSocket(peer(json.dumps(probe_fixture()))),FakeSocket(peer('rmdir failed\n')),
+                                  FakeSocket(peer('fixture context'))]
+        with tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets):
+            report=metadata.capture('10.0.0.65',Path('/unused'),Path(td)/'evidence')
+            self.assertEqual(report['state'],'SDK_STAGE_CLEANUP_UNVERIFIED')
+            self.assertEqual(metadata.validate_stage(report['remaining_sdk_stage']),report['remaining_sdk_stage'])
+            self.assertIsNotNone(report['probe']);self.assertEqual(len(report['stage_attempts']),1)
+
+    def test_upload_transport_failure_still_cleans_and_does_not_retry(self):
+        sockets=initial_sockets()+[FakeSocket(peer('UGLYOS_STAGE_CREATED\n')),OSError('lost connection'),
+                                  FakeSocket(peer('UGLYOS_STAGE_REMOVED\n')),FakeSocket(peer('fixture context'))]
+        with tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets):
+            report=metadata.capture('10.0.0.65',Path('/unused'),Path(td)/'evidence')
+            self.assertEqual(report['state'],'LOCAL_OR_SDB_IO_ERROR');self.assertTrue(report['stage_cleanup_verified'])
+            self.assertEqual(len(report['stage_attempts']),1)
 
     def test_local_create_diagnostic_failure_still_removes_verified_stage(self):
-        sockets=[FakeSocket(peer('sdk_toolpath:/tmp\n')),FakeSocket(peer('UGLYOS_STAGE_CREATED\n')),
-                 FakeSocket(peer('UGLYOS_STAGE_REMOVED\n')),FakeSocket(peer('fixture context'))]
+        sockets=initial_sockets()+[FakeSocket(peer('UGLYOS_STAGE_CREATED\n')),FakeSocket(peer('UGLYOS_STAGE_REMOVED\n')),
+                                  FakeSocket(peer('fixture context'))]
         real_write=metadata.private_write
         def write(path,raw):
-            if path.name=='stage-create.response': raise OSError('local write failed')
+            if path.name=='stage-create.response':raise OSError('local write failed')
             return real_write(path,raw)
         with tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets),patch.object(metadata,'private_write',side_effect=write):
             report=metadata.capture('10.0.0.65',Path('/unused'),Path(td)/'evidence')
-            self.assertTrue(report['stage_cleanup_verified'])
-            self.assertFalse(report['probe_uploaded'])
-
-    def test_cleanup_failure_is_explicit_and_preserves_evidence_and_exact_stage(self):
-        sockets=[FakeSocket(peer('sdk_toolpath:/tmp/sdk_tools\n')),FakeSocket(peer('UGLYOS_STAGE_CREATED\n')),
-                 upload_peer(),FakeSocket(peer(json.dumps(probe_fixture()))),FakeSocket(peer('rmdir failed\n')),
-                 FakeSocket(peer('fixture stage context'))]
-        with tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets):
-            root=Path(td);report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip')
-            self.assertEqual(report['state'],'SDK_STAGE_CLEANUP_UNVERIFIED')
-            self.assertEqual(metadata.validate_stage(report['remaining_sdk_stage']),report['remaining_sdk_stage'])
-            self.assertIsNotNone(report['probe'])
+            self.assertTrue(report['stage_cleanup_verified']);self.assertFalse(report['probe_uploaded'])
 
     def test_missing_compiler_and_existing_outputs_make_no_watch_connection(self):
         with tempfile.TemporaryDirectory() as td,patch.object(metadata.shutil,'which',return_value=None),patch.object(socket,'create_connection') as connect:
             root=Path(td);report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip')
-            self.assertEqual(report['state'],'CLANG_MISSING_RUN_PKG_INSTALL_CLANG')
-            connect.assert_not_called()
+            self.assertEqual(report['state'],'CLANG_MISSING_RUN_PKG_INSTALL_CLANG');connect.assert_not_called()
             original=(root/'evidence.zip').read_bytes()
-            with self.assertRaises(metadata.MetadataError):
-                metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip')
+            with self.assertRaises(metadata.MetadataError):metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip')
             self.assertEqual((root/'evidence.zip').read_bytes(),original)
 
-    def test_unverified_stage_creation_never_uploads_or_removes_an_unowned_directory(self):
-        sockets=[FakeSocket(peer('sdk_toolpath:/tmp/sdk_tools\n')),FakeSocket(peer('mkdir: File exists\n')),
-                 FakeSocket(peer('fixture stage context'))]
-        with tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets) as connect:
-            root=Path(td);report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip')
-            self.assertEqual(report['state'],'SDK_STAGE_CREATION_NOT_VERIFIED')
-            self.assertEqual(connect.call_count,3)
-            self.assertFalse(report['probe_uploaded'])
-            self.assertIn('unverified_sdk_stage',report)
-            self.assertTrue(all(b'rm -f' not in s.sent for s in sockets))
-
-    def test_compiler_failure_preserves_private_diagnostic_before_any_watch_connection(self):
+    def test_compiler_failure_preserves_private_diagnostic_before_watch_connection(self):
         failed=subprocess.CompletedProcess([],1,b'',b'private-compiler-detail')
         with tempfile.TemporaryDirectory() as td,patch.object(metadata.subprocess,'run',return_value=failed),patch.object(socket,'create_connection') as connect:
             root=Path(td);report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip',compiler='/fixture/compiler')
             self.assertEqual(report['state'],'PROBE_COMPILER_FAILED');connect.assert_not_called()
             self.assertNotIn('private-compiler-detail',json.dumps(report))
-            with zipfile.ZipFile(root/'evidence.zip') as z:
-                self.assertEqual(z.read('compiler.response'),b'private-compiler-detail')
+            with zipfile.ZipFile(root/'evidence.zip') as z:self.assertEqual(z.read('compiler.response'),b'private-compiler-detail')
 
 
 class NativeProbeProgramTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('gcc'), 'host C compiler unavailable')
+    def test_real_noexec_mount_refuses_our_host_probe_despite_mode_0700(self):
+        mounts=metadata.parse_mountinfo(Path('/proc/self/mountinfo').read_text())
+        fixture=os.environ.get('WATCH3_NOEXEC_FIXTURE')
+        if not fixture:
+            if os.environ.get('WATCH3_REQUIRE_ARM_ELF')=='1':self.fail('Required real noexec fixture unavailable')
+            self.skipTest('Disposable noexec mount supplied by CI')
+        directory=Path(fixture)
+        self.assertTrue(directory.is_dir())
+        self.assertIn('noexec',metadata.containing_mount(str(directory),mounts)['options'])
+        with tempfile.TemporaryDirectory() as td,tempfile.TemporaryDirectory(dir=directory,prefix='uglyos-noexec-') as nd:
+            raw,_=metadata.build_probe(Path(td),shutil.which('gcc'),host_test=True)
+            program=Path(nd)/'probe';program.write_bytes(raw);program.chmod(0o700)
+            self.assertEqual(program.stat().st_mode&0o777,0o700)
+            with self.assertRaises(PermissionError) as cm:subprocess.check_output([str(program)],timeout=5)
+            self.assertEqual(cm.exception.errno,errno.EACCES)
+
     def check_fixture(self, compiler, *, arm):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td); fixture=root/'fixture'; values={}
