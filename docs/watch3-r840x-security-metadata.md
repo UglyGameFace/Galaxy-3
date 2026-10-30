@@ -1,5 +1,9 @@
 # R840X recovery access and native security metadata
 
+The owner has now completed the home metadata run: native output is valid and
+cleanup verified. The [physical findings and current privilege-inventory command](watch3-r840x-privilege-inventory.md)
+supersede the acquisition command below. Do not repeat completed staging runs.
+
 Issue #47, October 30, 2026. The ordinary shell capture now confirms that all
 three recovery scripts exist and are permission-denied. The native root switch
 was also denied. A missing getcap utility leaves actual executable capability
@@ -148,7 +152,7 @@ available. Raw preflight/create/upload/run/cleanup responses stay private and
 existing evidence is never overwritten. A failure still creates the report/ZIP.
 Compiler failures make no watch contact.
 
-## One phone command
+## Completed home metadata command (history)
 
 ```sh
 cd ~/Galaxy-3 && git switch main && git pull --ff-only &&
@@ -164,9 +168,9 @@ builds all target backends. Clang is already installed and the owner's first
 phone build succeeded. No PC, paid tooling or Tizen SDK is needed. Execution
 of the reader on the watch still requires physical validation.
 
-Attach `watch3-security-metadata-home.zip` from Downloads, including if
-the state is partial/failed. A successful metadata capture does not prove root,
-a signature bypass, bootloader unlock, custom boot or tested recovery.
+The owner supplied `watch3-security-metadata-home.zip`; this acquisition is
+complete. Its root/unlock limitations and the next operation are recorded in
+the current guide linked at the top.
 
 ## Validation
 

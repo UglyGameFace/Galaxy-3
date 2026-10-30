@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import struct
 import sys
 import tempfile
 import unittest
@@ -70,6 +71,90 @@ def preflight_fixture(*, bases=BASES, records=None, mountinfo=MOUNTINFO):
 
 def initial_sockets(raw=None):
     return [FakeSocket(peer(CAPABILITIES)),FakeSocket(peer((raw if raw is not None else preflight_fixture()).decode()))]
+
+
+def inventory_fixture():
+    cap=struct.pack('<5I',0x02000001,0,0x002000c2,0,0).hex()
+    row=dict(name='helper',mode=0o104755,uid=0,gid=0,size_hex=f'{len(elf_fixture()):016x}',
+             capability_rc=20,capability_hex=cap,read_access_rc=0,exec_access_rc=0,
+             label_rc=1,label_hex='5f',exec_label_rc=-61,exec_label_hex='')
+    dirs=[dict(path=p,open_rc=0,scan_rc=0,complete=True,entries_scanned=0,regular_files=0,
+               stat_errors=0,capability_errors=0,unsafe_names=0,dropped_records=0,files=[])
+          for p in metadata.INVENTORY_ROOTS]
+    dirs[2].update(entries_scanned=1,regular_files=1,files=[row])
+    return dict(schema='uglyos-system-helper-metadata-v1',no_new_privs_rc=0,securebits_rc=0,
+                bounding_caps_hex='0000003fffffffff',bounding_read_errors=0,directories=dirs)
+
+
+class PrivilegeInventoryTests(unittest.TestCase):
+    def test_capability_decoder_preserves_errors_and_distinguishes_three_revisions(self):
+        for version in (1,2,3):
+            words=[version<<24|1,0x80,0x42]
+            if version>=2:words += [1,2]
+            if version==3:words += [1000]
+            raw=struct.pack('<'+'I'*len(words),*words)
+            cap=metadata.decode_file_capability(len(raw),raw.hex())
+            self.assertEqual(cap['state'],'DECODED');self.assertTrue(cap['effective_flag'])
+            self.assertEqual(cap['rootid'],1000 if version==3 else None)
+            self.assertEqual(int(cap['permitted_hex'],16),0x80|((1<<32) if version>=2 else 0))
+        self.assertEqual(metadata.decode_file_capability(-61,'')['state'],'ATTRIBUTE_ABSENT')
+        self.assertEqual(metadata.decode_file_capability(-13,'')['state'],'READ_ERROR')
+        self.assertEqual(metadata.decode_file_capability(3,'000000')['state'],'UNRECOGNIZED_ATTRIBUTE')
+
+    def test_inventory_parser_rejects_path_escape_bad_lengths_and_unbounded_records(self):
+        probe=probe_fixture();probe['privilege_inventory']=inventory_fixture()
+        metadata.parse_probe(json.dumps(probe).encode(),inventory=True)
+        cases=[]
+        for key,value in (('name','../root'),('capability_hex','00'),('mode',0o120777)):
+            bad=copy.deepcopy(probe);bad['privilege_inventory']['directories'][2]['files'][0][key]=value;cases.append(bad)
+        bad=copy.deepcopy(probe);bad['privilege_inventory']['directories'][2]['dropped_records']=999999;cases.append(bad)
+        bad=copy.deepcopy(probe);bad['test_fixture']=True;cases.append(bad)
+        for value in cases:
+            with self.assertRaises(metadata.MetadataError):metadata.parse_probe(json.dumps(value).encode(),inventory=True)
+        probe['inheritable_caps_hex']='00000000002000c2'
+        summary=metadata.inventory_summary(probe)
+        self.assertTrue(summary['scope_complete'])
+        self.assertEqual(summary['candidates'][0]['matching_inheritable_hex'],'00000000002000c2')
+        self.assertFalse(summary['root_proven'])
+
+    def test_inventory_capture_copies_only_bounded_originals_after_cleanup_and_never_runs_them(self):
+        value=probe_fixture();value['privilege_inventory']=inventory_fixture()
+        sockets=initial_sockets()+[FakeSocket(peer('UGLYOS_STAGE_CREATED\n')),upload_peer(),
+                 FakeSocket(peer(json.dumps(value))),FakeSocket(peer('UGLYOS_STAGE_REMOVED\n')),
+                 FakeSocket(b''),FakeSocket(b''),FakeSocket(peer('fixed unit context'))]
+        with tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets),patch.object(metadata,'_receive_bounded_file',return_value=elf_fixture()) as read:
+            root=Path(td);report=metadata.capture('10.0.0.65',Path('/unused'),root/'evidence',archive=root/'evidence.zip',inventory=True)
+            self.assertEqual(report['state'],'NATIVE_PRIVILEGE_INVENTORY_CAPTURED')
+            self.assertTrue(report['stage_cleanup_verified'])
+            self.assertEqual([c.args[2] for c in read.call_args_list],[b'/usr/bin/launch_app',b'/usr/bin/helper'])
+            self.assertTrue(all(c.args[3]==metadata.MAX_INPUT_BYTES for c in read.call_args_list))
+            self.assertTrue(all(r['copied'] for r in report['inventory_summary']['original_inputs']))
+            with zipfile.ZipFile(root/'evidence.zip') as z:
+                self.assertEqual(z.read('helper-01.bin'),elf_fixture());self.assertIn('privilege-context.response',z.namelist())
+            self.assertFalse(report['inventory_summary']['privileged_helper_executed'])
+        commands=[f[3] for s in sockets for f in decode_all(bytes(s.sent)) if f[0]==b'OPEN']
+        self.assertNotIn(b'shell:/usr/bin/helper',b'\n'.join(commands))
+        self.assertTrue(all(b'root:on' not in s.sent for s in sockets))
+
+    def test_candidate_budget_and_invalid_input_preserve_metadata_without_running_helpers(self):
+        value=probe_fixture();inventory=inventory_fixture();value['privilege_inventory']=inventory
+        row=inventory['directories'][2]['files'][0]
+        inventory['directories'][2].update(entries_scanned=12,regular_files=12,
+            files=[dict(row,name='helper'+str(n)) for n in range(12)])
+        with tempfile.TemporaryDirectory() as td,patch.object(socket,'create_connection',return_value=FakeSocket(b'')),patch.object(metadata,'_receive_bounded_file',return_value=b'not an ELF') as read:
+            summary=metadata.collect_inventory_inputs('10.0.0.65',Path('/unused'),value,Path(td),[])
+            self.assertEqual(read.call_count,metadata.MAX_INPUTS)
+            self.assertTrue(all(not c['copied'] for c in summary['original_inputs']))
+            self.assertGreater(summary['inputs_not_selected'],0)
+            self.assertFalse(summary['root_proven'])
+
+    def test_inventory_cleanup_failure_prevents_followup_copy(self):
+        value=probe_fixture();value['privilege_inventory']=inventory_fixture()
+        sockets=initial_sockets()+[FakeSocket(peer('UGLYOS_STAGE_CREATED\n')),upload_peer(),
+                                  FakeSocket(peer(json.dumps(value))),FakeSocket(peer('cleanup failed'))]
+        with tempfile.TemporaryDirectory() as td,patch.object(metadata,'build_probe',return_value=(elf_fixture(),{})),patch.object(socket,'create_connection',side_effect=sockets),patch.object(metadata,'collect_inventory_inputs') as collect:
+            report=metadata.capture('10.0.0.65',Path('/unused'),Path(td)/'evidence',inventory=True)
+            self.assertEqual(report['state'],'SDK_STAGE_CLEANUP_UNVERIFIED');collect.assert_not_called()
 
 
 class SecurityMetadataTests(unittest.TestCase):
@@ -287,6 +372,78 @@ class SecurityMetadataTests(unittest.TestCase):
 
 
 class NativeProbeProgramTests(unittest.TestCase):
+    def check_inventory(self, compiler, *, arm):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);fixture=root/'fixture'
+            cap=struct.pack('<5I',0x02000001,0,0x002000c2,0,0)
+            for directory in metadata.INVENTORY_ROOTS:(fixture/directory.lstrip('/')).mkdir(parents=True,exist_ok=True)
+            for path in metadata.TARGETS:
+                file=fixture/path.lstrip('/');file.parent.mkdir(parents=True,exist_ok=True);file.touch()
+                os.setxattr(file,'user.uglyos_fixture',cap)
+            helper=fixture/'bin/owned-helper';helper.write_bytes(b'read only fixture');helper.chmod(0o4755)
+            os.setxattr(helper,'user.uglyos_fixture',cap)
+            sparse=fixture/'sbin/sparse-helper'
+            with sparse.open('wb') as f:f.truncate((1<<32)+7)
+            sparse.chmod(0o4755)
+            os.setxattr(sparse,'user.uglyos_fixture',cap)
+            (fixture/'bin/linked-helper').symlink_to(helper)
+            unsafe=fixture/'bin/quote"name';unsafe.touch()
+            for number in range(70):
+                file=fixture/f'usr/bin/candidate-{number:02d}';file.touch();file.chmod(0o755)
+                os.setxattr(file,'user.uglyos_fixture',cap)
+            try:
+                metadata.build_probe(root,compiler,fixture=fixture,host_test=not arm,inventory=True)
+            except metadata.MetadataError as exc:
+                self.fail(getattr(exc,'diagnostic',str(exc).encode()).decode('utf-8','replace'))
+            command=([shutil.which('qemu-arm')] if arm else [])+[str(root/'security-metadata-probe')]
+            value=json.loads(subprocess.check_output(command,timeout=20));self.assertTrue(value['test_fixture'])
+            inventory=value['privilege_inventory'];metadata.validate_inventory(inventory)
+            directories={d['path']:d for d in inventory['directories']}
+            owned=next(r for r in directories['/bin']['files'] if r['name']=='owned-helper')
+            self.assertEqual((owned['mode'],owned['uid'],owned['gid']),
+                             (helper.stat().st_mode,helper.stat().st_uid,helper.stat().st_gid))
+            self.assertEqual(owned['capability_hex'],cap.hex())
+            self.assertEqual(owned['size_hex'],f'{helper.stat().st_size:016x}')
+            self.assertEqual(next(r['size_hex'] for r in directories['/sbin']['files'] if r['name']=='sparse-helper'),
+                             '0000000100000007')
+            self.assertNotIn('linked-helper',[r['name'] for r in directories['/bin']['files']])
+            self.assertEqual(directories['/bin']['unsafe_names'],1)
+            self.assertEqual(sum(len(d['files']) for d in inventory['directories']),64)
+            self.assertGreater(sum(d['dropped_records'] for d in inventory['directories']),0)
+            self.assertTrue(all(d['complete'] for d in inventory['directories']))
+            with self.assertRaises(metadata.MetadataError):metadata.parse_probe(json.dumps(value).encode(),inventory=True)
+            # Native fixture layout is independently verified above; schema tests
+            # use a synthetic copy, never claim these are watch capabilities.
+            value['test_fixture']=False
+            for file in value['files']:file['attrs']=file['attrs'][:3]
+            metadata.parse_probe(json.dumps(value).encode(),inventory=True)
+            self.assertFalse(metadata.inventory_summary(value)['scope_complete'])
+            for file in (fixture/'usr/bin').iterdir():
+                if file.is_file():
+                    for attribute in ('user.uglyos_fixture','user.uglyos_label','user.uglyos_exec_label'):
+                        os.setxattr(file,attribute,b'Z'*256)
+            # Real maximum-size xattrs stress the total-output reserve as well
+            # as the independent 64-record budget; output must remain valid.
+            raw=subprocess.check_output(command,timeout=20)
+            self.assertLessEqual(len(raw),65536)
+            stressed=json.loads(raw)['privilege_inventory'];metadata.validate_inventory(stressed)
+            self.assertGreater(sum(d['dropped_records'] for d in stressed['directories']),0)
+
+    @unittest.skipUnless(shutil.which('gcc'),'host C compiler unavailable')
+    def test_native_inventory_matches_real_modes_xattrs_sparse_sizes_and_bounds(self):
+        self.check_inventory(shutil.which('gcc'),arm=False)
+
+    def test_arm_inventory_matches_stat64_dirent64_and_query_abi_under_qemu(self):
+        if not shutil.which('clang') or not shutil.which('qemu-arm'):
+            if os.environ.get('WATCH3_REQUIRE_ARM_ELF')=='1':self.fail('Required ARM compiler/QEMU missing')
+            self.skipTest('ARM compiler/QEMU unavailable locally')
+        self.check_inventory(shutil.which('clang'),arm=True)
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)
+            metadata.build_probe(root,shutil.which('clang'),inventory=True)
+            raw=subprocess.check_output([shutil.which('qemu-arm'),str(root/'security-metadata-probe')],timeout=20)
+            metadata.parse_probe(raw,inventory=True)
+
     @unittest.skipUnless(shutil.which('gcc'), 'host C compiler unavailable')
     def test_real_noexec_mount_refuses_our_host_probe_despite_mode_0700(self):
         mounts=metadata.parse_mountinfo(Path('/proc/self/mountinfo').read_text())
