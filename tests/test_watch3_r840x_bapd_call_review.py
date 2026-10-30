@@ -117,6 +117,12 @@ class CallbackRegistrationTests(unittest.TestCase):
     def test_registration_call_mutation_fails(self):
         data, sections = self.fixture()
         data[0xac7c] ^= 0xff
+        with self.assertRaisesRegex(review.ReviewError, "EVENT_CALLBACK_REGISTRY_TARGET_INVALID"):
+            review.callback_registration(data, sections)
+
+    def test_non_call_opcode_rejected(self):
+        data, sections = self.fixture()
+        data[0xac7d] = 0x00
         with self.assertRaisesRegex(review.ReviewError, "EVENT_REGISTRATION_CALL_INVALID"):
             review.callback_registration(data, sections)
 
