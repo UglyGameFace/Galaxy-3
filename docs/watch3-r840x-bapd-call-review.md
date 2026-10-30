@@ -56,3 +56,38 @@ enter the published report.
    44 more copy plans unselected), directory aliases and stat errors.
 
 Hardware status remains **NO-GO for any firmware or recovery write**.
+
+
+## October 30 continuation: original callback registration and guard
+
+The exact original `/bin/bapd` was inspected offline. This extends the
+previous verified D-Bus callsite to its registering callback and state gate.
+
+| Address | Original instruction evidence | Limit |
+| --- | --- | --- |
+| `0xac7c` | Direct Thumb `BL` to `bo_add_callback` at `0x4e10` | Static event registration |
+| `0xac84` | PC-relative callback pointer resolves to `0xaad1` (entry `0xaad0`) | The callback contains the FOTA request |
+| `0xac88` | PC-relative event name resolves to `0x12134` (`dbus-connected`) | Internal event, not an untrusted external trigger |
+| `0xaafe`–`0xab00` | Local state compared with zero; `BNE` skips to `0xab74` | Nonzero state skips the request |
+| `0xab58` | Previously verified `g_dbus_connection_call` to `fota.consumer.LaunchFota` | Call construction, not authorization |
+
+The original callback appears to send a FOTA launch request in response
+to its internal `dbus-connected` event if the local state permits. The
+source of the state value, runtime event reachability, D-Bus sender
+policy, receiver identity, and archive/signature checks are not established.
+
+Standard D-Bus system-bus permissions include policy rules such as
+`send_destination` and user/context-specific allow/deny rules. Additional
+Tizen SMACK/Cynara checks may apply. The actual R840X effective policy
+files have not been recovered, so there is NO evidence that SDB's
+`User::Shell` principal could send this request. Earlier systemd unit
+evidence reports configured `User=fota`, not root.
+
+Official D-Bus policy documentation:
+https://dbus.freedesktop.org/doc/dbus-daemon.1.html
+
+The existing offline Termux invocation now emits `callback_registration`
+in its private JSON result. There is no reason to rerun live root mode,
+invoke `LaunchFota`, or execute a Samsung helper to prove this static
+finding. Next: verify policy and signature/restoration boundaries using
+authentic read-only evidence.
