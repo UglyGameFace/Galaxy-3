@@ -39,7 +39,10 @@ and [pinned bapd call review](docs/watch3-r840x-bapd-call-review.md).
 
 PR #134 merged at `02795ac`. PR #135 merged to main at `a5de1a4`;
 required Watch3 NO WATCH CI run `41082843518` passed both Linux versions.
-No active overlapping PR. New exact-input pinned callsite verifier:
+New callback/guard validation is integrated in the same exact-input verifier:
+`tools/watch3_r840x_bapd_call_review.py`. Current development branch
+`issue-47-bapd-trigger-boundary` (integration and CI pending).
+Previously merged callsite verifier:
 `tools/watch3_r840x_bapd_call_review.py`; synthetic tests and required
 NO WATCH CI matrix. Original binaries remain private. The earlier private-input verifier
 `tools/watch3_r840x_privilege_offline.py` checks ZIP structure/limits,
@@ -48,6 +51,15 @@ ARM ELF32 headers, and FOTA static markers. It creates a local JSON report
 with restricted permissions; no SDB or binary execution. Synthetic tamper
 tests: `tests/test_watch3_r840x_privilege_offline.py`.
 Original Samsung executables and private reports remain **outside Git**.
+
+The exact pinned original bapd call edge now also has a verified
+`bo_add_callback` registration (0xac7c): event `dbus-connected` at
+0x12134 points at handler 0xaad0 (Thumb pointer 0xaad1). A local
+state check at 0xaafe/0xab00 branches around the FOTA request at
+0xab58 when nonzero. This is a real static callback/guard connection,
+NOT an SDB-user trigger, sender/receiver authorization, firmware update
+acceptance or root. Synthetic regression tests and original byte review
+cover event pointers, call targets, label and branch guard.
 
 Next research: determine real caller/receiver authorization for the
 verified D-Bus call, compare original consumer D-Bus method interface,
