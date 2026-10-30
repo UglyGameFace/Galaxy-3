@@ -133,6 +133,75 @@ def literal(data, sections, load, add, pool, dest, string):
     return {"load": hex(load), "string_address": hex(dest), "text": string}
 
 
+
+def callback_registration(data, sections):
+    """Prove original event->handler pointer and conditional FOTA call site.
+
+    This is a static registration/control-flow edge, not a bus policy grant
+    or evidence that this event is reachable from an untrusted SDB shell.
+    """
+    def read(addr, length):
+        start = offset(sections, addr, length)
+        return data[start:start + length]
+
+    if (read(0xac6c, 2) != bytes.fromhex("08b5") or
+            read(0xac72, 10) != bytes.fromhex("0023034a04497a447944")):
+        raise ReviewError("EVENT_REGISTRATION_INSTRUCTIONS_INVALID")
+    # Direct Thumb BL to the exported bo_add_callback function.
+    first, second = u16(data, offset(sections, 0xac7c, 4)), u16(data, offset(sections, 0xac7e, 2))
+    if first & 0xf800 != 0xf000 or second & 0xd000 != 0xd000:
+        raise ReviewError("EVENT_REGISTRATION_CALL_INVALID")
+    sign = (first >> 10) & 1
+    i1 = 1 ^ (((second >> 13) & 1) ^ sign)
+    i2 = 1 ^ (((second >> 11) & 1) ^ sign)
+    displacement = ((sign << 24) | (i1 << 23) | (i2 << 22) |
+                    ((first & 0x3ff) << 12) | ((second & 0x7ff) << 1))
+    if displacement & (1 << 24):
+        displacement -= 1 << 25
+    target = (0xac7c + 4 + displacement) & 0xffffffff
+    if target != 0x4e10 or read(target, 2) != bytes.fromhex("2de9"):
+        raise ReviewError("EVENT_CALLBACK_REGISTRY_TARGET_INVALID")
+
+    handler = (u32(data, offset(sections, 0xac84, 4)) + 0xac78 + 4) & 0xffffffff
+    event = (u32(data, offset(sections, 0xac88, 4)) + 0xac7a + 4) & 0xffffffff
+    if handler != 0xaad1 or event != 0x12134:
+        raise ReviewError("EVENT_HANDLER_OR_NAME_POINTER_INVALID")
+    if read(event, len(b"dbus-connected\0")) != b"dbus-connected\0":
+        raise ReviewError("EVENT_NAME_MISMATCH")
+    if read(0xaad0, 4) != bytes.fromhex("2de9f041"):
+        raise ReviewError("EVENT_CALLBACK_ENTRY_INVALID")
+
+    # LDR global flag, CMP r4,#0, BNE returns before constructing FOTA request.
+    if (read(0xaafc, 2) != bytes.fromhex("1c68") or
+            read(0xaafe, 4) != bytes.fromhex("002c38d1") or
+            read(0xab74, 8) != bytes.fromhex("012008b0bde8f081")):
+        raise ReviewError("EVENT_CALLBACK_GUARD_INVALID")
+    branch = u16(data, offset(sections, 0xab00, 2))
+    distance = branch & 0xff
+    if distance & 0x80:
+        distance -= 0x100
+    if (branch & 0xff00) != 0xd100 or 0xab00 + 4 + distance*2 != 0xab74:
+        raise ReviewError("EVENT_CALLBACK_GUARD_TARGET_INVALID")
+    # Exact original FOTA request was already proven at 0xab58; it falls
+    # between the conditional branch and the skip-to-return target.
+    if not (0xab00 < 0xab58 < 0xab74):
+        raise ReviewError("EVENT_CALLBACK_CALL_OUTSIDE_GUARD")
+    return {
+        "registered_event": "dbus-connected",
+        "registration_site": "0xac7c",
+        "registration_function": "bo_add_callback",
+        "callback_thumb_pointer": hex(handler),
+        "callback_code_entry": "0xaad0",
+        "request_callsite": "0xab58",
+        "conditional_skip": "nonzero local state skips request",
+        "guard_branch_site": "0xab00",
+        "guard_return_target": "0xab74",
+        "runtime_event_reachability_proven": False,
+        "dbus_sender_authorization_proven": False,
+        "consumer_authorization_proven": False
+    }
+
+
 def analyze(data):
     if len(data) != SIZE or hashlib.sha256(data).hexdigest() != PIN:
         raise ReviewError("PINNED_ORIGINAL_REQUIRED")
@@ -166,12 +235,13 @@ def analyze(data):
         "calls": [call(0xab2a, "g_variant_new"),
                   call(0xab58, "g_dbus_connection_call")],
         "arguments":refs,
+        "callback_registration": callback_registration(data, sections),
         "service":"fota.consumer", "object_path":"/fota/consumer",
         "interface":"fota.consumer", "method":"LaunchFota", "variant_format":"(is)",
         "device_connected":False, "vendor_binary_executed":False,
         "caller_authorized":False, "fota_invoked":False, "root_proven":False,
         "signature_bypass_proven":False,"bootloader_unlocked":False,"stock_restore_proven":False,
-        "scope_note":"One validated callsite and imported relocations, not live authorization or complete path analysis"
+        "scope_note":"One original FOTA callsite, callback registration and guard; neither event reachability nor authorization policy is proven"
     }
 
 
