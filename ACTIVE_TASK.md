@@ -1,98 +1,59 @@
 # UgLy|OS R840X bootloader and recovery
 
-Updated October 30, 2026. Objective: verified stock recovery/restoration and
-UgLy|OS custom boot on the owner's SM-R840X, NOBLESSE-LARGE-BT R08,
-R840XXXU1AUA2, CSC PAP candidate. Root, bootloader unlock, custom boot and
-restoration remain unverified. Owner authorization is established. Termux/
-Android only, free only, no PC/hardware purchases. Preserve the working watch.
+Updated October 30, 2026. Issue #47. Owner-owned Samsung Galaxy Watch3
+SM-R840X, NOBLESSE-LARGE-BT R08, stock R840XXXU1AUA2, CSC PAP candidate.
+Goal: verified exact-variant stock rescue and reproducible UgLy|OS custom
+boot. Android/Termux only, free only, preserve the working watch.
 
-## Current device result
+## Physical evidence and active state
 
-Base main inspected: `b86ebb5`, PR #132 merged. No overlapping open PR.
-New owner watch3-security-metadata-home.zip: 3,464 bytes, SHA-256
-83c297b4743a3d56a9f40f5ae80c4932171385a9654d96becf1d1d8c19bd25ec.
-Five members independently checked/preserved privately. Report SHA-256
-ce5d5508bb8d73b17b847e8c276d2c7e47fe6f341febaf40d719a29314f26726;
-native 2,226-byte response 45bf249e8ccc0a9c631ac5548bd75232060a2fd5c888cafc7e744a181168f6bd.
-Production parsers reproduce preflight/probe objects; cleanup marker matches.
+PR #133 was merged into main at `3f7ca89`. The native reader executed
+on the physical watch as UID/EUID 5001, User::Shell. Effective/permitted
+capabilities both zero; inheritable mask `0x2000c2` is not root. Eight fixed
+updater targets have no security.capability attribute; FOTA service runs as
+`User=fota`. Earlier root-on was denied. The R840X ODIN/LOKE handshake is
+transport magic only, with no flash session or proven stock restoration.
 
-NATIVE_SECURITY_METADATA_CAPTURED on actual watch. Canonical share directory
-/opt/usr/home/owner/share, /opt/usr rw,nosuid without noexec. Our 7,444-byte ARM
-program ran as UID/EUID5001, User::Shell, 25 groups with no1051. Effective and
-permitted caps0, inheritable00000000002000c2 (bits1 DAC_OVERRIDE,6 SETGID,
-7 SETUID,21 SYS_ADMIN). Inheritable bits are not usable permission by themselves.
+Owner supplied `watch3-privilege-inventory.zip`, SHA-256
+`2454c2cbe7826a14984669bfad0e0da8ca92cfcacc51cfb59afd67c833c6083d`.
+The raw probe matches the report; stage cleanup marker verified. Eight
+original ARM ELF32 helper inputs match their reported hashes and lengths.
+**64** candidate records retained; **82** candidate records dropped by
+inventory bounds. **44** eligible helper-copy plans not selected (a distinct
+limit). Scan stat errors persist. The directory inventory is incomplete.
+No setuid/setgid modes among retained candidates, although file capabilities
+are present. No helper executed or firmware changed.
 
-All eight target security.capability attributes return ENODATA(-61). Consumer,
-OMA-DM and scripts label _, no exec label; launch_app label User::Shell and
-exec label User (MAC attribute, not root). Fixed executable/script write checks
-EROFS(-30); FOTA/save label User::App::Shared returns write-check0; recovery
-label _ returns EACCES(-13). No archive/file created in FOTA or recovery dirs.
-No vendor execution, FOTA action, root switch, partition read or firmware write.
+The original `/bin/bapd` contains `_fota_launch_cb` and
+`fota.consumer.LaunchFota` with `/fota/consumer`. The original
+`/bin/csc-util` contains firmware-mode CSC preparation functions. These are
+static links to the FOTA workflow, NOT proven caller authorization, root,
+installer, bootloader access or a signature bypass. See
+[offline review](docs/watch3-r840x-privilege-offline-review.md).
 
-Completed native root:on denied; do not retry. Completed cat/RECV denials,
-FUMO/receiver captures and metadata runs remain preserved. Missing SDK paths
-and /tmp noexec diagnosed; stop repeating them. Native execution/cleanup now
-physically works. Root, kernel acceptance, recovery/restoration still unproved.
+## Current development
 
-## Implementation and next physical input
+Branch: `issue-47-privilege-offline-review`. The private-input verifier
+`tools/watch3_r840x_privilege_offline.py` checks ZIP structure/limits,
+report-to-probe consistency, cleanup/no-write flags, original hashes and
+ARM ELF32 headers, and FOTA static markers. It creates a local JSON report
+with restricted permissions; no SDB or binary execution. Synthetic tamper
+tests: `tests/test_watch3_r840x_privilege_offline.py`.
+Original Samsung executables and private reports remain **outside Git**.
 
-Source branch: issue-47-physical-privilege-inventory.
-Implementation PR: #133. Physical inventory/original-input execution pending.
-Extend the existing controller with --privilege-inventory, reusing proven
-canonical preflight/upload/cleanup. Native profile adds only read/query
-getdents64/lstat64/prctl GETs to enumerate six fixed system-helper directories,
-nonrecursively. Report setuid/setgid and capability-bearing regular files,
-mode/owners/64-bit sizes, access checks, label/exec-label values and process
-no-new-privileges/securebits/bounding queries. Do not execute discovered helpers.
+Next research: map original `bapd` callback's actual relocation/call edges
+offline, compare to previously reviewed consumer D-Bus method interface,
+package registration and caller policies. Resolve `/bin` vs `/usr/bin` alias
+questions, stat errors and dropped records in the inventory if needed.
+Continue *exact R840X* stock recovery provenance, partition identity,
+signed-boot checks and tested rescue feasibility before any write.
 
-Limits/errors/truncation explicit, synthetic fixtures rejected. Same command,
-after verified probe cleanup, copies launch_app plus selected bounded original
-helpers (up to8, 2MiB each) via RECV only. Validate observed paths, ARM ELF32,
-known size/hash; retain denied/invalid copies. Fixed systemctl show privilege
-settings and fota-consumer unit cat supply service context without activation.
-No remount, identity/cap/label changes, update archive or firmware access.
+## Safety / definition of done
 
-[Physical evidence and current phone command](docs/watch3-r840x-privilege-inventory.md).
-Fresh inventory output names preserve older ZIPs. Phone clang already works.
-Cloud cannot authenticate to the watch; this inventory/original-input upload
-is the physical dependency. Static matches are candidates, not privilege proof.
-
-## Preserved reverse engineering
-
-Original FUMO plugin supplies metadata/logging (17 verified immediate calls),
-not install logic. Original public CA has RSA-2048 key and verified self-
-signature, no signing private key. Original daemon registers Install event4,
-task8 callback0x1feac with selected state-dependent update segments reviewed.
-Daemon pre-update helper verifies nested archive before inner execution; outer
-parsing precedes check. Standalone consumer helper differs. Device-plugin
-helper failure rejoins preparation. No whole-firmware bypass proven.
-[Detailed original review](docs/watch3-r840x-omadm-install-verification.md).
-
-Earlier: non-root ARMv7 Tizen SDB, Linux4.9.59, 21 partition labels and critical
-kernel geometry. Owner completed only ODIN/LOKE handshake and returned stock.
-Historical R500/retail findings do not establish R840X compatibility. No exact
-original bootloader/boot/recovery bytes or tested return-to-stock route yet.
-
-## Validation and remaining work
-
-Host and required ARM/QEMU tests use real directories, mode/owner/stat64,
-positive user xattrs, symlink rejection, >4GiB sparse-file sizes, record limits
-and synthetic markers. Exact production inventory profile also runs in QEMU.
-Capability decoding covers revisions1/2/3, error-vs-absence and rootid retention.
-Protocol checks cover bounded input copies/private ZIP, unsafe records, denied
-ELF reads, copy budget, cleanup and no follow-up after cleanup failure. Existing
-metadata/ARM/noexec regressions remain. No Samsung binary runs or goes to CI.
-Local focused suite: 271 tests, passing with four unavailable ARM/noexec checks
-skipped locally. The updated host inventory/bounds fixtures also pass. Required
-ARM/QEMU CI also passed: run41071961281, code head5423b9d, all271 focused +
-2 private D-Bus +1 real systemd tests on both Ubuntu versions (274 per OS,
-no skips). Logs confirm exact ARM inventory/profile ABI, real >4GiB stat64,
-xattr/output bounds and original-copy/cleanup regressions. Integration and the
-owner's new inventory command remain to be verified.
-
-Pending: physical privilege inventory and selected helper originals, actual
-privilege-gain path, archive/caller/MAC validation, exact R840X S-BOOT/boot/
-recovery originals, verified rescue, custom boot acceptance and restoration.
-Issue #47 stays open. No unlock/root/recovery success claim is supported.
-Remote merged-branch deletion unavailable through current connector/Git
-credentials. Preserve owner work and unrelated-project independence.
+Root: NOT PROVEN. Bootloader unlocked: NO. Custom boot: NO.
+Exact stock restoration: NOT PROVEN. Firmware writes: **NO-GO**.
+Never flash R840 images onto R840X by model similarity, issue blind Odin/PIT
+writes, call FOTA to test reachability, execute discovered privileged helpers
+or change security labels/capabilities. No claim of production boot readiness
+until signed-image acceptance and independent restoration are both proved.
+Issue #47 stays open. User's unrelated projects continue independently.
