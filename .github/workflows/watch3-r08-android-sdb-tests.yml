@@ -16,6 +16,9 @@ on:
       - 'tools/watch3_r840x_security_metadata.py'
       - 'tools/watch3_r840x_privilege_offline.py'
       - 'tools/watch3_r840x_bapd_call_review.py'
+      - 'tools/watch3_r840x_dbus_policy_readonly.py'
+      - 'tests/test_watch3_r840x_dbus_policy_readonly.py'
+      - 'tools/watch3_r08_fota_consumer_inventory.py'
       - 'tests/test_watch3_r840x_bapd_call_review.py'
       - 'tests/test_watch3_r840x_privilege_offline.py'
       - 'tools/native/watch3_security_metadata.c'
@@ -86,7 +89,7 @@ jobs:
           export WATCH3_NOEXEC_FIXTURE="$uglyos_noexec_dir"
           python3 -m py_compile tools/watch3_r08_fota_framework_context.py
           python3 -m py_compile tools/watch3_r840x_native_root.py
-          python3 -m py_compile tools/watch3_r840x_security_metadata.py tools/watch3_r840x_privilege_offline.py tools/watch3_r840x_bapd_call_review.py
+          python3 -m py_compile tools/watch3_r840x_security_metadata.py tools/watch3_r840x_privilege_offline.py tools/watch3_r840x_bapd_call_review.py tools/watch3_r840x_dbus_policy_readonly.py
           python3 -m py_compile tools/watch3_r08_android_sdb.py tools/watch3_r08_root_prereq.py tools/watch3_r08_fota_artifact_pull.py tools/watch3_r08_fota_consumer_inventory.py tools/watch3_r08_fota_manifest_probe.py tools/watch3_r08_fota_package_registration_pull.py tools/watch3_r08_fota_handoff_pull.py tools/watch3_r08_recovery_script_pull.py tools/analyze_watch3_r08_fota_handoff_offline.py tools/watch3_r08_fota_services.py tools/analyze_watch3_r08_fota_elf.py tools/watch3_r840x_fota_owner_readonly.py
           WATCH3_REQUIRE_ARM_ELF=1 python3 - <<'PY'
           import socket
@@ -102,6 +105,7 @@ jobs:
               'test_watch3_r840x_security_metadata.py',
               'test_watch3_r840x_privilege_offline.py',
               'test_watch3_r840x_bapd_call_review.py',
+              'test_watch3_r840x_dbus_policy_readonly.py',
           ]
           suite = unittest.TestSuite(unittest.defaultTestLoader.discover('tests', pattern=p)
                                      for p in patterns)
