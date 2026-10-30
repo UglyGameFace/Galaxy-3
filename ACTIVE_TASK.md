@@ -64,12 +64,11 @@ NOT an SDB-user trigger, sender/receiver authorization, firmware update
 acceptance or root. Synthetic regression tests and original byte review
 cover event pointers, call targets, label and branch guard.
 
-Next physical dependency: one bounded, read-only standard D-Bus
-policy capture via `tools/watch3_r840x_dbus_policy_readonly.py`, with
-fixed system.conf files and two system.d directories only. A short
-parsed local JSON records relevant allow/deny rules, but **never**
-concludes effective authorization from a partial policy view. No
-FOTA invocation. Analyze the actual result before choosing further work.
+The physical read-only standard D-Bus policy capture is now available,
+so the next evidence gate is to distinguish possible overlapping default
+allow/deny from actual effective bus/security policy. No D-Bus update
+invocation or added root attempt is justified. Follow the offline review
+in `docs/watch3-r840x-dbus-policy-readonly.md` and preserve unknowns.
 Compare source policy with the original consumer handler and package
 registration; preserve explicit SMACK/Cynara unknowns. Resolve `/bin` vs `/usr/bin` alias
 questions, stat errors and dropped records in the inventory if needed.
@@ -85,10 +84,20 @@ Adds read-only standard D-Bus policy directory support to the shared
 SDB inventory decoder, a bounded policy reader, and 11 synthetic tests.
 The prior original `bapd` callsite report ran successfully in Termux as
 `PINNED_OFFLINE_BAPD_CALLSITE_VERIFIED`.
-**Pending physical evidence:** run the merged policy reader once with the
-watch's current IP and supply the redacted report. No authorization
-conclusion until that report is reviewed. The source branch can be
-retired after verifying no unmerged work; connector cannot delete it.
+**Physical policy capture received and analyzed, October 30:** the fixed
+source `fota-consumer.conf` has explicit send grants to root/fota/system,
+a default deny for FOTA method calls, and a later interface-specific
+default send allow. Core system.conf denies method calls by default.
+The standard override policy directory contains 103 other/unreported
+entries (not 103 confirmed FOTA rules). This is a **potential rule overlap**,
+not proof that User::Shell can send, trigger or install FOTA.
+The existing `watch3_r840x_dbus_policy_readonly.py` now supports
+`--offline-report` to review the owner's saved v1 JSON without another
+physical read or risking a method call. Strict interpretation marks
+effective bus policy, caller UID, SMACK/Cynara and consumer authorization
+UNDETERMINED. No further attempt is justified until those boundaries
+and exact-variant stock rescue are evidenced. Work branch:
+`issue-47-dbus-policy-review-v1`; tests/CI and integration pending.
 
 ## Safety / definition of done
 
