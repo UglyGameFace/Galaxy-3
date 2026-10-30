@@ -76,7 +76,7 @@ def receive_one(sock, key_path: Path, remote_path: bytes) -> bytes:
 
 def _receive_bounded_file(sock, key_path: Path, remote_path: bytes, max_bytes: int) -> bytes:
     """Shared RECV transport; callers must validate their own fixed/declared paths."""
-    if not 1 <= max_bytes <= 8 * 1024 * 1024:
+    if type(max_bytes) is not int or not 1 <= max_bytes <= 32 * 1024 * 1024:
         raise HandoffError("INVALID_LOCAL_BYTE_LIMIT")
     conn = Connection(sock, key_path)
     try:
@@ -95,8 +95,13 @@ def _receive_bounded_file(sock, key_path: Path, remote_path: bytes, max_bytes: i
     except (OSError, SdbError, TimeoutError):
         raise HandoffError("SDB_RECV_REQUEST_FAILED") from None
     buffer = CappedBytes(max_bytes)
-    decoder = ReadOnlySyncDecoder(buffer)
-    for _ in range(MAX_STREAM_FRAMES):
+    # Existing metadata/ELF callers retain their original caps. The explicitly
+    # invoked native-root backup can read a known 18 MiB partition after fresh
+    # label/geometry checks; this decoder never sends data to the watch.
+    decoder = ReadOnlySyncDecoder(buffer, max_bytes=max(8 * 1024 * 1024, max_bytes))
+    frame_limit = (MAX_STREAM_FRAMES if max_bytes <= 8 * 1024 * 1024
+                   else MAX_STREAM_FRAMES + max_bytes // 1024)
+    for _ in range(frame_limit):
         try:
             kind, sender, receiver, part = receive(sock)
         except (OSError, SdbError, TimeoutError):

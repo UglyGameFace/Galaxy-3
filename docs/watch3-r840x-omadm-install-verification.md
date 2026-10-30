@@ -120,7 +120,7 @@ The helper's failed signature check alone does not prove the whole installation
 aborts. Conversely, continuation does not demonstrate that unsigned firmware
 will pass the remaining updater, recovery or bootloader checks.
 
-## Focused next capture
+## Completed firmware-focused capture
 
 The original backend XML declares an MO plugin with Type `FUMO` and path
 `/usr/lib/sync-agent/dm-private/libplugin-mo-fumo.so`. The four-ELF cap was
@@ -143,10 +143,62 @@ python tools/watch3_r08_fota_framework_context.py \
   --archive ~/storage/downloads/watch3-firmware-focus-evidence.zip
 ```
 
-Attach `watch3-firmware-focus-evidence.zip` from Downloads, including if the
-reported state is partial. This workspace cannot authenticate directly to the
-watch; the phone retains its private SDB key. No repeated broad acquisition or
-retry of the unavailable preparation-script read is needed.
+The owner supplied that ZIP successfully. The command above is acquisition
+history; do not repeat it. ZIP SHA-256:
+`461b424a40ef512b4bdca83fcfa6ab8682a7202226a5b643e8e6eb98c10cdabb`.
+The 2,721-byte report has SHA-256
+`5c0c84556b05024613e4f36c173b3fd3a2662e144d0f9bcb0ef7eb2346908d34`.
+Its state is `FIRMWARE_FOCUS_CAPTURED`; all three member names, sizes and
+hashes match. The original 5,032-byte FUMO plugin has SHA-256
+`e3993a58bfc904730a0e753de188e5ab61cef7fb9e52de75899270477ed99458`
+and GNU build ID `06d04977f8e458215a73fa1153ff9795896b3bf6`.
+
+### FUMO's four exported functions provide metadata
+
+| Code address | Export | Reviewed behavior |
+| --- | --- | --- |
+| `0x79c` | `sync_agent_plugin_get_server_id_list` | Allocates a list containing `*` |
+| `0x878` | `sync_agent_plugin_get_mo_value` | Handles `PkgName`, `PkgVersion`, `State`; State copies `10` plus NUL |
+| `0x994` | `sync_agent_plugin_set_function_get_devinfo` | Logging stub in this original |
+| `0x9ec` | `sync_agent_plugin_initialize` | Logs and returns 1 |
+
+The private independent review checks all 17 immediate calls in these four
+exports with the Thumb decoder, Capstone and the real PLT/GOT relocations.
+They resolve only to logging, malloc, calloc and strcmp. The `State` copy uses
+the three literal bytes at `0xca0`. This is static plugin metadata, not a live
+firmware state or an installation routine. The pinned `fumo-plugin` analyzer
+profile now reports these exact exports. No plugin code was executed.
+
+### The captured trust anchor is a public certificate
+
+The 1,058-byte DER certificate has SHA-256
+`196a09eb31f957fcca49bae20c427070c38cca59cddefaf1874ab2173c20a70c`.
+Its public key is RSA-2048; the certificate is self-issued, has CA=true, and
+its self-signature verifies with SHA-512/RSA. Its encoded validity interval is
+2013-11-21 01:46:01 UTC through 2068-08-24 01:46:01 UTC. That interval is not
+an observation of the watch's clock or of actual package acceptance. This is
+a public trust anchor, not the firmware signing private key. The certificate's
+own signature algorithm does not establish which digest an update archive uses.
+
+### Additional daemon task mapping
+
+Original-byte checks now link task registration to `make_fumo_serviceEngine_process_task_spec`
+at `0x1eb76`. Registration uses task ID 8 at `0x1eb84`/`0x1eb86`; the Install
+request helper also uses ID 8 at `0x1f286`/`0x1f28a`. The task-spec builder
+resolves Thumb callback pointer `0x1fead` at `0x21468` and passes it to
+`sync_agent_alloc_simple_task_spec` at `0x2147c`.
+
+That callback calls `service_engine_start` at `0x2005e`; a state-dependent
+path calls `fumo_exec` at `0x2f088`. Its `/Update` branch calls
+`firmware_update_operation` at `0x3770e`, which calls
+`fumo_engine_state_operation` at `0x373a8`. Eight further calls, two PLT/GOT
+bindings, the callback literal and both task-ID instructions were checked
+against original bytes. These are static segments with intervening state
+checks; a complete live event-to-flash execution has not been observed.
+
+The current next phone operation is the
+[standard root-mode attempt and conditional boot/recovery backup](watch3-r840x-native-root-and-backup.md).
+The phone retains its SDB key; this workspace cannot authenticate directly.
 
 The acquisition tests use explicitly synthetic pins and fake SDB responses.
 The separate private review above uses the owner's actual bytes. CI fixtures

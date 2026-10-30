@@ -84,8 +84,11 @@ def _sdb_stage_error(stage: str, exc: Exception) -> ArtifactPullError:
 class ReadOnlySyncDecoder:
     """Streaming decoder of adb/SDB sync RECV DATA/DONE or FAIL packets."""
 
-    def __init__(self, out):
+    def __init__(self, out, *, max_bytes=MAX_BINARY_BYTES):
+        if type(max_bytes) is not int or not 1 <= max_bytes <= 32 * 1024 * 1024:
+            raise ArtifactPullError("INVALID_SYNC_BYTE_LIMIT")
         self.out = out
+        self.max_bytes = max_bytes
         self.digest = hashlib.sha256()
         self.byte_count = 0
         self.head = bytearray()
@@ -112,8 +115,9 @@ class ReadOnlySyncDecoder:
                     raise ArtifactPullError("UNEXPECTED_SYNC_RESPONSE")
                 if size > (MAX_SYNC_CHUNK if tag == b"DATA" else 512):
                     raise ArtifactPullError("UNBOUNDED_SYNC_MESSAGE")
-                if tag == b"DATA" and self.byte_count + size > MAX_BINARY_BYTES:
-                    raise ArtifactPullError("REMOTE_FILE_EXCEEDS_EIGHT_MIB")
+                if tag == b"DATA" and self.byte_count + size > self.max_bytes:
+                    raise ArtifactPullError("REMOTE_FILE_EXCEEDS_EIGHT_MIB" if self.max_bytes == MAX_BINARY_BYTES
+                                            else "REMOTE_FILE_EXCEEDS_CONFIGURED_LIMIT")
                 self.pending = (tag, size)
             tag, size = self.pending
             if len(self.buf) < size:
@@ -125,8 +129,9 @@ class ReadOnlySyncDecoder:
                 # Raw text is never retained, logged or serialized. Existing
                 # callers keep their established exception message.
                 raise RemoteFileReadError(part)
-            if self.byte_count + len(part) > MAX_BINARY_BYTES:
-                raise ArtifactPullError("REMOTE_FILE_EXCEEDS_EIGHT_MIB")
+            if self.byte_count + len(part) > self.max_bytes:
+                raise ArtifactPullError("REMOTE_FILE_EXCEEDS_EIGHT_MIB" if self.max_bytes == MAX_BINARY_BYTES
+                                        else "REMOTE_FILE_EXCEEDS_CONFIGURED_LIMIT")
             self.byte_count += len(part)
             self.digest.update(part)
             self.out.write(part)

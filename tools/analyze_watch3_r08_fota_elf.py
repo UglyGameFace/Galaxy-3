@@ -29,11 +29,14 @@ OMADM_AGENT_SHA256 = "32057c3ba2537b2632a5d73dc1397b919ad3bf9c58c446b11e48e3837a
 OMADM_AGENT_BYTES = 525584
 DM_DEVICE_PLUGIN_SHA256 = "98c21b99b0c443e75f42e00cc990f6e4374fa8c398f8d3e8c82a4585d9f2f357"
 DM_DEVICE_PLUGIN_BYTES = 36184
+FUMO_PLUGIN_SHA256 = "e3993a58bfc904730a0e753de188e5ab61cef7fb9e52de75899270477ed99458"
+FUMO_PLUGIN_BYTES = 5032
 PINNED_PROFILES = {
     "fota-consumer": (CONSUMER_SHA256, CONSUMER_BYTES),
     "sync-agent": (SYNC_AGENT_SHA256, SYNC_AGENT_BYTES),
     "oma-dm-agent": (OMADM_AGENT_SHA256, OMADM_AGENT_BYTES),
     "dm-device-plugin": (DM_DEVICE_PLUGIN_SHA256, DM_DEVICE_PLUGIN_BYTES),
+    "fumo-plugin": (FUMO_PLUGIN_SHA256, FUMO_PLUGIN_BYTES),
 }
 MAX_BYTES = 8 * 1024 * 1024
 ELF_HDR = struct.Struct("<16sHHIIIIIHHHHHH")
@@ -76,6 +79,10 @@ IMPORT_GROUPS = {
                                 "sync_agent_dm_fota_software_update", "device_power_reboot",
                                 "sync_agent_set_event_callback", "sync_agent_execute_dev_function",
                                 "vconf_notify_key_changed", "sync_agent_file_md5_validation")),
+    "framework_plugin": frozenset(("sync_agent_plugin_get_server_id_list",
+                                    "sync_agent_plugin_get_mo_value",
+                                    "sync_agent_plugin_set_function_get_devinfo",
+                                    "sync_agent_plugin_initialize")),
     # Digest/HMAC primitives are not, by themselves, signature verification.
     "other_crypto": frozenset(("DES_set_key", "DES_ecb_encrypt", "gcry_md_open",
                                "EVP_DigestInit_ex", "EVP_DigestUpdate", "EVP_DigestFinal",
@@ -517,6 +524,7 @@ def main(argv=None) -> int:
         "sync-agent": "watch3-r840x-sync-agent-native-evidence/libsync-agent.so.0.bin",
         "oma-dm-agent": "watch3-r840x-sync-agent-receiver-evidence/context-03.bin",
         "dm-device-plugin": "watch3-r840x-sync-agent-receiver-evidence/context-14.bin",
+        "fumo-plugin": "watch3-r840x-firmware-focus-evidence/context-01.bin",
     }
     if args.input is None:
         args.input = Path.home() / default_inputs[args.component]

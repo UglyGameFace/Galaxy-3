@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Termux-to-Tizen read-only SDB, without a computer or Samsung SDK.
+"""Termux-to-Tizen SDB transport, without a computer or Samsung SDK.
 
 Only explicitly allowlisted system metadata reads and FOTA registry queries run.
 The FOTA owner collector can also read one observed PID's proc-exe symlink.
-No root, reboot, device writes, partition reading, install or flashing.
+The default metadata CLI remains read-only. The separate native-root tool can
+explicitly request the standard root-mode service; it does not flash firmware.
 The battery sysfs uevent response is not yet verified on physical SM-R840X.
 """
 from __future__ import annotations
@@ -25,6 +26,11 @@ from watch3_r08_bezel_capabilities import summarize_bezel
 from watch3_r08_boot_memory import summarize_memory
 from watch3_r08_root_prereq import ROOT_PATH_PROBES, summarize_root_path
 from watch3_r08_fota_services import FOTA_PATH_PROBES, FOTA_FILE_PATHS, summarize_fota_path
+
+NATIVE_ROOT_IDENTITY_PROBES = {
+    "native_root_uid": "id -u",
+    "native_root_status": "cat /proc/self/status",
+}
 
 # Read ONLY the pinned Samsung battery device's read-only sysfs uevent.
 # No wildcard, arbitrary paths, raw blocks or writes; its exact identity
@@ -120,6 +126,7 @@ ALLOWED_PROBES.update(CRITICAL_GEOMETRY_PROBES)
 # Preserve the existing audited boot/power/bezel contract; root-path checks
 # are a separate, opt-in, fixed read-only set.
 ALLOWED_PROBES.update(ROOT_PATH_PROBES)
+ALLOWED_PROBES.update(NATIVE_ROOT_IDENTITY_PROBES)
 ALLOWED_PROBES.update(FOTA_PATH_PROBES)
 
 # The original owner-extracted fota-service ELF names fota.consumer on the
@@ -288,6 +295,19 @@ class Connection:
             raise SdbError("Operation not in the fixed read-only allowlist")
         return self._shell_command(ALLOWED_PROBES[operation], style)
 
+    def capabilities(self):
+        """Read the native capability service; callers filter private fields."""
+        return self._read_service(b"capability:\x00")
+
+    def enable_native_root(self):
+        """Request Tizen's normal root switch, never infer success from a reply.
+
+        This explicitly changes requested daemon account mode. Only the
+        separately invoked native-root entry point calls it; metadata captures
+        do not. A fresh authenticated UID/EUID readback is still necessary.
+        """
+        return self._read_service(b"root:on\x00")
+
     def process_executable(self, pid: int, style="standard"):
         """Read one proc symlink for a registry-observed PID, never process memory.
 
@@ -306,9 +326,16 @@ class Connection:
         # dispatcher on some models uses "shell:0 cat ..." instead.
         # Both variants only contain our literal read-only allowlist.
         destination = ("shell:" if style == "standard" else "shell:0 ")
+        return self._read_service((destination + command).encode() + b"\x00")
+
+    def _read_service(self, destination):
+        """Shared bounded stream reader for fixed shell/native-service callers.
+
+        Keep the established shell diagnostics for backward compatibility;
+        non-shell callers categorize errors without retaining their text.
+        """
         local = 2
-        self.send(b"OPEN", local, 0,
-                  (destination + command).encode() + b"\x00")
+        self.send(b"OPEN", local, 0, destination)
         remote = None
         output = bytearray()
         payload_frames = 0
