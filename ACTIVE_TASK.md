@@ -107,12 +107,16 @@ uncertainty in this projection:** v1 discarded original D-Bus rule
 attributes (send_path, send_member, reply constraints, etc.) and ordered
 include declarations. These cannot be recovered from saved JSON.
 
-Current branch: `issue-47-fota-dbus-full-attributes`. One cohesive
-extension of the same existing reader adds focused read-only parsing of
-exactly 3 previously observed standard config files and full matching
-rule attributes, 10 new fake-watch regression tests, and Android steps.
-No arbitrary directory scan, FOTA call, service activation, firmware write,
-or claim of access. Physical capture must be performed once after CI/merge.
+PR #139 merged into `main` at `6f37262` after passing no-watch CI
+`41095003011` on Ubuntu 22.04 and 24.04. The existing reader now
+supports `--focused-detail-ip` for **exactly three** already-observed
+D-Bus config files, preserving ordered includes and detailed rule
+matching attributes, with 10 new fake-watch regression tests. No new
+transport, arbitrary directory scan, FOTA method, service activation,
+root or firmware write. One physical read-only capture is now the
+next evidence gate, as documented in `docs/watch3-r840x-dbus-policy-readonly.md`.
+The merged source branch `issue-47-fota-dbus-full-attributes` awaits safe
+retirement; this connector does not expose branch deletion.
 Current objective: then check full rule attributes, actual daemon config and
 runtime bus sender, Tizen MAC policy, and exact-R840X signed rescue before
 any writes. Branch `issue-47-dbus-policy-review-v1` remains
