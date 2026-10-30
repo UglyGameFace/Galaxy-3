@@ -39,9 +39,12 @@ and [pinned bapd call review](docs/watch3-r840x-bapd-call-review.md).
 
 PR #134 merged at `02795ac`. PR #135 merged to main at `a5de1a4`;
 required Watch3 NO WATCH CI run `41082843518` passed both Linux versions.
-New callback/guard validation is integrated in the same exact-input verifier:
-`tools/watch3_r840x_bapd_call_review.py`. Current development branch
-`issue-47-bapd-trigger-boundary` (integration and CI pending).
+PR #136 merged at `24ac54f` with callback/guard validation in the
+same exact-input verifier `tools/watch3_r840x_bapd_call_review.py`.
+The required NO WATCH CI run `41084666846` passed on Ubuntu 22.04/24.04.
+No active overlapping pull request remains. The merged source branch
+`issue-47-bapd-trigger-boundary` should be retired if safe; GitHub branch
+deletion is not available through this connector.
 Previously merged callsite verifier:
 `tools/watch3_r840x_bapd_call_review.py`; synthetic tests and required
 NO WATCH CI matrix. Original binaries remain private. The earlier private-input verifier
