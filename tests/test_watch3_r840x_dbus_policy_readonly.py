@@ -559,5 +559,97 @@ class FocusedDefaultAuditTests(unittest.TestCase):
 
 
 
+
+class OriginalWatchPolicyRuleClassificationTests(unittest.TestCase):
+    """Regression for reply-only rules found in original system.conf."""
+
+    @staticmethod
+    def physical_shape():
+        obj=full_original_subset_fixture()
+        general=obj["policy_files"]["/usr/share/dbus-1/system.conf"]["ordered_config_nodes"][0]["rules"]
+        general.extend([
+            {"action":"allow","attributes":{"send_type":"signal"},"unreported_attribute_names":[]},
+            {"action":"allow","attributes":{"send_type":"method_return",
+                                          "send_requested_reply":"true"},"unreported_attribute_names":[]},
+            {"action":"allow","attributes":{"send_type":"error",
+                                          "send_requested_reply":"true"},"unreported_attribute_names":[]},
+            {"action":"allow","attributes":{"receive_type":"method_call"},"unreported_attribute_names":[]},
+            {"action":"deny","attributes":{"send_destination":"org.freedesktop.DBus",
+                            "send_interface":"org.freedesktop.DBus.Debug.Stats"},
+             "unreported_attribute_names":[]},
+        ])
+        return obj
+
+    def test_original_reply_only_rules_do_not_poison_method_call_subset(self):
+        out=policy.review_focused_report(self.physical_shape())
+        self.assertTrue(out["exact_original_three_hashes_matched"])
+        self.assertEqual(out["fota_default_rule_sequence_for_hypothetical_message"],["deny","allow"])
+        self.assertEqual(out["observed_default_subset_result"],"LATER_FOTA_INTERFACE_ALLOW_MATCHES")
+        self.assertFalse(out["matching_rule_subset_has_unknowns_or_drift"])
+        self.assertEqual(out["subset_uncertainty_reason_codes"],[])
+        self.assertGreater(out["known_nonmatching_default_rules_ignored"],4)
+        self.assertEqual(out["effective_dbus_send_permission_for_shell"],"UNDETERMINED")
+
+    def test_known_mismatch_precedes_unknown_reply_constraints(self):
+        rule={"action":"allow","attributes":{
+            "send_type":"method_return","send_requested_reply":"true",
+            "send_destination_prefix":"new-constraint"},"unreported_attribute_names":["future_field"]}
+        self.assertEqual(policy._focused_default_send_matches(rule),"NO_MATCH")
+        rule["attributes"]["send_type"]="method_call"
+        self.assertEqual(policy._focused_default_send_matches(rule),"UNKNOWN")
+
+    def test_known_different_destination_precedes_unknown(self):
+        rule={"action":"deny","attributes":{
+            "send_destination":"org.freedesktop.DBus",
+            "send_requested_reply":"true"},"unreported_attribute_names":[]}
+        self.assertEqual(policy._focused_default_send_matches(rule),"NO_MATCH")
+        rule["attributes"]["send_destination"]="fota.consumer"
+        self.assertEqual(policy._focused_default_send_matches(rule),"UNKNOWN")
+
+    def test_unknown_on_matching_fota_allow_stays_inconclusive(self):
+        obj=self.physical_shape()
+        fota=obj["policy_files"]["/etc/dbus-1/system.d/fota-consumer.conf"]["ordered_config_nodes"][-1]
+        fota["rules"][-1]["attributes"]["send_requested_reply"]="true"
+        out=policy.review_focused_report(obj)
+        self.assertTrue(out["matching_rule_subset_has_unknowns_or_drift"])
+        self.assertIn("UNKNOWN_POTENTIAL_SEND_CONSTRAINT",out["subset_uncertainty_reason_codes"])
+        self.assertEqual(out["observed_default_subset_result"],"INCONCLUSIVE")
+
+    def test_changed_original_sha_is_a_distinct_inconclusive_reason(self):
+        obj=self.physical_shape()
+        obj["policy_files"]["/etc/dbus-1/system.d/fota-consumer.conf"]["sha256"]="0"*64
+        out=policy.review_focused_report(obj)
+        self.assertEqual(out["subset_uncertainty_reason_codes"],["PINNED_SOURCE_CHANGED_OR_UNVERIFIED"])
+        self.assertEqual(out["observed_default_subset_result"],"INCONCLUSIVE")
+
+    def test_unrelated_user_policy_scope_does_not_poison_default_subset(self):
+        obj=self.physical_shape()
+        fota=obj["policy_files"]["/etc/dbus-1/system.d/fota-consumer.conf"]["ordered_config_nodes"][0]
+        fota["unrecognized_scope_names"]=["future_user_attribute"]
+        out=policy.review_focused_report(obj)
+        self.assertEqual(out["observed_default_subset_result"],"LATER_FOTA_INTERFACE_ALLOW_MATCHES")
+        self.assertEqual(out["effective_dbus_send_permission_for_shell"],"UNDETERMINED")
+
+    def test_unknown_default_scope_stays_inconclusive(self):
+        obj=self.physical_shape()
+        fota=obj["policy_files"]["/etc/dbus-1/system.d/fota-consumer.conf"]["ordered_config_nodes"][-1]
+        fota["unrecognized_scope_names"]=["future_default_attribute"]
+        out=policy.review_focused_report(obj)
+        self.assertEqual(out["observed_default_subset_result"],"INCONCLUSIVE")
+        self.assertIn("UNKNOWN_DEFAULT_SCOPE_ATTRIBUTE",out["subset_uncertainty_reason_codes"])
+
+    def test_owner_shaped_json_offline_no_watch_and_private_output(self):
+        with tempfile.TemporaryDirectory() as td:
+            inp,out=Path(td)/"focused.json",Path(td)/"audit.json"
+            inp.write_text(json.dumps(self.physical_shape()))
+            with patch.object(policy.socket,"create_connection",side_effect=AssertionError("NO WATCH")):
+                self.assertEqual(policy.main(["--offline-focused-report",str(inp),
+                                              "--report",str(out)]),0)
+            result=json.loads(out.read_text())
+            self.assertEqual(result["observed_default_subset_result"],"LATER_FOTA_INTERFACE_ALLOW_MATCHES")
+            self.assertFalse(result["matching_rule_subset_has_unknowns_or_drift"])
+            self.assertFalse(result["watch_contacted"])
+            self.assertEqual(out.stat().st_mode & 0o077,0)
+
 if __name__=="__main__":
     unittest.main()
