@@ -8,54 +8,59 @@ Android only, free only, no PC/hardware purchases. Preserve the working watch.
 
 ## Current device result
 
-Base main inspected: `e76a94d`, PR #129 merged. No overlapping open PR.
-New owner upload watch3-recovery-shell-evidence.zip: 3,325 bytes, SHA-256
-cde1834a01caba62970d6ac6946027908386af98ad82d292a1454bd86a4fa33e.
-All nine members match the 3,637-byte report/hash; preserved privately.
+Base main inspected: `4b5b2e9`, PR #130 merged. No overlapping open PR.
+The new watch3-security-metadata-evidence.zip is 884 bytes, SHA-256
+be7b2b5349c39ab81c4d6c40a96d2050976aa9ca69e382c1ebd5667d998f238b.
+Both original members are preserved privately. Report 874 bytes, SHA-256
+447d90baf5c5402d6c0e23bf0e7d75b262d648fc97732341ac313d75221cb131.
 
-Three scripts exist but cat explicitly denied access: recovery-update.sh
-0550 uid200:gid1051 / 8,339 bytes; rw-update-prepare.sh 0550 200:1051 /
-664 bytes; rw-update-systemd.sh 0700 0:0 / 7,706 bytes. OMA-DM unit also
-permission-denied, 0700 200:200 / 453 bytes. Consumer and daemon ELF paths
-are 0755 200:200, lengths agree with pinned originals. Archive save directory
+The phone successfully built the unchanged ARM reader: 7,444 bytes, SHA-256
+76f8f1df022a7dc3e4d0b7864dae2c7434850c8175006c40bf99b9c92e4e82e8.
+The advertised /home/owner/share/tmp/sdk_tools path could not host the random
+child: mkdir explicitly returned No such file or directory (142-byte response,
+SHA-256 14df1545ac823d62661ca68f27a7f3a317d4d8f81cfb1d912a4dc0b0d4541039).
+This is a missing parent/path component, not a probe execution denial. No
+program uploaded/executed, no native attribute result, no created child to
+remove from that attempt. No root/partition/firmware operation occurred.
+
+Earlier shell capture: all three recovery scripts and OMA-DM unit exist but
+cat is permission-denied. Scripts 0550 200:1051 / 8,339 and 664 bytes, and
+0700 0:0 / 7,706 bytes. Consumer/daemon 0755 200:200. Archive directory
 0777 2201:1051; recovery directory 0770 200:1051. DAC mode is not effective
-SMACK writability. No archive write occurred. Shell label User::Shell.
-getcap is missing, not proof of absent capability attributes.
+SMACK writability. Shell label User::Shell. getcap is missing, not absent
+capabilities. All five queried updater units inactive/dead, MainPID0. fota
+units configured fota:fota; rw-update root:root; recovery-update default;
+update-service app_fw:app_fw. Configured capability ceiling is not a grant.
 
-All five queried units loaded/inactive/dead, MainPID=0. Both updater daemons
-configured fota:fota; rw-update root:root, recovery-update empty/default,
-update-service app_fw:app_fw via launch_app. Bounding mask all bits is only a
-ceiling, not granted capabilities. NoNewPrivileges=no grants nothing. Prior
-recovery-update exit0 does not prove recovery boot/restoration. fota last
-exit44 cause unestablished. Account mappings for numerical owners not attested.
-
-Prior normal root:on was explicitly denied: UID/EUID5001, GIDs100, CapEff0
-before/after, both root flags disabled. No partition read. Do not repeat the
-normal switch or identical cat/RECV acquisitions without changed evidence.
+Prior root:on explicitly denied, UID/EUID5001 and CapEff0 before/after,
+root flags disabled. Do not repeat that switch, cat/RECV, or completed FUMO/
+receiver/shell captures without changed evidence. Numerical file owners have
+not been independently mapped to accounts. No exact stock rescue is verified.
 
 ## Implementation and next physical input
 
-Source branch: issue-47-native-privilege-metadata.
-Add our static ARM EABI metadata reader to replace unavailable getcap. Fixed
-read/query calls: UID/EUID, groups, capget, getxattr, current label and access.
-Fixed targets: six updater executables/scripts and two directories. Bounded
-security.capability/SMACK64/SMACK64EXEC values preserve bytes/errno. No capset,
-setuid, setxattr, ioctl, mount, FOTA action or vendor-script execution.
+Source branch: issue-47-metadata-stage-fallback.
+Fix the real staging failure in the existing controller. Try at most three
+validated locations: advertised SDK directory; immediate parent only for an
+sdk_tools final segment; /tmp. Create only a new random mode0700 child under
+an existing parent. No mkdir -p, parent creation, traversal or permission/
+attribute changes. Explicit missing-parent/failed-mkdir markers allow fallback.
+Unknown creation/transport results stop fallback without deleting unknown dirs.
 
-The phone controller builds from our source using Termux clang/lld, validates
-static ARM ELF, derives/validates the advertised SDK home/tmp directory,
-creates one random private child, SENDs/runs only our small metadata reader,
-then removes only that file and empty child. This is an explicit temporary
-SDK write/execute operation, not entirely read-only. No firmware/partition
-write or attribute modification. No unverified pre-existing directory removal.
-Failures preserve private responses, exact uncertain stage and diagnostic ZIP.
-Cleanup is separately verified; no silent success if cleanup fails.
+Only our compiled fixed ARM metadata program is uploaded. A refused upload or
+invalid/denied execution response can retry only after verified cleanup of
+that known-created child. Cleanup failure stops fallback. Separate private
+responses/report fields retain every attempted stage and exact residual paths.
+Unsuccessful staging also collects fixed read-only id/directory/mount context.
+The ARM reader and its syscall/target allowlists are unchanged. Compiler errors
+still make no watch contact. No root/FOTA/vendor-script/partition/firmware action.
 
-[Actual evidence, native probe and one command](docs/watch3-r840x-security-metadata.md).
-This workspace cannot authenticate directly to the watch; phone build/run/
-upload is the physical dependency. Do not repeat completed root/FUMO/receiver/
-shell captures. Determine real capabilities, exec labels, supplementary groups
-and non-mutating directory access before proposing an active updater path.
+[Evidence, implementation and fresh-name retry command](docs/watch3-r840x-security-metadata.md).
+Phone clang already worked; do not ask to reinstall it. Preserve original
+local evidence; retry uses a distinct output folder and Downloads ZIP. Cloud
+cannot authenticate to this watch; the phone run/upload is the physical input.
+Determine real caps, exec labels, groups and permission checks before choosing
+an active updater path. Metadata capture alone is not root or an unlock.
 
 ## Preserved reverse engineering
 
@@ -75,17 +80,16 @@ original bootloader/boot/recovery bytes or tested return-to-stock route yet.
 
 ## Validation and remaining work
 
-Host C tests exercise real positive/oversized xattrs; fake-SDB cases exercise
-bounded SEND, validated stage roots, acquisition/cleanup, upload/run errors,
-uncertain creation and cleanup failure, private/exclusive failure archives.
-Required CI compiles/runs the ARM ABI under QEMU with real xattr fixtures;
-fixture output is marked synthetic and rejected by production parsing.
-Original Samsung code is never executed/committed or sent to CI. This proves
-probe/protocol behavior only, not physical root or recovery.
+Regression checks exercise real shell/filesystem missing-parent/existing-child
+behavior, actual advertised-path fallback through fake SDB, denied execution
+cleanup before retry, bounded/deduplicated candidates, private failure context,
+transport/cleanup failures stopping fallback, and cleanup despite local write
+failure. Existing host xattr tests and required ARM/QEMU CI remain in place.
+No Samsung binary is executed/committed or sent to CI. Tests establish the
+controller/probe behavior, not physical root or bootloader acceptance.
 
-Pending: phone build/native metadata result, writable archive/caller/MAC
-boundaries, full validation chain, exact R840X S-BOOT/boot/recovery originals,
-verified rescue, custom boot acceptance and restoration. Issue #47 stays open.
-No unlock/root/recovery success claim is supported. Retire merged local
-branches safely; remote deletion unavailable through current connector/Git
-credentials. Preserve owner work and do not lock unrelated conversations.
+Pending: phone metadata retry, writable archive/caller/MAC boundaries, full
+validation chain, exact R840X S-BOOT/boot/recovery originals, verified rescue,
+custom boot acceptance and restoration. Issue #47 stays open. No unlock/root/
+recovery success claim is supported. Remote merged-branch deletion unavailable
+through current connector/Git credentials; preserve owner work.

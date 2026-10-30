@@ -91,10 +91,33 @@ def sdk_stage(raw: str, nonce: str) -> str:
     return validate_stage(paths[0].rstrip("/") + "/uglyos-metadata-" + nonce)
 
 
+def sdk_stages(raw: str, nonce: str) -> list[str]:
+    """Bounded SDK/temp candidates; never create a missing parent directory."""
+    advertised = sdk_stage(raw, nonce)
+    parent, suffix = advertised.rsplit("/", 1)
+    bases = [parent]
+    if parent.endswith("/sdk_tools"):
+        bases.append(parent.rsplit("/", 1)[0])
+    bases.append("/tmp")
+    return list(dict.fromkeys(validate_stage(base + "/" + suffix) for base in bases))
+
+
+def stage_command(operation: str, stage: str) -> str:
+    stage = validate_stage(stage)
+    parent = stage.rsplit("/", 1)[0]
+    return {
+        "create": (f"if [ ! -d {parent} ]; then printf 'UGLYOS_STAGE_PARENT_MISSING\\n'; "
+                   f"elif mkdir -m 700 {stage}; then printf 'UGLYOS_STAGE_CREATED\\n'; "
+                   "else printf 'UGLYOS_STAGE_NOT_CREATED\\n'; fi"),
+        "run": f"{stage}/probe",
+        "cleanup": f"rm -f {stage}/probe && rmdir {stage} && printf 'UGLYOS_STAGE_REMOVED\\n'",
+    }[operation]
+
+
 def request(ip: str, key: Path, operation: str, *, stage=None, timeout=8):
-    if operation not in ("capabilities", "create", "run", "cleanup"):
+    if operation not in ("capabilities", "create", "run", "cleanup", "stage_context"):
         raise MetadataError("OPERATION_NOT_ALLOWLISTED")
-    if operation != "capabilities":
+    if operation not in ("capabilities", "stage_context"):
         stage = validate_stage(stage)
     with socket.create_connection((ip, PORT), timeout=timeout) as sock:
         sock.settimeout(timeout)
@@ -102,11 +125,12 @@ def request(ip: str, key: Path, operation: str, *, stage=None, timeout=8):
         conn.handshake()
         if operation == "capabilities":
             return conn.capabilities()
-        command = {
-            "create": f"mkdir -m 700 {stage} && printf 'UGLYOS_STAGE_CREATED\\n'",
-            "run": f"{stage}/probe",
-            "cleanup": f"rm -f {stage}/probe && rmdir {stage} && printf 'UGLYOS_STAGE_REMOVED\\n'",
-        }[operation]
+        if operation == "stage_context":
+            command = ("id; stat -c '%a %u %g %s %n' /tmp /home/owner "
+                       "/home/owner/share /home/owner/share/tmp /home/owner/share/tmp/sdk_tools "
+                       "/opt/usr/home/owner/share/tmp; cat /proc/mounts")
+        else:
+            command = stage_command(operation, stage)
         return conn._read_service(("shell:" + command).encode() + b"\0", raw=True)
 
 
@@ -144,7 +168,13 @@ def send_probe(ip: str, key: Path, stage: str, raw: bytes, *, timeout=8):
             if len(response) >= 8:
                 tag, size = SYNC.unpack(response[:8])
                 if tag == b"FAIL":
-                    raise MetadataError("PROBE_UPLOAD_DENIED")
+                    if size > 512 or len(response) > 8 + size:
+                        raise MetadataError("PROBE_UPLOAD_RESPONSE_INVALID")
+                    if len(response) < 8 + size:
+                        continue
+                    error = MetadataError("PROBE_UPLOAD_DENIED")
+                    error.upload_response = bytes(response)
+                    raise error
                 if tag != b"OKAY" or size or len(response) != 8:
                     raise MetadataError("PROBE_UPLOAD_RESPONSE_INVALID")
                 return
@@ -208,31 +238,73 @@ def capture(ip: str, key: Path, folder: Path, *, archive: Path | None = None,
               "partition_reads_attempted": False, "firmware_written": False,
               "bootloader_unlock_proven": False, "stock_recovery_proven": False}
     saved = []
-    stage = None
-    created = False
+    report["stage_attempts"] = []
+
+    def save(name, raw):
+        private_write(folder / name, raw)
+        saved.append(name)
+
+    def cleanup(attempt, prefix):
+        if progress: progress("Removing the temporary probe and its directory")
+        try:
+            raw = request(ip, key, "cleanup", stage=attempt["stage"])
+            attempt["cleanup_verified"] = raw.strip() == b"UGLYOS_STAGE_REMOVED"
+            save(prefix + "stage-cleanup.response", raw)
+        except (OSError, SdbError, MetadataError):
+            attempt["cleanup_verified"] = False
+        report["stage_cleanup_verified"] = attempt["cleanup_verified"]
+        if not attempt["cleanup_verified"]:
+            report["remaining_sdk_stage"] = attempt["stage"]
+            report["state"] = "SDK_STAGE_CLEANUP_UNVERIFIED"
+
     try:
         if progress: progress("Building our static ARM metadata reader")
         with tempfile.TemporaryDirectory(prefix="uglyos-metadata-build-") as tmp:
             binary, report["build"] = build_probe(Path(tmp), compiler)
-        stage = sdk_stage(request(ip, key, "capabilities"), uuid.uuid4().hex)
-        report["temporary_sdk_write_requested"] = True
-        report["unverified_sdk_stage"] = stage
-        creation = request(ip, key, "create", stage=stage)
-        created = creation.strip() == b"UGLYOS_STAGE_CREATED"
-        private_write(folder / "stage-create.response", creation)
-        saved.append("stage-create.response")
-        if not created: raise MetadataError("SDK_STAGE_CREATION_NOT_VERIFIED")
-        report.pop("unverified_sdk_stage", None)
-        if progress: progress("Uploading our reader into the new temporary SDK directory")
-        send_probe(ip, key, stage, binary)
-        report["probe_uploaded"] = True
-        report["probe_execution_requested"] = True
-        if progress: progress("Reading file capabilities, labels and access checks")
-        raw = request(ip, key, "run", stage=stage)
-        private_write(folder / "probe-output.response", raw)
-        saved.append("probe-output.response")
-        report["probe"] = parse_probe(raw)
-        report["state"] = "NATIVE_SECURITY_METADATA_CAPTURED"
+        stages = sdk_stages(request(ip, key, "capabilities"), uuid.uuid4().hex)
+        for number, stage in enumerate(stages, 1):
+            prefix = "" if number == 1 else f"attempt-{number}-"
+            attempt = {"stage": stage, "created": False, "uploaded": False,
+                       "execution_requested": False, "cleanup_verified": False}
+            report["stage_attempts"].append(attempt)
+            report["temporary_sdk_write_requested"] = True
+            report["unverified_sdk_stage"] = stage
+            creation = request(ip, key, "create", stage=stage)
+            attempt["created"] = creation.strip() == b"UGLYOS_STAGE_CREATED"
+            if attempt["created"]:
+                report.pop("unverified_sdk_stage", None)
+            retry = False
+            try:
+                save(prefix + "stage-create.response", creation)
+                marker = creation.strip().splitlines()[-1:]  # Diagnostics may precede a failure marker.
+                if marker in ([b"UGLYOS_STAGE_PARENT_MISSING"], [b"UGLYOS_STAGE_NOT_CREATED"]):
+                    attempt["creation_result"] = marker[0].decode()
+                    report.pop("unverified_sdk_stage", None)
+                    report["state"] = "SDK_STAGE_UNAVAILABLE"
+                    if progress: progress("Temporary parent unavailable; trying the next fixed candidate")
+                    continue
+                if not attempt["created"]:
+                    raise MetadataError("SDK_STAGE_CREATION_NOT_VERIFIED")
+                if progress: progress("Uploading our reader into the new temporary directory")
+                send_probe(ip, key, stage, binary)
+                attempt["uploaded"] = report["probe_uploaded"] = True
+                attempt["execution_requested"] = report["probe_execution_requested"] = True
+                if progress: progress("Reading file capabilities, labels and access checks")
+                raw = request(ip, key, "run", stage=stage)
+                save(prefix + "probe-output.response", raw)
+                report["probe"] = parse_probe(raw)
+                report["state"] = "NATIVE_SECURITY_METADATA_CAPTURED"
+            except MetadataError as exc:
+                report["state"] = attempt["error"] = str(exc)
+                if getattr(exc, "upload_response", None):
+                    save(prefix + "probe-upload.response", exc.upload_response)
+                retry = str(exc) in ("PROBE_UPLOAD_DENIED", "PROBE_OUTPUT_INVALID")
+                if not retry: raise
+            finally:
+                if attempt["created"]:
+                    cleanup(attempt, prefix)
+            if not retry or not report["stage_cleanup_verified"]:
+                break
     except (MetadataError, OfflineELFError) as exc:
         report["state"] = str(exc)
         if isinstance(exc, MetadataError) and getattr(exc, "diagnostic", None):
@@ -240,19 +312,13 @@ def capture(ip: str, key: Path, folder: Path, *, archive: Path | None = None,
             saved.append("compiler.response")
     except (OSError, SdbError):
         report["state"] = "LOCAL_OR_SDB_IO_ERROR"
-    finally:
-        if created:
-            if progress: progress("Removing the temporary probe and SDK subdirectory")
-            try:
-                cleanup = request(ip, key, "cleanup", stage=stage)
-                report["stage_cleanup_verified"] = cleanup.strip() == b"UGLYOS_STAGE_REMOVED"
-                private_write(folder / "stage-cleanup.response", cleanup)
-                saved.append("stage-cleanup.response")
-            except (OSError, SdbError, MetadataError):
-                pass
-            if not report["stage_cleanup_verified"]:
-                report["remaining_sdk_stage"] = stage
-                report["state"] = "SDK_STAGE_CLEANUP_UNVERIFIED"
+    if report.get("remaining_sdk_stage"):
+        report["state"] = "SDK_STAGE_CLEANUP_UNVERIFIED"
+    if report["temporary_sdk_write_requested"] and report["state"] != "NATIVE_SECURITY_METADATA_CAPTURED":
+        try:
+            save("stage-context.response", request(ip, key, "stage_context"))
+        except (OSError, SdbError, MetadataError):
+            pass
     private_write(folder / REPORT_NAME, (json.dumps(report, indent=2) + "\n").encode())
     if archive is not None:
         fd = os.open(archive, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
