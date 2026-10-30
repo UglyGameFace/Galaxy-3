@@ -265,3 +265,56 @@ files, the bus sender's real UID and Tizen SMACK/Cynara and consumer-side
 checks. These cannot be bypassed or inferred from a default allow
 alone. Independent exact SM-R840X signed stock rescue is still
 required before any firmware writes or alternate-OS attempt.
+
+
+## October 30: false inconclusive warning in the offline rule matcher
+
+The owner ran the existing `--offline-focused-report` mode using the
+physical three-file capture. The original source report SHA-256 was
+`c27bf1ee54229753e5e0ac6f31269ab1733ced3ce344b1c32edf3589e83644b3`.
+All three underlying vendor policy-file hashes matched the previously
+captured originals. The report correctly found original FOTA rules
+`deny -> allow`, but set `matching_rule_subset_has_unknowns_or_drift=true`
+and `observed_default_subset_result=INCONCLUSIVE`.
+
+**Root cause:** the focused matcher checked for unimplemented
+`send_requested_reply` and `send_error` attributes **before** evaluating
+a known `send_type` mismatch. The original core configuration includes
+reply-only allowances for `send_type=method_return` and `send_type=error`
+with `send_requested_reply=true`. These cannot match the hypothetical
+`method_call` to `fota.consumer.LaunchFota`, regardless of their
+remaining attributes. Their unsupported reply constraint must not
+create uncertainty about this method-call subset.
+
+The matcher now first establishes any definite known mismatch
+(`send_type`, destination, interface, member or path). Only otherwise
+potentially matching rules with unsupported constraints cause an
+`UNKNOWN_POTENTIAL_SEND_CONSTRAINT` outcome. Separate
+`subset_uncertainty_reason_codes` explain genuine uncertainty or source
+hash drift; the count of known nonmatching default send rules is
+explicit. Regression tests cover the physical observed reply-only
+rules, unknown attributes on a plausible FOTA allow, changed hashes,
+unrecognized default scopes, and the existing no-network CLI.
+
+A corrected local-subset result such as
+`LATER_FOTA_INTERFACE_ALLOW_MATCHES` **still does not mean that
+`User::Shell` has bus permission.** The running daemon's complete
+included policy, user/group/mandatory policy precedence, sender
+credentials, SMACK/Cynara, receiver checks and firmware authenticity
+remain unknown. No FOTA action or boot write has been tested.
+
+After CI-green merge, rerun only the **offline** reviewer against the
+existing saved focused report. Use a distinct output filename, because
+the report writer correctly refuses to overwrite the old one:
+
+```sh
+cd ~/Galaxy-3 && git switch main && git pull --ff-only
+python tools/watch3_r840x_dbus_policy_readonly.py \
+  --offline-focused-report ~/watch3-r840x-dbus-focused-original-rules.json \
+  --report ~/watch3-r840x-dbus-focused-default-rule-audit-v2.json
+cat ~/watch3-r840x-dbus-focused-default-rule-audit-v2.json
+```
+
+The new file is private mode 0600; the old audit remains unchanged.
+Official D-Bus policy matching reference:
+https://dbus.freedesktop.org/doc/dbus-daemon.1.html
