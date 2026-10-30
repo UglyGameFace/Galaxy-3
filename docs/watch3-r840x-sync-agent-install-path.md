@@ -138,7 +138,15 @@ empty `crypto_verification` allowlist is not evidence that all cryptography is
 absent. The generic analyzer now reports those public gcry_md APIs separately
 under `other_crypto`, and exposes the defined MD5 API as an allowlisted export.
 
-## Next phone operation: receiver context
+## Completed phone operation: receiver context
+
+The owner supplied this expanded capture. The daemon, backend XML, event
+definitions and three plugins are now preserved and reviewed in
+[OMA-DM Install and pre-update verification](watch3-r840x-omadm-install-verification.md).
+Event 4 registers a concrete callback, and the daemon contains certificate
+and signature checks for its pre-update helper. FUMO was skipped by the
+four-ELF limit. Use the linked focused command next; do not repeat the broad
+capture below, which is retained as acquisition history.
 
 The context reader verifies the already copied library locally against its
 exact hash/length before contacting the watch. It reads the exact initialization
@@ -163,7 +171,7 @@ python tools/watch3_r08_fota_framework_context.py \
   --archive ~/storage/downloads/watch3-sync-agent-receiver-evidence.zip
 ```
 
-Attach `watch3-sync-agent-receiver-evidence.zip` from Downloads. The reader
+The resulting `watch3-sync-agent-receiver-evidence.zip` was supplied. The reader
 prints progress for each read, uses a new 0700 output folder, saves 0600 files,
 and creates a diagnostic ZIP even if a remote read fails. Previous library
 and failure evidence is preserved. Existing destinations are never overwritten.
@@ -176,8 +184,9 @@ encodings are rejected. No watch-side helper, shell, event submission, service
 activation, SDB SEND, root-mode change, reboot or partition write is used.
 The report schema is v2 and records discovery, copied counts by kind and whether
 candidate code was captured. `runtime_receiver_observed` remains false. The
-root initializer's capture succeeded; physical validation of the corrected,
-expanded capture remains pending. Earlier output folders and ZIPs are preserved.
+expanded capture succeeded partially: four ELF files were copied, the unit
+read failed ambiguously and the ELF cap skipped FUMO. Earlier output folders
+and ZIPs are preserved. See the linked follow-up for the exact original hashes.
 
 The analyzer's `--component sync-agent` profile can reproduce the original
 library's pinned generic ELF report locally. The 36-edge instruction review

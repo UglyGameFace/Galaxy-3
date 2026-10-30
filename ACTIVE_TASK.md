@@ -1,112 +1,96 @@
 # UgLy|OS R840X bootloader and recovery
 
-Updated October 29, 2026. Issue #47: restore stock reliably and boot UgLy|OS
+Updated October 30, 2026. Issue #47: restore stock reliably and boot UgLy|OS
 on the owner's SM-R840X / NOBLESSE-LARGE-BT R08, R840XXXU1AUA2, CSC PAP candidate.
 Root, bootloader unlock, custom boot and tested restoration remain unverified.
-Owner authorization is established.
+Owner authorization is established. Android/Termux only, free only, no PC or
+hardware purchases. Preserve the single working watch and existing evidence.
 
-## Current physical result and original-code review
+## Current original capture and findings
 
-Base main `40cdf13` includes PR #125. Library and root initializer capture
-succeeded. No overlapping open PR was present. Original library upload:
-`watch3-sync-agent-native-evidence.zip` SHA-256:
-`331b97505a06dc0a3c8dd45cf08b3e42d269151f9e1dd1f756818eb5c8ba374e`.
-It contains the 4,211-byte report and 647,076-byte ARM ELF32 library copied
-from `/usr/lib/libsync-agent.so.0`, SHA-256:
-`3fbebb3d55a7e6a132f3516af88280e63278a4b3bf51cb61cca194614b605a97`.
-GNU build ID: `07783d299457ad74f7c232f1941446060aa6a1a9`.
+Base main `c84e40a` contains PR #126. The owner supplied
+`watch3-sync-agent-receiver-evidence.zip`, SHA-256
+`b07635c319f89c64daef262e6fac700af785cb3c852a342e6f3bd310e77ccdc9`.
+Its 14 members contain a 16,247-byte report and 13 original copied files:
+seven XML, two opaque config and four ARM ELF32 binaries. All member paths,
+lengths and hashes were verified. Originals remain private and unexecuted.
 
-New upload `watch3-sync-agent-context-evidence.zip`, SHA-256:
-`6ce5c08e884046ea257082ceb09bb6222061f8889c763c1ecb47db66ccff873b`.
-It contains only the 872-byte report and 384-byte initializer, SHA-256:
-`29ab3dea6bfa21a28d7d148f943485fca7779df54c3ca9df276aea01c4939b92`.
-The XML selects Event-Key=omadm and RunEventHandler=0. Event-Config and
-Noti-Config point to extensionless files under /usr/share/oma-dm-cfg/ipc.
-V1's .xml-only assumption skipped both. Its CONTEXT_CAPTURED state proves
-only the root XML copy, not complete receiver context. Preserve that upload.
+The captured daemon `/usr/bin/oma-dm-agent` is 525,584 bytes, SHA-256
+`32057c3ba2537b2632a5d73dc1397b919ad3bf9c58c446b11e48e3837ab99a05`.
+The DM device plugin is 36,184 bytes, SHA-256
+`98c21b99b0c443e75f42e00cc990f6e4374fa8c398f8d3e8c82a4585d9f2f357`.
+The backend initializer is 5,296 bytes, SHA-256
+`f8ba15dde1bca536e16ee08149206d428b605e839667151a3d55056c49a7500e`.
 
-Actual-byte review now matches 36 immediate calls with independent decoders,
-26 PLT/GOT relocations, 11 control/argument instructions and 5 literals.
-The public Install wrapper creates event 4 and sends a configuration-selected
-Unix socket request. The library's generic listener dispatches a registered
-callback; the configured endpoint derives to /tmp/agent_fw_event_omadm.
-The library checks RunEventHandler against 1 and does not start its generic
-listener for this initializer's 0 value. The extensionless event definition
-is loaded through fopen/fscanf, not an XML parser. Actual live receiver,
-callback, privileges and validation behavior have not yet been identified.
-A separate MD5 file-comparison routine exists. Do not conflate it with the
-Install wrapper or assert that the backend omits signature verification.
+The event file labels event 4 EVENT_INSTALL. The daemon's bounded TBB entry
+and callback setter register Thumb pointer 0x23749 / code 0x23748 for event 4.
+The callback opens a management object and requests an asynchronous FUMO task.
+The backend initializer selects Event-Key=omadm, RunEventHandler=1; main
+references that exact XML. This identifies a static registration, not a live
+receiver or UID. The complete async dispatch remains open.
 
-## Current implementation and next phone action
+Daemon _pre_update_client at 0x187e8 calls verify_FOTA_image at 0x188ea,
+using /usr/share/oma-dm-cfg/certi/FOTA_ROOT.cer. Actual calls and branches
+check X509_verify_cert and EVP_PKEY_verify before extracting/executing the
+inner pre_update_client_2. Outer archive parsing occurs before that check.
+This daemon implementation differs from the standalone fota-consumer helper.
+The device plugin's nonzero-helper-return path rejoins later update preparation;
+the helper signature check alone does not establish whole-update abortion.
+This continuation is also not proof of unsigned-firmware acceptance.
 
-Source branch: `issue-47-omadm-receiver-capture`.
-`watch3_r08_fota_framework_context.py` verifies the existing original library
-locally, reads its exact initialization XML, follows declared absolute config
-references including the extensionless event/notification files, and stores
-those text definitions as opaque bytes. Native LIST now discovers actual
-OMA-DM/sync-agent-family units, /usr/bin entries and fw-init files. Captures
-observed code candidates plus normal executables declared by unit ExecStart
-or XML, using established validators/RECV. No service or event is invoked.
-Schema v2 reports discovery, copied-by-kind counts and candidate-code status;
-runtime_receiver_observed remains false. Fresh receiver output folder/ZIP
-preserve the successful root XML and earlier original library.
-Bounds: 16 XML / 8 config / 8 unit / 4 ELF; no entities or path/command guessing.
+Private independent review: 25 immediate calls match standard-library decoding
+and Capstone; 18 PLT/GOT bindings, seven branches, eight literals and the event-4
+TBB entry match original bytes. readelf confirms metadata/build IDs/symbols.
+The analyzer now pins both originals and reports the formerly omitted
+EVP_PKEY_verify / X509_verify_cert imports. No absence inference is valid from
+the earlier narrow allowlist.
 
-The exact root XML is referenced by original code at `0x483ac` and passed
-to initialization at `0x483ae`; the exact initializer is now acquired. Both
-declared extensionless paths were confirmed by running the corrected parser
-on those actual 384 bytes. The existing five-file handoff mode, its 8 KiB
-limit and default directory inventory scopes are preserved. Only the explicit
-context capture uses receiver-family discovery.
+[Detailed review and next command](docs/watch3-r840x-omadm-install-verification.md).
 
-[Original review and next one-run command](docs/watch3-r840x-sync-agent-install-path.md).
-Expanded receiver acquisition remains pending the owner's phone run. This
-workspace has no authenticated direct connection to the watch. Do not repeat
-the completed library capture or the earlier unavailable cache-helper query.
+## Next physical input: firmware focus
 
-## Preserved evidence
+Source branch: `issue-47-fumo-signature-boundary`.
+The four-ELF limit consumed the daemon, HTTP and two device plugins. It did
+not attempt the backend-declared MO/FUMO plugin:
+`/usr/lib/sync-agent/dm-private/libplugin-mo-fumo.so`.
+Native LIST observed the 453-byte oma-dm-agent.service, but its RECV returned
+REMOTE_MISSING_DENIED_OR_UNREADABLE; the failure reason is not resolved.
 
-- Authenticated non-root Tizen Wi-Fi SDB, ARMv7 userspace, Linux 4.9.59.
-- 21 partition names and critical sysfs geometry; no original physical
-  S-BOOT/boot/recovery bytes or tested restore.
-- Owner completed only ODIN/LOKE exchange, then returned to stock.
-- Private originals: accessory fota-service 87,036 bytes and configured
-  fota-consumer 89,980 bytes; exact hashes remain pinned in the tools/docs.
-- Consumer configuration fota:fota, inactive/dead; no current live owner
-  in the earlier snapshot.
-- Original-byte analysis connects the accessory's separate receipt/install
-  states (50/60), vconf notification and consumer update callback.
-- The consumer executes archive-supplied pre_update_client_2 in reviewed
-  wrappers; earlier/library/later validation and actual privileges are open.
-- Separate Install reaches sync_agent_dm_fota_install, now acquired and traced
-  to an IPC request. The receiving callback/configuration is the missing boundary.
-- Failed preparation/recovery-script sync reads remain ambiguous. The TV
-  tar route lacks sdbd-tarlauncher; R500/retail firmware observations do not
-  establish exact-R840X compatibility.
+The existing context reader's --firmware-focus option verifies the existing
+library, daemon and backend config before connecting, derives the unique FUMO
+plugin from that exact XML, and copies only that plugin plus the daemon's
+referenced public certificate. Two bounded RECV operations, no rediscovery.
+Fresh default folder watch3-r840x-firmware-focus-evidence; explicit ZIP in
+Downloads. Failures retain partial files and a diagnostic report/ZIP.
+No watch shell, helper execution, service/event invocation or firmware write.
+Original captures and the phone's SDB key remain untouched.
 
-[Detailed original-code findings](docs/watch3-r840x-consumer-trust-boundaries.md).
-PR #122 removed hard-coded flash_allowed/NO_GO permission-like output;
-existing evidence remains valid.
+The phone run/upload remains necessary: this workspace has no authenticated
+watch connection. Do not repeat the completed broad capture, old library
+capture, unavailable cache-helper query or ambiguous preparation-script read.
 
-## Validation and remaining work
+## Validation and unresolved project goals
 
-Local focused suite: 210 passing cases, one compiler-only fixture skipped
-because clang/lld are absent locally. CI requires all 211 cases including
-the cross-compiled ARM/readelf fixture, plus two real private D-Bus tests
-and one real systemd test on Ubuntu 22.04 and 24.04 without skips.
-Fake-SDB context tests verify the real initializer's extensionless shape,
-complete native LIST/RECV discovery and unit-declared libexec capture, source
-pinning, diagnostic ZIPs, read/encoding/ELF errors, privacy and bounded cycles.
-Those fixtures do not establish a physical receiver or a working unlock.
-Samsung originals are not committed, executed or uploaded to CI.
+Local focused suite: 219 passing cases plus one compiler-only fixture skipped
+because clang/lld are absent locally. CI requires all 220 cases including
+the compiled ARM/readelf fixture, plus two real private D-Bus and one real
+systemd test per Ubuntu 22.04/24.04, with no skips. New fake-SDB cases verify
+two-file selection, source pins, bounded diagnostics, private ZIPs, no discovery,
+unchanged prior captures, and invalid/deceptive local manifests. Fixtures do
+not establish a physical receiver, exploit, bootloader unlock or recovery.
 
-The original library has been acquired and examined. Its receiving updater
-and full validation behavior remain open. Exact R840X S-BOOT,
-complete signed rescue firmware or verified compatible replacement,
-unsigned-kernel acceptance and tested return to stock remain missing.
-Issue #47 stays open. This context reader changes no firmware or service state.
+Preserved earlier evidence: authenticated non-root ARMv7 Tizen Wi-Fi SDB,
+Linux 4.9.59, 21 partition names and critical sysfs geometry; original
+fota-service, fota-consumer and libsync-agent; consumer configured fota:fota,
+inactive/dead, no current D-Bus owner in the earlier snapshot. The owner
+completed only ODIN/LOKE handshake, then returned to stock. Historical R500
+and retail firmware findings do not establish exact-R840X compatibility.
 
-Android/Termux only, free only, no PC or hardware purchases.
-Earlier merged remote branches remain retained: direct Git deletion has no
-authentication and the connector exposes no delete-ref operation.
-Do not discard unpreserved owner work.
+Remaining: full FUMO/firmware verification chain and runtime privilege,
+exact R840X physical S-BOOT/boot/recovery bytes, complete signed rescue or
+verified compatible replacement, custom-kernel acceptance and tested stock
+restoration. Issue #47 stays open. PR #122 removed hard-coded NO_GO permission-like
+output; evidence flags describe observations, not authorization.
+
+Earlier remote branches remain retained because direct Git deletion has no
+authentication and the connector lacks delete-ref. Do not discard owner work.
