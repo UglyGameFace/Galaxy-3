@@ -6,7 +6,9 @@ They do not supply a demonstrated unlock. The next phone operation attempts
 Tizen's normal root-mode service once, verifies the actual shell identity,
 then acquires original boot/recovery and recovery-script inputs if permitted.
 The owner has now run this mode: the watch explicitly denied the request.
-The current next operation is the shell-context read below.
+The shell-context read below is also completed. Its observed permission
+denials and the [current native metadata command](watch3-r840x-security-metadata.md)
+are recorded in the follow-up; do not repeat the completed reads.
 
 ## Actual root attempt: denied
 
@@ -25,7 +27,7 @@ reads, script copies, FOTA calls, service activation or firmware writes ran.
 This closes the normal SDB root-switch route for this observed build/state.
 Do not repeat it without a relevant change or a different evidenced route.
 
-## Current next command: ordinary-shell recovery context
+## Completed command: ordinary-shell recovery context
 
 The earlier script acquisition failures came from native sync RECV, which
 does not distinguish a missing file, denied access or another unreadable
@@ -65,6 +67,13 @@ overwritten. `RECOVERY_SCRIPTS_CAPTURED_VIA_SHELL` means three script-looking
 payloads were acquired, not that recovery or an exploit worked. Further analysis
 will use the captured contents and privilege metadata; root, custom boot,
 bootloader unlock and tested restoration remain unproven.
+
+The owner supplied that archive: all three scripts and the OMA-DM unit
+explicitly denied access; no script body was acquired. stat confirmed the
+files and modes, getcap was unavailable, and the unit snapshot showed both
+updater daemons configured as fota and currently inactive. The follow-up
+above replaces the missing getcap utility and tests metadata/access without
+invoking the update flow. This command is retained as acquisition history.
 
 ## Protocol and observed success requirements
 
