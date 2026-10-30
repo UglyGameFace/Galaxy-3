@@ -25,6 +25,7 @@ import zipfile
 
 from watch3_r08_android_sdb import Connection, PORT, SdbError, private_watch_ip, receive
 from watch3_r08_fota_handoff_pull import private_write
+from watch3_r08_fota_handoff_pull import _receive_bounded_file, HandoffError
 from analyze_watch3_r08_fota_elf import parse_elf32, OfflineELFError
 
 SOURCE = Path(__file__).parent / "native/watch3_security_metadata.c"
@@ -38,13 +39,16 @@ ATTRIBUTES = ("security.capability", "security.SMACK64", "security.SMACK64EXEC")
 STAGE = re.compile(r"(?P<base>/(?:tmp|(?:opt/(?:usr/)?)?home/(?:owner|developer|sdk))"
                    r"(?:/[A-Za-z0-9_.+-]+)*)/uglyos-metadata-[a-f0-9]{32}\Z")
 MAX_PREFLIGHT = 256 * 1024
+INVENTORY_ROOTS = ("/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/libexec", "/usr/lib")
+MAX_INPUT_BYTES = 2 * 1024 * 1024
+MAX_INPUTS = 8
 
 
 class MetadataError(ValueError):
     pass
 
 
-def build_probe(directory: Path, compiler=None, *, fixture=None, host_test=False) -> tuple[bytes, dict]:
+def build_probe(directory: Path, compiler=None, *, fixture=None, host_test=False, inventory=False) -> tuple[bytes, dict]:
     compiler = compiler or shutil.which("clang")
     if not compiler:
         raise MetadataError("CLANG_MISSING_RUN_PKG_INSTALL_CLANG")
@@ -59,6 +63,8 @@ def build_probe(directory: Path, compiler=None, *, fixture=None, host_test=False
                   "-static", "-fuse-ld=lld", "-Wl,-e,_start,--build-id=none,-z,noexecstack"]
     if fixture is not None:
         flags += ["-DPROBE_TEST", "-DPROBE_TEST_PREFIX=" + json.dumps(str(fixture))]
+    if inventory:
+        flags += ["-DPROBE_INVENTORY"]
     try:
         result = subprocess.run([compiler, *flags, str(SOURCE), "-o", str(output)],
                                 capture_output=True, timeout=45, check=False)
@@ -75,7 +81,8 @@ def build_probe(directory: Path, compiler=None, *, fixture=None, host_test=False
                 facts["executable_stack"] != "NONEXECUTABLE"):
             raise MetadataError("PROBE_ELF_PROFILE_INVALID")
     return raw, {"source_sha256": hashlib.sha256(SOURCE.read_bytes()).hexdigest(),
-                 "elf_sha256": hashlib.sha256(raw).hexdigest(), "elf_bytes": len(raw)}
+                 "elf_sha256": hashlib.sha256(raw).hexdigest(), "elf_bytes": len(raw),
+                 "profile": "PRIVILEGE_INVENTORY" if inventory else "FIXED_SECURITY_METADATA"}
 
 
 def validate_stage(path: str) -> str:
@@ -210,9 +217,9 @@ def stage_command(operation: str, stage: str) -> str:
 
 
 def request(ip: str, key: Path, operation: str, *, stage=None, bases=None, timeout=8):
-    if operation not in ("capabilities", "preflight", "create", "run", "cleanup", "stage_context", "probe_context"):
+    if operation not in ("capabilities", "preflight", "create", "run", "cleanup", "stage_context", "probe_context", "privilege_context"):
         raise MetadataError("OPERATION_NOT_ALLOWLISTED")
-    if operation not in ("capabilities", "preflight", "stage_context"):
+    if operation not in ("capabilities", "preflight", "stage_context", "privilege_context"):
         stage = validate_stage(stage)
     preflight = preflight_command(bases) if operation == "preflight" else None
     with socket.create_connection((ip, PORT), timeout=timeout) as sock:
@@ -223,6 +230,12 @@ def request(ip: str, key: Path, operation: str, *, stage=None, bases=None, timeo
             return conn.capabilities()
         if operation == "preflight":
             command = preflight
+        elif operation == "privilege_context":
+            command = ("systemctl show fota-consumer.service oma-dm-agent.service "
+                       "--no-pager --property=Id,User,Group,SupplementaryGroups,MainPID,Capabilities,"
+                       "CapabilityBoundingSet,AmbientCapabilities,SecureBits,NoNewPrivileges,SmackProcessLabel,"
+                       "PermissionsStartOnly,ExecStart,ExecStartPre,ExecStartPost; "
+                       "cat /usr/lib/systemd/system/fota-consumer.service")
         elif operation == "probe_context":
             command = (f"stat -c '%a %u %g %s %n' {stage} {stage}/probe; "
                        f"ls -ldZ {stage} {stage}/probe; cat /proc/self/attr/current")
@@ -282,8 +295,128 @@ def send_probe(ip: str, key: Path, stage: str, raw: bytes, *, timeout=8):
         raise MetadataError("PROBE_UPLOAD_INCOMPLETE")
 
 
-def parse_probe(raw: bytes) -> dict:
-    if not raw or len(raw) > 32768:
+def decode_file_capability(rc: int, raw_hex: str) -> dict:
+    """Decode Linux VFS capability bytes; errors/unknown formats stay unknown."""
+    if rc < 0:
+        return {"state": "ATTRIBUTE_ABSENT" if rc == -61 else "READ_ERROR", "rc": rc}
+    raw = bytes.fromhex(raw_hex)
+    if len(raw) != rc or len(raw) < 4:
+        return {"state": "UNRECOGNIZED_ATTRIBUTE"}
+    magic = int.from_bytes(raw[:4], "little")
+    version = magic >> 24
+    if version not in (1, 2, 3) or len(raw) != {1: 12, 2: 20, 3: 24}[version] or magic & 0x00fffffe:
+        return {"state": "UNRECOGNIZED_ATTRIBUTE"}
+    words = struct.unpack("<" + "I" * (len(raw) // 4), raw)
+    permitted = words[1] | ((words[3] << 32) if version >= 2 else 0)
+    inherited = words[2] | ((words[4] << 32) if version >= 2 else 0)
+    return {"state": "DECODED", "revision": version, "effective_flag": bool(magic & 1),
+            "permitted_hex": f"{permitted:016x}", "inheritable_hex": f"{inherited:016x}",
+            "rootid": words[5] if version == 3 else None}
+
+
+def validate_inventory(value: dict) -> None:
+    def integer(v, low, high):
+        if type(v) is not int or not low <= v <= high: raise ValueError
+    if (value["schema"] != "uglyos-system-helper-metadata-v1" or
+            [d["path"] for d in value["directories"]] != list(INVENTORY_ROOTS)):
+        raise ValueError
+    integer(value["no_new_privs_rc"], -4095, 1)
+    integer(value["securebits_rc"], -4095, 0x7fffffff)
+    integer(value["bounding_read_errors"], 0, 64)
+    if not re.fullmatch(r"[0-9a-f]{16}", value["bounding_caps_hex"]): raise ValueError
+    count = 0
+    for directory in value["directories"]:
+        integer(directory["open_rc"], -4095, 0); integer(directory["scan_rc"], -4095, 0)
+        if type(directory["complete"]) is not bool: raise ValueError
+        for name in ("entries_scanned", "regular_files", "stat_errors", "capability_errors", "dropped_records"):
+            integer(directory[name], 0, 4096)
+        integer(directory["unsafe_names"], 0, 65536)
+        if (directory["regular_files"] + directory["stat_errors"] > directory["entries_scanned"] or
+                directory["capability_errors"] > directory["regular_files"] or
+                directory["complete"] and (directory["open_rc"] != 0 or directory["scan_rc"] != 0)):
+            raise ValueError
+        files = directory["files"]
+        if not isinstance(files, list) or len(files) > directory["regular_files"]: raise ValueError
+        if directory["open_rc"] and (directory["entries_scanned"] or files): raise ValueError
+        names = set()
+        for row in files:
+            name = row["name"]
+            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_.+-]{1,255}", name) or name in (".", "..") or name in names:
+                raise ValueError
+            names.add(name)
+            integer(row["mode"], 0, 0xffffffff)
+            if row["mode"] & 0o170000 != 0o100000: raise ValueError
+            for key in ("uid", "gid"): integer(row[key], 0, 0xffffffff)
+            if not re.fullmatch(r"[0-9a-f]{16}", row["size_hex"]): raise ValueError
+            for key in ("read_access_rc", "exec_access_rc"): integer(row[key], -4095, 0)
+            for key in ("capability", "label", "exec_label"):
+                rc, encoded = row[key + "_rc"], row[key + "_hex"]
+                integer(rc, -4095, 256)
+                if not isinstance(encoded, str) or not re.fullmatch(r"[0-9a-f]*", encoded) or len(encoded) != 2 * max(rc, 0):
+                    raise ValueError
+            if not row["mode"] & 0o6000 and row["capability_rc"] <= 0: raise ValueError
+        count += len(files)
+    if count > 64: raise ValueError
+
+
+def inventory_summary(probe: dict) -> dict:
+    inventory = probe["privilege_inventory"]
+    inherited = int(probe["inheritable_caps_hex"] or "0", 16)
+    candidates = []
+    for directory in inventory["directories"]:
+        for row in directory["files"]:
+            cap = decode_file_capability(row["capability_rc"], row["capability_hex"])
+            match = int(cap.get("inheritable_hex", "0"), 16) & inherited
+            candidates.append({"path": directory["path"] + "/" + row["name"], **row,
+                               "capability_decoded": cap, "matching_inheritable_hex": f"{match:016x}"})
+    complete = all(d["complete"] and not any(d[k] for k in ("stat_errors", "capability_errors", "unsafe_names", "dropped_records"))
+                   for d in inventory["directories"])
+    return {"scope_complete": complete, "recursive": False, "candidates": candidates,
+            "privileged_helper_executed": False, "root_proven": False}
+
+
+def collect_inventory_inputs(ip, key, probe, folder, saved):
+    summary = inventory_summary(probe)
+    # Known label-changing launcher first, then strongest static intersections.
+    def priority(row):
+        return (not bool(int(row["matching_inheritable_hex"], 16)),
+                not bool(row["uid"] == 0 and row["mode"] & 0o4000),
+                not bool(row["gid"] == 1051 and row["mode"] & 0o2000),
+                row["path"].startswith(("/bin/", "/sbin/")), row["path"])
+    plans = ["/usr/bin/launch_app"]
+    for row in sorted(summary["candidates"], key=priority):
+        if (row["path"] not in plans and row["mode"] & 0o111 and row["read_access_rc"] == 0 and
+                0 < int(row["size_hex"], 16) <= MAX_INPUT_BYTES):
+            plans.append(row["path"])
+    summary["inputs_not_selected"] = max(0, len(plans) - MAX_INPUTS)
+    copies = []
+    expected = {r["path"]: int(r["size_hex"], 16) for r in summary["candidates"]}
+    for number, path in enumerate(plans[:MAX_INPUTS], 1):
+        # Paths originate in validated native records, never CLI or shell fragments.
+        parent, name = path.rsplit("/", 1)
+        if (parent not in INVENTORY_ROOTS or not re.fullmatch(r"[A-Za-z0-9_.+-]{1,255}", name) or
+                name in (".", "..") or path != "/usr/bin/launch_app" and path not in expected):
+            raise MetadataError("HELPER_INPUT_PATH_REJECTED")
+        entry = {"path": path, "copied": False}
+        copies.append(entry)
+        try:
+            with socket.create_connection((ip, PORT), timeout=12) as sock:
+                sock.settimeout(12)
+                raw = _receive_bounded_file(sock, key, path.encode("ascii"), MAX_INPUT_BYTES)
+            if path in expected and len(raw) != expected[path]:
+                raise MetadataError("HELPER_INPUT_SIZE_CHANGED")
+            parse_elf32(raw)  # Authoritative parser already requires little-endian ARM ELF32.
+            name = f"helper-{number:02d}.bin"
+            private_write(folder / name, raw); saved.append(name)
+            entry.update(copied=True, file=name, bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest())
+        except (OSError, SdbError, HandoffError, OfflineELFError, MetadataError):
+            entry["error"] = "HELPER_INPUT_MISSING_DENIED_OR_INVALID_ELF"
+    summary["original_inputs"] = copies
+    return summary
+
+
+def parse_probe(raw: bytes, *, inventory=False) -> dict:
+    if not raw or len(raw) > (65536 if inventory else 32768):
         raise MetadataError("PROBE_OUTPUT_INVALID")
     try:
         value = json.loads(raw)
@@ -313,13 +446,15 @@ def parse_probe(raw: bytes) -> dict:
             if (type(rc) is not int or not -4095 <= rc <= 256 or not isinstance(encoded, str) or
                     not re.fullmatch(r"[a-f0-9]*", encoded) or len(encoded) != 2 * max(rc, 0)):
                 raise ValueError
+        if inventory:
+            validate_inventory(value["privilege_inventory"])
     except (ValueError, TypeError, KeyError, UnicodeError):
         raise MetadataError("PROBE_OUTPUT_INVALID") from None
     return value
 
 
 def capture(ip: str, key: Path, folder: Path, *, archive: Path | None = None,
-            compiler=None, progress=None) -> dict:
+            compiler=None, progress=None, inventory=False) -> dict:
     ip = private_watch_ip(ip)
     folder = folder.expanduser()
     archive = archive.expanduser() if archive is not None else None
@@ -338,7 +473,7 @@ def capture(ip: str, key: Path, folder: Path, *, archive: Path | None = None,
               "existing_security_attributes_modified": False, "fota_method_called": False,
               "partition_reads_attempted": False, "firmware_written": False,
               "bootloader_unlock_proven": False, "stock_recovery_proven": False,
-              "staging_preflight": None}
+              "staging_preflight": None, "privilege_inventory_requested": inventory}
     saved = []
     report["stage_attempts"] = []
 
@@ -362,7 +497,7 @@ def capture(ip: str, key: Path, folder: Path, *, archive: Path | None = None,
     try:
         if progress: progress("Building our static ARM metadata reader")
         with tempfile.TemporaryDirectory(prefix="uglyos-metadata-build-") as tmp:
-            binary, report["build"] = build_probe(Path(tmp), compiler)
+            binary, report["build"] = build_probe(Path(tmp), compiler, inventory=inventory)
         bases = stage_bases(request(ip, key, "capabilities"))
         if progress: progress("Checking existing directories, resolved paths and mount flags before upload")
         raw = request(ip, key, "preflight", bases=bases)
@@ -395,12 +530,12 @@ def capture(ip: str, key: Path, folder: Path, *, archive: Path | None = None,
             attempt["uploaded"] = report["probe_uploaded"] = True
             attempt["execution_requested"] = report["probe_execution_requested"] = True
             if progress: progress("Reading file capabilities, labels and access checks")
-            raw = request(ip, key, "run", stage=stage)
+            raw = request(ip, key, "run", stage=stage, timeout=20 if inventory else 8)
             save("probe-output.response", raw)
             if b"Permission denied" in raw:
                 raise MetadataError("PROBE_EXECUTION_DENIED")
-            report["probe"] = parse_probe(raw)
-            report["state"] = "NATIVE_SECURITY_METADATA_CAPTURED"
+            report["probe"] = parse_probe(raw, inventory=inventory)
+            report["state"] = "NATIVE_PRIVILEGE_INVENTORY_CAPTURED" if inventory else "NATIVE_SECURITY_METADATA_CAPTURED"
         except MetadataError as exc:
             attempt["error"] = str(exc)
             if getattr(exc, "upload_response", None):
@@ -423,11 +558,19 @@ def capture(ip: str, key: Path, folder: Path, *, archive: Path | None = None,
         report["state"] = "LOCAL_OR_SDB_IO_ERROR"
     if report.get("remaining_sdk_stage"):
         report["state"] = "SDK_STAGE_CLEANUP_UNVERIFIED"
-    if report["temporary_sdk_write_requested"] and report["state"] != "NATIVE_SECURITY_METADATA_CAPTURED":
+    if report["temporary_sdk_write_requested"] and report["probe"] is None:
         try:
             save("stage-context.response", request(ip, key, "stage_context"))
         except (OSError, SdbError, MetadataError):
             pass
+    if inventory and report["probe"] is not None and report["stage_cleanup_verified"]:
+        if progress: progress("Copying bounded original helper inputs for offline analysis; no helper execution")
+        report["inventory_summary"] = collect_inventory_inputs(ip, key, report["probe"], folder, saved)
+        try:
+            context = request(ip, key, "privilege_context")
+            save("privilege-context.response", context)
+        except (OSError, SdbError, MetadataError):
+            report["privilege_context_error"] = "CONTEXT_READ_UNAVAILABLE"
     private_write(folder / REPORT_NAME, (json.dumps(report, indent=2) + "\n").encode())
     if archive is not None:
         fd = os.open(archive, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -447,16 +590,18 @@ def main(argv=None):
     p.add_argument("--key-path", type=Path, default=Path.home()/".config/galaxy3/watch3-sdbkey")
     p.add_argument("--output-dir", type=Path, default=Path.home()/"watch3-r840x-security-metadata-evidence")
     p.add_argument("--archive", type=Path)
+    p.add_argument("--privilege-inventory", action="store_true",
+                   help="Inspect fixed system-helper directories and copy up to eight bounded original ELF inputs; never run helpers")
     args = p.parse_args(argv)
     try:
         report = capture(args.watch_ip, args.key_path, args.output_dir, archive=args.archive,
-                         progress=lambda text: print(text, flush=True))
+                         progress=lambda text: print(text, flush=True), inventory=args.privilege_inventory)
     except (OSError, SdbError, MetadataError) as exc:
         print("SECURITY_METADATA_ERROR: " + (str(exc) if isinstance(exc, MetadataError) else "LOCAL_OR_SDB_IO_ERROR"), file=sys.stderr)
         return 1
     print("SECURITY_METADATA_STATE: " + report["state"])
     if args.archive: print("SECURITY_METADATA_ARCHIVE: " + str(args.archive.expanduser()))
-    return 0 if report["state"] == "NATIVE_SECURITY_METADATA_CAPTURED" else 1
+    return 0 if report["state"] in ("NATIVE_SECURITY_METADATA_CAPTURED", "NATIVE_PRIVILEGE_INVENTORY_CAPTURED") else 1
 
 
 if __name__ == "__main__": raise SystemExit(main())

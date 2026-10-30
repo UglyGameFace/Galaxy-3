@@ -8,7 +8,8 @@ then acquires original boot/recovery and recovery-script inputs if permitted.
 The owner has now run this mode: the watch explicitly denied the request.
 The shell-context read below is also completed. Its observed permission
 denials and the [current native metadata command](watch3-r840x-security-metadata.md)
-are recorded in the follow-up; do not repeat the completed reads.
+are recorded in the follow-up; do not repeat the completed reads. Native
+metadata has since succeeded; use the [current privilege-inventory guide](watch3-r840x-privilege-inventory.md).
 
 ## Actual root attempt: denied
 
@@ -163,4 +164,5 @@ Backup cases reject changed/duplicate metadata and incomplete copies. A
 synthetic transfer crosses the previous 8 MiB boundary while a legacy decoder
 still rejects it. No original firmware, physical watch or real host root switch
 is part of those fixtures. The native-root phone run was denied as recorded
-above. Physical validation of the distinct shell-context capture remains pending.
+above. Shell-context and native metadata captures are now completed; their
+findings and remaining physical dependency are in the current guide above.
