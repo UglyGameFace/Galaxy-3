@@ -18,7 +18,10 @@ import stat
 import sys
 import xml.etree.ElementTree as ET
 
-from watch3_r08_android_sdb import PORT, SdbError, private_watch_ip
+from watch3_r08_android_sdb import (
+    PORT, SdbError, ShellCloseError, Connection, DBUS_RUNTIME_PROBES,
+    private_watch_ip,
+)
 from watch3_r08_fota_consumer_inventory import (
     DBUS_POLICY_DIRECTORIES, DBUS_FOTA_POLICY_NAME,
     InventoryError, list_one,
@@ -650,6 +653,167 @@ def read_existing_report(path: Path) -> tuple[dict, str]:
     return record, hashlib.sha256(raw).hexdigest()
 
 
+
+RUNTIME_ALLOWED_OPS = frozenset(("dbus_runtime_unit", "service_process_snapshot"))
+RUNTIME_EXECUTABLES = {"dbus-daemon": "DBUS_DAEMON",
+                       "dbus-broker-launch": "DBUS_BROKER_LAUNCH"}
+RUNTIME_PROCESS_LIMIT = 4
+RUNTIME_RAW_MAX = 64 * 1024
+
+
+def runtime_bus_query(ip: str, key: Path, operation: str, timeout=8) -> str:
+    """Existing SDB allowlist; no activation, FOTA or arbitrary shell input."""
+    if operation not in RUNTIME_ALLOWED_OPS:
+        raise PolicyError("RUNTIME_OPERATION_NOT_ALLOWLISTED")
+    for style in ("standard", "tizen-command"):
+        try:
+            with socket.create_connection((ip, PORT), timeout=timeout) as sock:
+                sock.settimeout(timeout)
+                channel = Connection(sock, key)
+                channel.handshake()
+                return channel.shell(operation, style=style)
+        except ShellCloseError:
+            if style == "tizen-command":
+                raise PolicyError("RUNTIME_SDB_SHELL_UNAVAILABLE") from None
+        except (SdbError, OSError, TimeoutError):
+            raise PolicyError("RUNTIME_SDB_CONNECTION_FAILED") from None
+    raise PolicyError("RUNTIME_SDB_SHELL_UNAVAILABLE")
+
+
+def _daemon_family(command: str) -> str | None:
+    """Match only the argv0 basename, never a command mentioned as an arg."""
+    if not isinstance(command, str) or len(command) > 4096:
+        return None
+    first = command.strip().split(None, 1)[0] if command.strip() else ""
+    if not re.fullmatch(r"(/[A-Za-z0-9_+./-]{1,160}/)?[A-Za-z0-9_-]{1,60}", first):
+        return None
+    return RUNTIME_EXECUTABLES.get(first.rsplit("/", 1)[-1])
+
+
+def _config_flag_class(command: str) -> str:
+    """Redact argv and paths other than the already-captured three configs."""
+    matches = re.findall(r"(?:^|\s)--config-file(?:=|\s+)([^\s;]+)", command)
+    if not matches:
+        return "NO_EXPLICIT_CONFIG_FLAG_SEEN"
+    if len(matches) != 1:
+        return "AMBIGUOUS_CONFIG_FLAG"
+    return ("CAPTURED_CORE_SYSTEM_CONF" if matches[0] ==
+            "/usr/share/dbus-1/system.conf" else
+            "CAPTURED_ETC_SYSTEM_CONF" if matches[0] ==
+            "/etc/dbus-1/system.conf" else
+            "OTHER_EXPLICIT_CONFIG_REDACTED")
+
+
+def parse_runtime_unit(raw: str) -> dict:
+    """Only categorical fields from systemctl show; no full ExecStart stored."""
+    if not isinstance(raw, str) or len(raw) > 8192:
+        raise PolicyError("RUNTIME_UNIT_OUTPUT_INVALID")
+    if any(part in raw.lower() for part in ("access denied", "permission denied")):
+        raise PolicyError("RUNTIME_UNIT_ACCESS_DENIED")
+    fields = {}
+    for line in raw.splitlines():
+        if "=" not in line:
+            raise PolicyError("RUNTIME_UNIT_OUTPUT_INVALID")
+        key, value = line.split("=", 1)
+        if key not in ("Id", "LoadState", "ActiveState", "SubState",
+                       "MainPID", "ExecStart") or key in fields or len(value) > 4096:
+            raise PolicyError("RUNTIME_UNIT_OUTPUT_INVALID")
+        fields[key] = value
+    if set(fields) != {"Id", "LoadState", "ActiveState", "SubState",
+                       "MainPID", "ExecStart"}:
+        raise PolicyError("RUNTIME_UNIT_OUTPUT_INVALID")
+    if fields["Id"] not in ("dbus.service", "dbus-daemon.service", "dbus-broker.service"):
+        raise PolicyError("RUNTIME_UNIT_UNEXPECTED_ID")
+    if any(not re.fullmatch(r"[a-z][a-z0-9-]{0,40}", fields[k])
+           for k in ("LoadState", "ActiveState", "SubState")):
+        raise PolicyError("RUNTIME_UNIT_OUTPUT_INVALID")
+    if not re.fullmatch(r"(0|[1-9][0-9]{0,7})", fields["MainPID"]):
+        raise PolicyError("RUNTIME_UNIT_OUTPUT_INVALID")
+    m = re.search(r"(?:^|\{\s*)path=([^\s;]+)\s*;", fields["ExecStart"])
+    family = _daemon_family(m.group(1)) if m else None
+    return {
+        "unit_id_class": fields["Id"],
+        "unit_loaded": fields["LoadState"] == "loaded",
+        "unit_active": fields["ActiveState"] == "active",
+        "unit_substate": fields["SubState"],
+        "main_pid_present": int(fields["MainPID"]) > 0,
+        "configured_daemon_family": family or "UNRECOGNIZED_OR_NOT_OBSERVED",
+        "configured_explicit_config_class": _config_flag_class(fields["ExecStart"]),
+        "unit_is_runtime_process_attestation": False,
+    }
+
+
+def parse_runtime_ps(raw: str) -> dict:
+    """Inspect one passive bounded ps output, discarding all unrelated argv."""
+    if not isinstance(raw, str) or not 1 <= len(raw) <= RUNTIME_RAW_MAX:
+        raise PolicyError("RUNTIME_PROCESS_OUTPUT_INVALID")
+    lines = raw.splitlines()
+    if len(lines) > 2000 or len(lines) < 1:
+        raise PolicyError("RUNTIME_PROCESS_OUTPUT_INVALID")
+    header = lines[0].split()
+    # The previously observed BusyBox ps format is PID USER VSZ STAT COMMAND.
+    # Different layouts must not be misinterpreted as runtime confirmation.
+    if header[:5] != ["PID", "USER", "VSZ", "STAT", "COMMAND"]:
+        return {"status": "PS_LAYOUT_UNSUPPORTED", "candidate_processes": [],
+                "truncated": False}
+    observed = []
+    all_count = 0
+    for line in lines[1:]:
+        chunks = line.strip().split(None, 4)
+        if len(chunks) != 5 or not chunks[0].isdigit():
+            continue
+        family = _daemon_family(chunks[4])
+        if not family:
+            continue
+        all_count += 1
+        if len(observed) < RUNTIME_PROCESS_LIMIT:
+            observed.append({
+                "daemon_family": family,
+                "explicit_config_class": _config_flag_class(chunks[4]),
+                "system_flag_observed": bool(re.search(r"(?:^|\s)--system(?:\s|$)", chunks[4])),
+                "process_is_system_bus_attested": False,
+            })
+    return {
+        "status": "PS_SNAPSHOT_PARSED",
+        "candidate_processes": observed,
+        "truncated": all_count > RUNTIME_PROCESS_LIMIT,
+    }
+
+
+def collect_runtime_bus(ip: str, key: Path) -> dict:
+    """Two bounded preexisting system commands; no mutation or daemon RPC."""
+    ip = private_watch_ip(ip)
+    sources = {}
+    for operation, decoder in (("dbus_runtime_unit", parse_runtime_unit),
+                               ("service_process_snapshot", parse_runtime_ps)):
+        try:
+            sources[operation] = decoder(runtime_bus_query(ip, key, operation))
+        except PolicyError as exc:
+            sources[operation] = {"status": str(exc)}
+    return {
+        "schema": "uglyos-r840x-running-dbus-provenance-v1",
+        "state": "PARTIAL_READONLY_RUNTIME_PROVENANCE",
+        "sources": sources,
+        "runtime_daemon_config_loaded_verified": False,
+        "running_daemon_arguments_independently_attested": False,
+        "complete_effective_dbus_policy_verified": False,
+        "sender_bus_uid_verified": False,
+        "smack_cynara_authorization": "UNDETERMINED",
+        "effective_dbus_send_permission_for_shell": "UNDETERMINED",
+        "fota_consumer_method_authorization": "UNDETERMINED",
+        "fota_method_called": False, "watch_write_performed": False,
+        "root_proven": False, "bootloader_unlocked": False,
+        "stock_recovery_proven": False,
+        "interpretation": (
+            "Only a bounded snapshot of the configured dbus.service and "
+            "candidate process names/flags. Unit properties, even when active, "
+            "do not attest the actual executable arguments or fully merged "
+            "D-Bus policy. No sender authorization, privileged service method, "
+            "security bypass or firmware write was tested."
+        ),
+    }
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     mode = p.add_mutually_exclusive_group(required=True)
@@ -657,12 +821,14 @@ def main(argv=None) -> int:
     mode.add_argument("--offline-report", type=Path, help="Local saved v1 report; NO WATCH")
     mode.add_argument("--focused-detail-ip", help="Read only three fixed original D-Bus policy XML files")
     mode.add_argument("--offline-focused-report", type=Path, help="Review exact original three-file JSON without watch access")
+    mode.add_argument("--runtime-ip", help="Two read-only metadata queries on existing system bus process/unit")
     p.add_argument("--key-path", type=Path, default=Path.home()/".config/galaxy3/watch3-sdbkey")
     p.add_argument("--report", type=Path, default=None)
     args = p.parse_args(argv)
     output_path = args.report or Path.home() / ("watch3-r840x-dbus-policy-static-review.json"
         if args.offline_report else "watch3-r840x-dbus-focused-default-rule-audit.json"
-        if args.offline_focused_report else "watch3-r840x-dbus-focused-original-rules.json"
+        if args.offline_focused_report else "watch3-r840x-dbus-runtime-provenance.json"
+        if args.runtime_ip else "watch3-r840x-dbus-focused-original-rules.json"
         if args.focused_detail_ip else "watch3-r840x-dbus-policy-evidence.json")
     try:
         if output_path.exists() or output_path.is_symlink():
@@ -677,6 +843,8 @@ def main(argv=None) -> int:
             result = review_focused_report(source, source_sha256=digest)
         elif args.focused_detail_ip:
             result = collect_focused(args.focused_detail_ip, args.key_path)
+        elif args.runtime_ip:
+            result = collect_runtime_bus(args.runtime_ip, args.key_path)
         else:
             result = collect(args.watch_ip, args.key_path)
         payload = (json.dumps(result, indent=2)+"\n").encode("utf-8")
@@ -695,6 +863,7 @@ def main(argv=None) -> int:
         return 1
     print(("OFFLINE_DBUS_POLICY_STATIC_REVIEW: " if args.offline_report else
            "OFFLINE_DBUS_FOCUSED_RULE_AUDIT: " if args.offline_focused_report else
+           "READ_ONLY_DBUS_RUNTIME_PROVENANCE: " if args.runtime_ip else
            "READ_ONLY_DBUS_FOCUSED_ORIGINAL_RULES: " if args.focused_detail_ip else
            "READ_ONLY_DBUS_POLICY_EVIDENCE: ")+str(output_path))
     print("Partial config evidence only; no service call, execution or watch write.")
