@@ -87,14 +87,17 @@ confirmed three original file hashes and FOTA default rule sequence
 `send_requested_reply=true,send_type=method_return/error` rules as
 unknown *before* recognizing their definitive `method_call` mismatch.
 
-Branch `issue-47-fota-audit-nonmatching-rules` fixes the canonical
-offline matcher to check known mismatches before unsupported constraints,
-adds explicit uncertainty reason codes, a nonmatching-rule count,
-synthetic tests shaped like the actual original system.conf, and
-documents rerunning the prior saved JSON only. All genuine unknown
-constraints on plausible FOTA send rules and pinned-source drift
-remain inconclusive. No watch call, root action, or firmware write.
-CI/merge and physical offline v2 review pending.
+PR #141 **merged to main** at `4dec7ad` after required NO WATCH CI
+run `41098372119` passed on Ubuntu 22.04 and 24.04. The canonical
+offline matcher now first rejects known mismatches, then evaluates
+unsupported constraints, and returns explicit uncertainty reasons and
+a count of definitely nonmatching default send rules. Regression tests
+use original reply-only `method_return`/`error` shapes and verify genuine
+unknown FOTA constraints still fail closed. No watch call, root action,
+or firmware write. The new offline v2 report from the owner's already
+saved JSON remains the next user-operated verification step. Branch
+`issue-47-fota-audit-nonmatching-rules` is a safe retirement candidate,
+but this connector lacks branch deletion.
 
 ## Next evidence gate / safety
 
