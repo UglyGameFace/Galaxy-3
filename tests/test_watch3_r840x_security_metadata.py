@@ -169,7 +169,12 @@ class NativeProbeProgramTests(unittest.TestCase):
                 os.setxattr(file,'user.uglyos_fixture',value);values[path]=value
             # One oversized attribute must report ERANGE, not overflow the buffer.
             os.setxattr(fixture/metadata.TARGETS[-1].lstrip('/'),'user.uglyos_fixture',b'x'*257)
-            _raw,_facts=metadata.build_probe(root,compiler,fixture=fixture,host_test=not arm)
+            try:
+                _raw,_facts=metadata.build_probe(root,compiler,fixture=fixture,host_test=not arm)
+            except metadata.MetadataError as exc:
+                if getattr(exc,'diagnostic',None):
+                    self.fail(exc.diagnostic.decode('utf-8','replace'))
+                raise
             program=root/'security-metadata-probe'
             command=[shutil.which('qemu-arm'),str(program)] if arm else [str(program)]
             result=json.loads(subprocess.check_output(command,timeout=10))
