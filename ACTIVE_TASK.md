@@ -37,6 +37,7 @@ physically works. Root, kernel acceptance, recovery/restoration still unproved.
 ## Implementation and next physical input
 
 Source branch: issue-47-physical-privilege-inventory.
+Implementation PR: #133. Physical inventory/original-input execution pending.
 Extend the existing controller with --privilege-inventory, reusing proven
 canonical preflight/upload/cleanup. Native profile adds only read/query
 getdents64/lstat64/prctl GETs to enumerate six fixed system-helper directories,
@@ -83,7 +84,11 @@ ELF reads, copy budget, cleanup and no follow-up after cleanup failure. Existing
 metadata/ARM/noexec regressions remain. No Samsung binary runs or goes to CI.
 Local focused suite: 271 tests, passing with four unavailable ARM/noexec checks
 skipped locally. The updated host inventory/bounds fixtures also pass. Required
-ARM/QEMU CI and exact-head integration verification remain to be completed.
+ARM/QEMU CI also passed: run41071961281, code head5423b9d, all271 focused +
+2 private D-Bus +1 real systemd tests on both Ubuntu versions (274 per OS,
+no skips). Logs confirm exact ARM inventory/profile ABI, real >4GiB stat64,
+xattr/output bounds and original-copy/cleanup regressions. Integration and the
+owner's new inventory command remain to be verified.
 
 Pending: physical privilege inventory and selected helper originals, actual
 privilege-gain path, archive/caller/MAC validation, exact R840X S-BOOT/boot/
