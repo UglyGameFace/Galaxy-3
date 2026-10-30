@@ -18,7 +18,7 @@ import socket
 import sys
 import xml.etree.ElementTree as ET
 
-from watch3_r08_android_sdb import Connection, PORT, SdbError, private_watch_ip, receive
+from watch3_r08_android_sdb import Connection, PORT, SdbError, private_watch_ip, receive, RECOVERY_SCRIPT_PATHS
 from watch3_r08_fota_artifact_pull import (
     ArtifactPullError, LOCAL_STREAM, MAX_STREAM_FRAMES, ReadOnlySyncDecoder, SYNC_HDR,
 )
@@ -36,10 +36,10 @@ OBSERVED_FILES = {
 # The R840X physically supplied this exact ExecStart path through the
 # already downloaded 238-byte recovery-update.service unit. It has not
 # yet established whether SDB RECV permits access to the script itself.
-EVIDENCED_RECOVERY_SCRIPT_PATH = b"/usr/bin/recovery-update.sh"
+EVIDENCED_RECOVERY_SCRIPT_PATH = RECOVERY_SCRIPT_PATHS["recovery-update"]
 # Actual original consumer ELF SHA-256 19ad8468...c676a1a: literal resolved
 # at 0x63da and passed to system_cmd at 0x63de. Read only, never invoke.
-EVIDENCED_UPDATE_PREPARE_SCRIPT_PATH = b"/usr/bin/rw-update-prepare.sh"
+EVIDENCED_UPDATE_PREPARE_SCRIPT_PATH = RECOVERY_SCRIPT_PATHS["update-prepare"]
 MAX_FILE_BYTES = 8 * 1024
 REPORT_NAME = "fota-handoff-report.json"
 SCHEMA = "uglyos-r840x-exact-fota-handoff-recv-v1"

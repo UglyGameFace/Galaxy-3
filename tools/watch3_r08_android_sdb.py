@@ -31,6 +31,22 @@ NATIVE_ROOT_IDENTITY_PROBES = {
     "native_root_uid": "id -u",
     "native_root_status": "cat /proc/self/status",
 }
+# Paths evidenced by the original updater units/binaries; these are read with
+# cat only. Script contents are never passed to a shell as commands.
+RECOVERY_SCRIPT_PATHS = {
+    "recovery-update": b"/usr/bin/recovery-update.sh",
+    "update-prepare": b"/usr/bin/rw-update-prepare.sh",
+    "update-systemd": b"/usr/bin/rw-update-systemd.sh",
+}
+RECOVERY_CONTEXT_READS = {
+    **{path.decode().rsplit("/", 1)[1]: "cat " + path.decode()
+       for path in RECOVERY_SCRIPT_PATHS.values()},
+    "oma-dm-agent.service": "cat /usr/lib/systemd/system/oma-dm-agent.service",
+    "permissions.txt": "stat -c '%n|%a|%u|%g|%s|%F' /usr/bin/recovery-update.sh /usr/bin/rw-update-prepare.sh /usr/bin/rw-update-systemd.sh /usr/bin/fota-consumer /usr/bin/oma-dm-agent /usr/lib/systemd/system/oma-dm-agent.service /opt/usr/data/fota/save /opt/data/recovery",
+    "file-capabilities.txt": "getcap -v /usr/bin/fota-consumer /usr/bin/oma-dm-agent /usr/bin/rw-update-prepare.sh /usr/bin/rw-update-systemd.sh",
+    "smack-label.txt": "cat /proc/self/attr/current",
+    "updater-units.txt": "systemctl show oma-dm-agent.service fota-consumer.service recovery-update.service rw-update.service update-service.service --no-pager --property=Id,LoadState,ActiveState,SubState,User,Group,MainPID,ExecStart,NoNewPrivileges,CapabilityBoundingSet",
+}
 
 # Read ONLY the pinned Samsung battery device's read-only sysfs uevent.
 # No wildcard, arbitrary paths, raw blocks or writes; its exact identity
@@ -308,6 +324,17 @@ class Connection:
         """
         return self._read_service(b"root:on\x00")
 
+    def recovery_context_read(self, entry):
+        """Fixed read-only shell operations, returning the native payload bytes.
+
+        The separate context collector keeps diagnostics private and does not
+        confuse a cat error with script bytes. No caller-supplied path/command.
+        """
+        if entry not in RECOVERY_CONTEXT_READS:
+            raise SdbError("Recovery context read not allowlisted")
+        destination = ("shell:" + RECOVERY_CONTEXT_READS[entry]).encode() + b"\x00"
+        return self._read_service(destination, raw=True)
+
     def process_executable(self, pid: int, style="standard"):
         """Read one proc symlink for a registry-observed PID, never process memory.
 
@@ -328,7 +355,7 @@ class Connection:
         destination = ("shell:" if style == "standard" else "shell:0 ")
         return self._read_service((destination + command).encode() + b"\x00")
 
-    def _read_service(self, destination):
+    def _read_service(self, destination, *, raw=False):
         """Shared bounded stream reader for fixed shell/native-service callers.
 
         Keep the established shell diagnostics for backward compatibility;
@@ -393,7 +420,7 @@ class Connection:
                             "SDB acknowledged shell then closed it with "
                             f"CLSE(0,{local}) without any WRTE data "
                             "(legacy zero-sender close or service refusal)")
-                    return output.decode("utf-8", "replace")
+                    return bytes(output) if raw else output.decode("utf-8", "replace")
                 if arg0 != remote:
                     raise ShellCloseError(
                         "SDB closed an established shell with unexpected "
@@ -405,7 +432,7 @@ class Connection:
                     raise ShellCloseError(
                         "SDB acknowledged shell but closed without WRTE data "
                         f"(remote_id={remote})")
-                return output.decode("utf-8", "replace")
+                return bytes(output) if raw else output.decode("utf-8", "replace")
             else:
                 raise SdbError("Unexpected SDB frame during read-only shell")
         raise SdbError("SDB response exceeded frame limit")
