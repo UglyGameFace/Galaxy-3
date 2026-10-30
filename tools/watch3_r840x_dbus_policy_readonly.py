@@ -361,34 +361,50 @@ FOCUSED_REVIEW_MAX_NODES = 96
 
 
 def _focused_default_send_matches(rule: dict) -> str:
-    """MATCH / NO_MATCH / UNKNOWN under only supported original attributes.
+    """Tri-state match against a hypothetical FOTA method call only.
 
-    This checks a hypothetical message's shape, not sender UID, runtime
-    bus policy, service activation, MAC labels or an update result.
+    Decide a *definite mismatch* on known attributes before inspecting
+    unsupported attributes. In particular, send_requested_reply on
+    method_return/error rules must not create false uncertainty about
+    an unrelated method_call. Unknown constraints on otherwise plausible
+    send rules remain UNKNOWN, never MATCH.
     """
     if not isinstance(rule, dict) or rule.get("action") not in ("allow", "deny"):
         return "UNKNOWN"
     attributes = rule.get("attributes")
-    unknown = rule.get("unreported_attribute_names")
-    if not isinstance(attributes, dict) or not isinstance(unknown, list):
+    unreported = rule.get("unreported_attribute_names")
+    if not isinstance(attributes, dict) or not isinstance(unreported, list):
         return "UNKNOWN"
-    if unknown or any(k.startswith("send_") and
-                      k not in FOCUSED_SUPPORTED_SEND_MATCHES for k in attributes):
-        return "UNKNOWN"
-    checks = [(k, v) for k, v in attributes.items()
-              if k in FOCUSED_SUPPORTED_SEND_MATCHES]
-    if not checks:
-        return "NO_MATCH"
-    if any(type(v) is not str for _, v in checks):
-        return "UNKNOWN"
-    if any(v not in ("*", FOCUSED_REVIEW_TARGET[k]) for k, v in checks):
-        return "NO_MATCH"
-    if any(k not in FOCUSED_SUPPORTED_SEND_MATCHES
-           and (k.startswith("receive_") or k in ("eavesdrop", "own", "own_prefix"))
-           for k in attributes):
-        return "UNKNOWN"
-    return "MATCH"
 
+    known_send = [(key, value) for key, value in attributes.items()
+                  if key in FOCUSED_SUPPORTED_SEND_MATCHES]
+    # If *any* supported send filter excludes our method, no other
+    # attribute can make that rule apply to the hypothetical message.
+    if any(isinstance(value, str) and
+           value not in ("*", FOCUSED_REVIEW_TARGET[key])
+           for key, value in known_send):
+        return "NO_MATCH"
+    if any(type(value) is not str for _, value in known_send):
+        return "UNKNOWN"
+
+    unsupported_send = any(key.startswith("send_") and
+                           key not in FOCUSED_SUPPORTED_SEND_MATCHES
+                           for key in attributes)
+    unknown_non_send = any(key.startswith("receive_") or
+                           key in ("eavesdrop", "own", "own_prefix", "user", "group")
+                           for key in attributes
+                           if key not in FOCUSED_SUPPORTED_SEND_MATCHES)
+    # Preserve uncertainty for unknown constraints on otherwise plausible
+    # rules, but not for proven nonmatches such as send_type=method_return.
+    if unreported or unsupported_send or (known_send and unknown_non_send):
+        return "UNKNOWN"
+    if not known_send:
+        # Ordinary connection/receive/own rules do not regulate sending
+        # this method call. Unknown future attributes are not ignored.
+        if any(key not in RULE_ATTRIBUTES for key in attributes):
+            return "UNKNOWN"
+        return "NO_MATCH"
+    return "MATCH"
 
 def review_focused_report(source: object, *, source_sha256: str = "") -> dict:
     """Offline summary of known matching default rules; no access verdict."""
@@ -404,6 +420,8 @@ def review_focused_report(source: object, *, source_sha256: str = "") -> dict:
     details = {}
     observed_matches = []
     incomplete = False
+    uncertainty_reasons = set()
+    known_nonmatching_default_rules = 0
     for name in required:
         record = files[name]
         if not isinstance(record, dict) or not isinstance(
@@ -425,6 +443,7 @@ def review_focused_report(source: object, *, source_sha256: str = "") -> dict:
         }
         if not pinned:
             incomplete = True
+            uncertainty_reasons.add("PINNED_SOURCE_CHANGED_OR_UNVERIFIED")
         for node in nodes:
             if not isinstance(node, dict):
                 raise PolicyError("FOCUSED_REVIEW_INVALID_NODE")
@@ -436,20 +455,27 @@ def review_focused_report(source: object, *, source_sha256: str = "") -> dict:
                 continue
             if kind != "policy":
                 incomplete = True
+                uncertainty_reasons.add("UNKNOWN_CONFIG_NODE")
                 continue
             scope = node.get("scope")
             rules = node.get("rules")
             if (not isinstance(scope, dict) or not isinstance(rules, list) or
                     len(rules) > FOCUSED_REVIEW_MAX_NODES):
                 raise PolicyError("FOCUSED_REVIEW_INVALID_POLICY_BLOCK")
+            if scope.get("context") != "default":
+                # Named-user or group policies are accounted for by the
+                # global-effective-policy caveat, not default-rule matching.
+                continue
             if node.get("unrecognized_scope_names"):
                 incomplete = True
-            if scope.get("context") != "default":
-                continue
+                uncertainty_reasons.add("UNKNOWN_DEFAULT_SCOPE_ATTRIBUTE")
             for rule in rules:
                 state = _focused_default_send_matches(rule)
                 if state == "UNKNOWN":
                     incomplete = True
+                    uncertainty_reasons.add("UNKNOWN_POTENTIAL_SEND_CONSTRAINT")
+                elif state == "NO_MATCH":
+                    known_nonmatching_default_rules += 1
                 if state == "MATCH":
                     hit = {
                         "action": rule["action"],
@@ -476,6 +502,8 @@ def review_focused_report(source: object, *, source_sha256: str = "") -> dict:
         "fota_last_matching_default_rule": targeted[-1] if targeted else "NOT_OBSERVED",
         "fota_deny_then_allow_in_same_file": ordered_overlap,
         "matching_rule_subset_has_unknowns_or_drift": incomplete,
+        "subset_uncertainty_reason_codes": sorted(uncertainty_reasons),
+        "known_nonmatching_default_rules_ignored": known_nonmatching_default_rules,
         "individual_file_details": details,
         "observed_default_subset_result": (
             "LATER_FOTA_INTERFACE_ALLOW_MATCHES"
