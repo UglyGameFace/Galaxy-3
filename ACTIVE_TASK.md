@@ -77,6 +77,25 @@ attributes, malformed inputs, no networking and no-clobber output.
 No new watch capture or service call is needed for this milestone.
 See `docs/watch3-r840x-dbus-policy-readonly.md`.
 
+## October 30 focused offline audit regression
+
+The owner ran the three-file offline default send-rule reviewer. Report
+SHA-256 `c27bf1ee54229753e5e0ac6f31269ab1733ced3ce344b1c32edf3589e83644b3`
+confirmed three original file hashes and FOTA default rule sequence
+`deny -> allow`, but emitted `INCONCLUSIVE` with generic unknown flag.
+**Actual root cause in code:** the matcher classified unrelated
+`send_requested_reply=true,send_type=method_return/error` rules as
+unknown *before* recognizing their definitive `method_call` mismatch.
+
+Branch `issue-47-fota-audit-nonmatching-rules` fixes the canonical
+offline matcher to check known mismatches before unsupported constraints,
+adds explicit uncertainty reason codes, a nonmatching-rule count,
+synthetic tests shaped like the actual original system.conf, and
+documents rerunning the prior saved JSON only. All genuine unknown
+constraints on plausible FOTA send rules and pinned-source drift
+remain inconclusive. No watch call, root action, or firmware write.
+CI/merge and physical offline v2 review pending.
+
 ## Next evidence gate / safety
 
 Use only the owner's saved focused three-file JSON for the next
