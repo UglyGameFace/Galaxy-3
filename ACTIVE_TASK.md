@@ -24,16 +24,23 @@ limit). Scan stat errors persist. The directory inventory is incomplete.
 No setuid/setgid modes among retained candidates, although file capabilities
 are present. No helper executed or firmware changed.
 
-The original `/bin/bapd` contains `_fota_launch_cb` and
-`fota.consumer.LaunchFota` with `/fota/consumer`. The original
-`/bin/csc-util` contains firmware-mode CSC preparation functions. These are
-static links to the FOTA workflow, NOT proven caller authorization, root,
-installer, bootloader access or a signature bypass. See
-[offline review](docs/watch3-r840x-privilege-offline-review.md).
+The original `/bin/bapd` now has **verified Thumb-2 call edges**:
+`0xab2a` invokes `g_variant_new`, and `0xab58` invokes
+`g_dbus_connection_call`. PLT/GOT relocations and PC-relative literal
+loads establish bus `fota.consumer`, object `/fota/consumer`, interface
+`fota.consumer`, method `LaunchFota` and parameter format `(is)` on the
+exact original SHA-256 `429d9611...` ARM ELF32. No runtime caller
+authorization, root, firmware signature bypass or rescue proven.
+The original `/bin/csc-util` includes firmware-mode CSC preparation strings.
+See [offline review](docs/watch3-r840x-privilege-offline-review.md)
+and [pinned bapd call review](docs/watch3-r840x-bapd-call-review.md).
 
 ## Current development
 
-Branch: `issue-47-privilege-offline-review`. The private-input verifier
+PR #134 merged to main at `02795ac`; current branch
+`issue-47-bapd-callsite-offline`. New exact-input pinned callsite verifier:
+`tools/watch3_r840x_bapd_call_review.py`; synthetic tests and required
+NO WATCH CI matrix. Original binaries remain private. The earlier private-input verifier
 `tools/watch3_r840x_privilege_offline.py` checks ZIP structure/limits,
 report-to-probe consistency, cleanup/no-write flags, original hashes and
 ARM ELF32 headers, and FOTA static markers. It creates a local JSON report
@@ -41,9 +48,9 @@ with restricted permissions; no SDB or binary execution. Synthetic tamper
 tests: `tests/test_watch3_r840x_privilege_offline.py`.
 Original Samsung executables and private reports remain **outside Git**.
 
-Next research: map original `bapd` callback's actual relocation/call edges
-offline, compare to previously reviewed consumer D-Bus method interface,
-package registration and caller policies. Resolve `/bin` vs `/usr/bin` alias
+Next research: determine real caller/receiver authorization for the
+verified D-Bus call, compare original consumer D-Bus method interface,
+package registration and caller policies *offline*. Resolve `/bin` vs `/usr/bin` alias
 questions, stat errors and dropped records in the inventory if needed.
 Continue *exact R840X* stock recovery provenance, partition identity,
 signed-boot checks and tested rescue feasibility before any write.
