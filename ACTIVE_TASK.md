@@ -96,8 +96,13 @@ The existing `watch3_r840x_dbus_policy_readonly.py` now supports
 physical read or risking a method call. Strict interpretation marks
 effective bus policy, caller UID, SMACK/Cynara and consumer authorization
 UNDETERMINED. No further attempt is justified until those boundaries
-and exact-variant stock rescue are evidenced. Work branch:
-`issue-47-dbus-policy-review-v1`; tests/CI and integration pending.
+and exact-variant stock rescue are evidenced. PR #138 merged into `main` at `47b9c8f` after required NO WATCH CI
+run `41092362397` passed on both Ubuntu 22.04/24.04. The existing
+policy collector supports offline report review using only saved JSON.
+Current objective: interpret missing effective D-Bus policy and runtime
+identity via legitimate read-only evidence; resolve exact-R840X signed
+rescue before any writes. Branch `issue-47-dbus-policy-review-v1` remains
+a safe retirement candidate; branch deletion is unavailable here.
 
 ## Safety / definition of done
 
