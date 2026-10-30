@@ -281,5 +281,118 @@ class OfflinePolicyReviewTests(unittest.TestCase):
             collect.assert_called_once()
             self.assertEqual(json.loads(dest.read_text()),record)
 
+
+ORIGINAL_FOCUSED_XML = b"""<?xml version="1.0"?>
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+ <includedir>system.d</includedir>
+ <include ignore_missing="yes">system-local.conf</include>
+ <policy context="default">
+  <deny send_destination="fota.consumer" send_type="method_call"/>
+  <allow send_destination="fota.consumer" send_interface="fota.consumer"
+         send_path="/fota/consumer" send_member="LaunchFota"
+         send_requested_reply="true" custom_match="must-not-lose"/>
+ </policy>
+ <policy user="fota"><allow own="fota.consumer"/></policy>
+</busconfig>
+"""
+
+
+class FocusedOriginalPolicyTests(unittest.TestCase):
+    def test_retains_original_rule_order_and_full_matching_attributes(self):
+        doc=policy.focused_policy_xml(ORIGINAL_FOCUSED_XML)
+        self.assertEqual(doc["ordered_config_nodes"][0]["kind"],"includedir")
+        self.assertEqual(doc["ordered_config_nodes"][0]["path"],"system.d")
+        self.assertEqual(doc["ordered_config_nodes"][1]["path"],"system-local.conf")
+        rules=doc["ordered_config_nodes"][2]["rules"]
+        self.assertEqual([r["action"] for r in rules],["deny","allow"])
+        allow=rules[1]
+        self.assertEqual(allow["attributes"]["send_path"],"/fota/consumer")
+        self.assertEqual(allow["attributes"]["send_member"],"LaunchFota")
+        self.assertEqual(allow["attributes"]["send_requested_reply"],"true")
+        self.assertEqual(allow["unreported_attribute_names"],["custom_match"])
+        self.assertEqual(doc["effective_sender_permission"],"UNDETERMINED")
+
+    def test_preserves_user_scope_and_sanitizes_include_text(self):
+        doc=policy.focused_policy_xml(ORIGINAL_FOCUSED_XML)
+        self.assertEqual(doc["ordered_config_nodes"][3]["scope"],{"user":"fota"})
+        xml=b'<busconfig><include>../../secret?foo=bar</include></busconfig>'
+        self.assertEqual(policy.focused_policy_xml(xml)["ordered_config_nodes"][0]["path"],"UNREPORTED")
+
+    def test_rejects_entity_and_size_and_malformed_xml(self):
+        for raw in (b'<busconfig><!ENTITY secret "bad"/></busconfig>',
+                    b"x"*(policy.MAX_BYTES+1),
+                    b"<busconfig><policy>"):
+            with self.assertRaises(policy.PolicyError):
+                policy.focused_policy_xml(raw)
+
+    def test_focused_sources_fixed_and_hashes_known_from_capture(self):
+        self.assertEqual(policy.FOCUSED_FILES,(
+            b"/usr/share/dbus-1/system.conf",b"/etc/dbus-1/system.conf",
+            b"/etc/dbus-1/system.d/fota-consumer.conf",
+        ))
+        self.assertEqual(policy.EXPECTED_FOCUSED_SHA256[
+            "/etc/dbus-1/system.d/fota-consumer.conf"],
+            "499ae912f2397720c952f27143d2112427509b95335c91d5b0ec7749e6999fec")
+
+    def test_focused_collect_uses_exactly_three_originals_and_no_lists(self):
+        observed=[]
+        def read(ip,key,path):
+            observed.append(path)
+            return ORIGINAL_FOCUSED_XML
+        with patch.object(policy,"read_file",side_effect=read),patch.object(
+                policy,"list_policy_dir",side_effect=AssertionError("NO DIRECTORY SCAN")):
+            result=policy.collect_focused("10.115.12.131",Path("/unused"))
+        self.assertEqual(observed,list(policy.FOCUSED_FILES))
+        self.assertEqual(result["state"],"FOCUSED_FILES_ONLY")
+        self.assertFalse(result["bus_config_load_order_verified"])
+        self.assertFalse(result["other_103_directory_entries_inspected"])
+        self.assertFalse(result["fota_method_called"])
+        self.assertFalse(result["watch_write_performed"])
+        self.assertFalse(result["policy_files"][
+            "/etc/dbus-1/system.d/fota-consumer.conf"]["matches_october_30_v1_sha256"])
+
+    def test_denied_target_produces_categorical_outcome_not_permission(self):
+        with patch.object(policy,"read_file",
+                          side_effect=policy.PolicyError("POLICY_RECV_DENIED")):
+            result=policy.collect_focused("10.115.12.131",Path("/unused"))
+        self.assertEqual(len(result["policy_files"]),3)
+        self.assertTrue(all(item["status"]=="POLICY_RECV_DENIED"
+                            for item in result["policy_files"].values()))
+        self.assertEqual(result["effective_dbus_send_permission_for_shell"],"UNDETERMINED")
+
+    def test_cli_rejects_overlapping_capture_modes(self):
+        with self.assertRaises(SystemExit):
+            policy.main(["--watch-ip","10.115.12.131","--focused-detail-ip","10.115.12.131"])
+
+    def test_focused_cli_private_report_no_clobber_and_no_sdb_in_test(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest=Path(td)/"focused.json"
+            record={"schema":"uglyos-r840x-dbus-focused-original-rules-v1",
+                    "watch_write_performed":False}
+            with patch.object(policy,"collect_focused",return_value=record),patch.object(
+                    policy.socket,"create_connection",side_effect=AssertionError("NO NETWORK")):
+                rc=policy.main(["--focused-detail-ip","10.115.12.131","--report",str(dest)])
+                again=policy.main(["--focused-detail-ip","10.115.12.131","--report",str(dest)])
+            self.assertEqual(rc,0)
+            self.assertEqual(again,1)
+            self.assertEqual(dest.stat().st_mode & 0o077,0)
+            self.assertEqual(json.loads(dest.read_text()),record)
+
+    def test_original_offline_cli_remains_unmodified(self):
+        with tempfile.TemporaryDirectory() as td:
+            src,dest=Path(td)/"prior.json",Path(td)/"review.json"
+            src.write_text(json.dumps(captured_v1_fixture()))
+            with patch.object(policy.socket,"create_connection",side_effect=AssertionError("NO NETWORK")):
+                rc=policy.main(["--offline-report",str(src),"--report",str(dest)])
+            self.assertEqual(rc,0)
+            self.assertTrue(json.loads(dest.read_text())["potential_default_allow_after_deny"])
+
+    def test_focused_allows_only_fixed_files(self):
+        self.assertTrue(policy.allowed_path(policy.FOCUSED_FILES[-1]))
+        self.assertFalse(policy.allowed_path(b"/etc/dbus-1/system.d/../shadow"))
+        self.assertFalse(policy.allowed_path(b"/etc/dbus-1/system.d/other.conf"))
+
+
 if __name__=="__main__":
     unittest.main()

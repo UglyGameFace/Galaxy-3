@@ -143,3 +143,55 @@ load order, omitted relevant rules and applicable user/SMACK/Cynara
 restrictions by lawful read-only inspection. Exact-model stock
 recovery and signed-image acceptance are independent prerequisites
 for any firmware or partition write. Keep issue #47 open.
+
+
+## Focused original-attribute capture after the successful static review
+
+The owner completed the offline review, source report SHA-256
+`334cb44218801bab510dd1ba23b055527a7eba3cb3592b5bd3b425dd7a15a4f7`.
+It confirmed `["deny", "allow"]` within the **filtered v1** projection,
+but the v1 collector discarded `send_path`, `send_member`,
+`send_requested_reply`, possible other message matching attributes,
+and the ordered include paths. Therefore its `potential_default_allow_after_deny`
+is a reason to inspect a stronger record, **not** effective permission.
+
+The new opt-in `--focused-detail-ip` mode uses the existing authorized
+SDB **read-only RECV** implementation to read exactly three previously
+observed paths, each once and each capped at 64 KiB:
+
+- `/usr/share/dbus-1/system.conf`
+- `/etc/dbus-1/system.conf`
+- `/etc/dbus-1/system.d/fota-consumer.conf`
+
+It does **not** walk the 103 other policy-directory entries, invoke
+`LaunchFota`, open a D-Bus connection, start a service, execute a
+Samsung binary, or write to the watch. It extracts the ordered
+`<include>`, `<includedir>` and `<policy>` elements, all known
+`send_*`/`receive_*` attributes, and records names of any
+unsupported/invalid attributes rather than dropping constraints silently.
+It compares each SHA-256 with the owner's October 30 observed capture
+and reports any mismatch. Nothing is reloaded or changed on the watch.
+
+Run **once**, from the Android/Termux environment with your current
+already-authorized watch IP, after merging a green PR:
+
+```sh
+cd ~/Galaxy-3 && git switch main && git pull --ff-only
+python tools/watch3_r840x_dbus_policy_readonly.py \
+  --focused-detail-ip 10.115.12.131 \
+  --report ~/watch3-r840x-dbus-focused-original-rules.json
+cat ~/watch3-r840x-dbus-focused-original-rules.json
+```
+
+The reporter creates a new private mode-0600 JSON file and refuses to
+overwrite one. A denied file is recorded as denied/unknown, never
+treated as absent policy. If the watch IP changed, replace the example
+IP. No root, firmware mode, flash, recovery transition or extra
+hardware is necessary.
+
+**Still unknown afterwards:** which D-Bus daemon config actually
+runs, whether later policies in other files change precedence,
+the daemon-authenticated UID for `User::Shell`, Tizen SMACK/Cynara
+authorization, receiver-side checks and exact-model rescue.
+Even a matching allow in these three files does not resolve those
+questions or authorize firmware writes. Issue #47 remains open.

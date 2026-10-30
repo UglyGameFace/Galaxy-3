@@ -99,9 +99,23 @@ UNDETERMINED. No further attempt is justified until those boundaries
 and exact-variant stock rescue are evidenced. PR #138 merged into `main` at `47b9c8f` after required NO WATCH CI
 run `41092362397` passed on both Ubuntu 22.04/24.04. The existing
 policy collector supports offline report review using only saved JSON.
-Current objective: interpret missing effective D-Bus policy and runtime
-identity via legitimate read-only evidence; resolve exact-R840X signed
-rescue before any writes. Branch `issue-47-dbus-policy-review-v1` remains
+The owner has now physically confirmed the existing v1 policy review
+(source SHA-256 `334cb44218801bab510dd1ba23b055527a7eba3cb3592b5bd3b425dd7a15a4f7`),
+which reports ordered default `deny`, `allow` FOTA rules and still correctly
+marks `User::Shell` authorization UNDETERMINED. **Root cause of the
+uncertainty in this projection:** v1 discarded original D-Bus rule
+attributes (send_path, send_member, reply constraints, etc.) and ordered
+include declarations. These cannot be recovered from saved JSON.
+
+Current branch: `issue-47-fota-dbus-full-attributes`. One cohesive
+extension of the same existing reader adds focused read-only parsing of
+exactly 3 previously observed standard config files and full matching
+rule attributes, 10 new fake-watch regression tests, and Android steps.
+No arbitrary directory scan, FOTA call, service activation, firmware write,
+or claim of access. Physical capture must be performed once after CI/merge.
+Current objective: then check full rule attributes, actual daemon config and
+runtime bus sender, Tizen MAC policy, and exact-R840X signed rescue before
+any writes. Branch `issue-47-dbus-policy-review-v1` remains
 a safe retirement candidate; branch deletion is unavailable here.
 
 ## Safety / definition of done
