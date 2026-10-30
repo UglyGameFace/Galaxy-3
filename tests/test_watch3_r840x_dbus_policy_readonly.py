@@ -394,5 +394,170 @@ class FocusedOriginalPolicyTests(unittest.TestCase):
         self.assertFalse(policy.allowed_path(b"/etc/dbus-1/system.d/other.conf"))
 
 
+
+def full_original_subset_fixture():
+    """Synthetic projection of observed original policy rule shape; no vendor bytes."""
+    def rule(action, **attrs):
+        return {"action": action, "attributes": attrs, "unreported_attribute_names": []}
+    def policy_node(scope, rules):
+        return {"kind": "policy", "scope": scope,
+                "unrecognized_scope_names": [], "rules": rules, "other_nodes": 0}
+    fota_nodes = [
+        policy_node({"user": "root"}, [
+            rule("allow", send_destination="fota.consumer"),
+        ]),
+        policy_node({"user": "fota"}, [
+            rule("allow", own="fota.consumer"),
+            rule("allow", send_destination="fota.consumer"),
+        ]),
+        policy_node({"user": "system"}, [
+            rule("allow", send_destination="fota.consumer"),
+        ]),
+        policy_node({"context": "default"}, [
+            rule("deny", own="fota.consumer"),
+            rule("deny", send_destination="fota.consumer", send_type="method_call"),
+            rule("allow", send_destination="fota.consumer", send_interface="fota.consumer"),
+        ]),
+    ]
+    general_nodes = [
+        policy_node({"context": "default"}, [
+            rule("allow", user="*"),
+            rule("deny", own="*"),
+            rule("deny", send_type="method_call"),
+            rule("allow", send_destination="org.freedesktop.DBus",
+                 send_interface="org.freedesktop.DBus"),
+        ]),
+        {"kind": "include", "path": "/etc/dbus-1/system.conf", "attributes": {}},
+        {"kind": "includedir", "path": "system.d", "attributes": {}},
+        {"kind": "includedir", "path": "/etc/dbus-1/system.d", "attributes": {}},
+        {"kind": "include", "path": "/etc/dbus-1/system-local.conf",
+         "attributes": {"ignore_missing": "yes"}},
+    ]
+    original = {
+        "/usr/share/dbus-1/system.conf": general_nodes,
+        "/etc/dbus-1/system.conf": [],
+        "/etc/dbus-1/system.d/fota-consumer.conf": fota_nodes,
+    }
+    return {
+        "schema": "uglyos-r840x-dbus-focused-original-rules-v1",
+        "state": "FOCUSED_FILES_ONLY",
+        "policy_files": {
+            name: {
+                "xml_valid": True, "ordered_config_nodes": nodes,
+                "sha256": policy.EXPECTED_FOCUSED_SHA256[name],
+                "matches_october_30_v1_sha256": True,
+            } for name, nodes in original.items()
+        },
+        "bus_config_load_order_verified": False,
+        "effective_dbus_send_permission_for_shell": "UNDETERMINED",
+    }
+
+
+class FocusedDefaultAuditTests(unittest.TestCase):
+    @staticmethod
+    def review(fixture=None):
+        return policy.review_focused_report(
+            fixture if fixture is not None else full_original_subset_fixture(),
+            source_sha256="test")
+
+    def test_owner_observed_exact_default_sequence_exposes_later_allow(self):
+        actual = self.review()
+        self.assertTrue(actual["exact_original_three_hashes_matched"])
+        self.assertTrue(actual["core_default_method_deny_observed"])
+        self.assertEqual(actual["fota_default_rule_sequence_for_hypothetical_message"],
+                         ["deny", "allow"])
+        self.assertEqual(actual["observed_default_subset_result"],
+                         "LATER_FOTA_INTERFACE_ALLOW_MATCHES")
+        self.assertFalse(actual["matching_rule_subset_has_unknowns_or_drift"])
+        self.assertEqual(actual["effective_dbus_send_permission_for_shell"],
+                         "UNDETERMINED")
+        self.assertFalse(actual["watch_contacted"])
+        self.assertFalse(actual["fota_method_called"])
+        self.assertFalse(actual["root_proven"])
+
+    def test_missing_interface_attribute_cannot_match_unrelated_interface(self):
+        value = full_original_subset_fixture()
+        fota = value["policy_files"]["/etc/dbus-1/system.d/fota-consumer.conf"]
+        fota["ordered_config_nodes"][-1]["rules"][-1]["attributes"]["send_interface"] = "other.interface"
+        result = self.review(value)
+        self.assertEqual(result["fota_default_rule_sequence_for_hypothetical_message"], ["deny"])
+        self.assertEqual(result["observed_default_subset_result"], "INCONCLUSIVE")
+
+    def test_later_specific_deny_changes_observed_subset_conclusion(self):
+        value = full_original_subset_fixture()
+        rules = value["policy_files"]["/etc/dbus-1/system.d/fota-consumer.conf"]["ordered_config_nodes"][-1]["rules"]
+        rules.append({"action": "deny", "attributes": {
+            "send_destination": "fota.consumer", "send_member": "LaunchFota",
+        }, "unreported_attribute_names": []})
+        result = self.review(value)
+        self.assertEqual(result["fota_last_matching_default_rule"], "deny")
+        self.assertEqual(result["observed_default_subset_result"], "INCONCLUSIVE")
+
+    def test_unknown_send_constraint_does_not_claim_local_allow(self):
+        value = full_original_subset_fixture()
+        allow = value["policy_files"]["/etc/dbus-1/system.d/fota-consumer.conf"]["ordered_config_nodes"][-1]["rules"][-1]
+        allow["attributes"]["send_destination_prefix"] = "unknown"
+        result = self.review(value)
+        self.assertTrue(result["matching_rule_subset_has_unknowns_or_drift"])
+        self.assertEqual(result["observed_default_subset_result"], "INCONCLUSIVE")
+
+    def test_unreported_original_attribute_makes_result_inconclusive(self):
+        value = full_original_subset_fixture()
+        allow = value["policy_files"]["/etc/dbus-1/system.d/fota-consumer.conf"]["ordered_config_nodes"][-1]["rules"][-1]
+        allow["unreported_attribute_names"] = ["future-rule-option"]
+        result = self.review(value)
+        self.assertTrue(result["matching_rule_subset_has_unknowns_or_drift"])
+
+    def test_source_hash_drift_is_not_trusted(self):
+        value = full_original_subset_fixture()
+        value["policy_files"]["/etc/dbus-1/system.d/fota-consumer.conf"]["sha256"] = "0"*64
+        result = self.review(value)
+        self.assertFalse(result["exact_original_three_hashes_matched"])
+        self.assertEqual(result["observed_default_subset_result"], "INCONCLUSIVE")
+
+    def test_error_if_focused_files_missing_or_extra(self):
+        value = full_original_subset_fixture()
+        value["policy_files"].pop("/etc/dbus-1/system.conf")
+        with self.assertRaisesRegex(policy.PolicyError, "FOCUSED_REVIEW_FILES_INCOMPLETE_OR_EXTRA"):
+            self.review(value)
+        value = full_original_subset_fixture()
+        value["policy_files"]["/etc/shadow"] = {}
+        with self.assertRaisesRegex(policy.PolicyError, "FOCUSED_REVIEW_FILES_INCOMPLETE_OR_EXTRA"):
+            self.review(value)
+
+    def test_invalid_schema_and_rule_blocks_rejected(self):
+        value = full_original_subset_fixture()
+        value["schema"] = "invalid"
+        with self.assertRaisesRegex(policy.PolicyError, "FOCUSED_REVIEW_EXPECTS_V1_REPORT"):
+            self.review(value)
+        value = full_original_subset_fixture()
+        value["policy_files"]["/usr/share/dbus-1/system.conf"]["ordered_config_nodes"][0]["rules"] = None
+        with self.assertRaisesRegex(policy.PolicyError, "FOCUSED_REVIEW_INVALID_POLICY_BLOCK"):
+            self.review(value)
+
+    def test_host_only_cli_does_not_open_any_network_connection(self):
+        with tempfile.TemporaryDirectory() as td:
+            source, target = Path(td)/"source.json", Path(td)/"audit.json"
+            source.write_text(json.dumps(full_original_subset_fixture()))
+            with patch.object(policy.socket, "create_connection", side_effect=AssertionError("NO WATCH")):
+                rc = policy.main(["--offline-focused-report", str(source), "--report", str(target)])
+            self.assertEqual(rc, 0)
+            obj = json.loads(target.read_text())
+            self.assertEqual(obj["observed_default_subset_result"],
+                             "LATER_FOTA_INTERFACE_ALLOW_MATCHES")
+            self.assertEqual(obj["effective_dbus_send_permission_for_shell"],
+                             "UNDETERMINED")
+            self.assertEqual(target.stat().st_mode & 0o077, 0)
+            with patch.object(policy.socket, "create_connection", side_effect=AssertionError("NO WATCH")):
+                self.assertEqual(policy.main(
+                    ["--offline-focused-report", str(source), "--report", str(target)]), 1)
+
+    def test_watch_and_original_offline_modes_mutually_exclusive(self):
+        with self.assertRaises(SystemExit):
+            policy.main(["--watch-ip", "10.115.12.131",
+                         "--offline-focused-report", "/tmp/data.json"])
+
+
+
 if __name__=="__main__":
     unittest.main()

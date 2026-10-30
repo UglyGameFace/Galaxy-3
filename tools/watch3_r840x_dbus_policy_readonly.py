@@ -342,6 +342,170 @@ def collect_focused(ip: str, key: Path) -> dict:
     }
 
 
+
+# The owner has already read the complete rule attributes of these three
+# pinned original files. Audit their *subset* offline before any new probe.
+# Never turn a locally simulated D-Bus decision into an on-watch grant.
+FOCUSED_REVIEW_TARGET = {
+    "send_destination": "fota.consumer",
+    "send_interface": "fota.consumer",
+    "send_member": "LaunchFota",
+    "send_path": "/fota/consumer",
+    "send_type": "method_call",
+}
+FOCUSED_SUPPORTED_SEND_MATCHES = frozenset((
+    "send_destination", "send_interface", "send_member",
+    "send_path", "send_type",
+))
+FOCUSED_REVIEW_MAX_NODES = 96
+
+
+def _focused_default_send_matches(rule: dict) -> str:
+    """MATCH / NO_MATCH / UNKNOWN under only supported original attributes.
+
+    This checks a hypothetical message's shape, not sender UID, runtime
+    bus policy, service activation, MAC labels or an update result.
+    """
+    if not isinstance(rule, dict) or rule.get("action") not in ("allow", "deny"):
+        return "UNKNOWN"
+    attributes = rule.get("attributes")
+    unknown = rule.get("unreported_attribute_names")
+    if not isinstance(attributes, dict) or not isinstance(unknown, list):
+        return "UNKNOWN"
+    if unknown or any(k.startswith("send_") and
+                      k not in FOCUSED_SUPPORTED_SEND_MATCHES for k in attributes):
+        return "UNKNOWN"
+    checks = [(k, v) for k, v in attributes.items()
+              if k in FOCUSED_SUPPORTED_SEND_MATCHES]
+    if not checks:
+        return "NO_MATCH"
+    if any(type(v) is not str for _, v in checks):
+        return "UNKNOWN"
+    if any(v not in ("*", FOCUSED_REVIEW_TARGET[k]) for k, v in checks):
+        return "NO_MATCH"
+    if any(k not in FOCUSED_SUPPORTED_SEND_MATCHES
+           and (k.startswith("receive_") or k in ("eavesdrop", "own", "own_prefix"))
+           for k in attributes):
+        return "UNKNOWN"
+    return "MATCH"
+
+
+def review_focused_report(source: object, *, source_sha256: str = "") -> dict:
+    """Offline summary of known matching default rules; no access verdict."""
+    if (not isinstance(source, dict) or
+            source.get("schema") != "uglyos-r840x-dbus-focused-original-rules-v1" or
+            source.get("state") != "FOCUSED_FILES_ONLY" or
+            not isinstance(source.get("policy_files"), dict)):
+        raise PolicyError("FOCUSED_REVIEW_EXPECTS_V1_REPORT")
+    files = source["policy_files"]
+    required = [p.decode("ascii") for p in FOCUSED_FILES]
+    if set(files) != set(required):
+        raise PolicyError("FOCUSED_REVIEW_FILES_INCOMPLETE_OR_EXTRA")
+    details = {}
+    observed_matches = []
+    incomplete = False
+    for name in required:
+        record = files[name]
+        if not isinstance(record, dict) or not isinstance(
+                record.get("ordered_config_nodes"), list):
+            raise PolicyError("FOCUSED_REVIEW_FILE_NOT_OBSERVED")
+        nodes = record["ordered_config_nodes"]
+        if len(nodes) > FOCUSED_REVIEW_MAX_NODES:
+            raise PolicyError("FOCUSED_REVIEW_NODE_LIMIT")
+        pinned = (
+            record.get("xml_valid") is True and
+            record.get("sha256") == EXPECTED_FOCUSED_SHA256[name] and
+            record.get("matches_october_30_v1_sha256") is True
+        )
+        details[name] = {
+            "original_bytes_match_previous_capture": pinned,
+            "ordered_node_count": len(nodes),
+            "include_declarations": [],
+            "default_send_rule_matches": [],
+        }
+        if not pinned:
+            incomplete = True
+        for node in nodes:
+            if not isinstance(node, dict):
+                raise PolicyError("FOCUSED_REVIEW_INVALID_NODE")
+            kind = node.get("kind")
+            if kind in ("include", "includedir"):
+                details[name]["include_declarations"].append({
+                    "kind": kind, "path": node.get("path", "UNREPORTED"),
+                })
+                continue
+            if kind != "policy":
+                incomplete = True
+                continue
+            scope = node.get("scope")
+            rules = node.get("rules")
+            if (not isinstance(scope, dict) or not isinstance(rules, list) or
+                    len(rules) > FOCUSED_REVIEW_MAX_NODES):
+                raise PolicyError("FOCUSED_REVIEW_INVALID_POLICY_BLOCK")
+            if node.get("unrecognized_scope_names"):
+                incomplete = True
+            if scope.get("context") != "default":
+                continue
+            for rule in rules:
+                state = _focused_default_send_matches(rule)
+                if state == "UNKNOWN":
+                    incomplete = True
+                if state == "MATCH":
+                    hit = {
+                        "action": rule["action"],
+                        "attributes": rule["attributes"],
+                    }
+                    details[name]["default_send_rule_matches"].append(hit)
+                    observed_matches.append({"file": name, "action": rule["action"]})
+    targeted = [i["action"] for i in details[
+        "/etc/dbus-1/system.d/fota-consumer.conf"]["default_send_rule_matches"]]
+    core_deny = any(
+        item["action"] == "deny" and
+        item["attributes"].get("send_type") == "method_call"
+        for item in details["/usr/share/dbus-1/system.conf"]["default_send_rule_matches"]
+    )
+    ordered_overlap = len(targeted) >= 2 and "deny" in targeted[:-1] and targeted[-1] == "allow"
+    pinned_all = all(item["original_bytes_match_previous_capture"]
+                     for item in details.values())
+    return {
+        "schema": "uglyos-r840x-dbus-focused-default-rule-audit-v1",
+        "source_report_sha256": source_sha256,
+        "exact_original_three_hashes_matched": pinned_all,
+        "core_default_method_deny_observed": core_deny,
+        "fota_default_rule_sequence_for_hypothetical_message": targeted,
+        "fota_last_matching_default_rule": targeted[-1] if targeted else "NOT_OBSERVED",
+        "fota_deny_then_allow_in_same_file": ordered_overlap,
+        "matching_rule_subset_has_unknowns_or_drift": incomplete,
+        "individual_file_details": details,
+        "observed_default_subset_result": (
+            "LATER_FOTA_INTERFACE_ALLOW_MATCHES"
+            if ordered_overlap and pinned_all and not incomplete else
+            "INCONCLUSIVE"
+        ),
+        "running_daemon_load_order_verified": False,
+        "other_policy_files_verified": False,
+        "sender_bus_uid_verified": False,
+        "smack_cynara_authorization": "UNDETERMINED",
+        "effective_dbus_send_permission_for_shell": "UNDETERMINED",
+        "consumer_method_authorization": "UNDETERMINED",
+        "watch_contacted": False,
+        "fota_method_called": False,
+        "watch_write_performed": False,
+        "root_proven": False,
+        "bootloader_unlocked": False,
+        "stock_recovery_proven": False,
+        "interpretation": (
+            "Only a hypothetical method call matching the pinned original "
+            "fota.consumer interface is considered. A later default rule "
+            "in the observed FOTA file matches the request, but other includes, "
+            "user/group/mandatory policies, running daemon identity, MAC "
+            "and receiver checks are not validated. No effective authorization "
+            "or boot permission is concluded."
+        ),
+    }
+
+
+
 MAX_PREVIOUS_REPORT = 256 * 1024
 FOTA_POLICY = "/etc/dbus-1/system.d/fota-consumer.conf"
 SYSTEM_POLICY = "/usr/share/dbus-1/system.conf"
@@ -464,11 +628,13 @@ def main(argv=None) -> int:
     mode.add_argument("--watch-ip", help="Authenticated read-only physical policy capture")
     mode.add_argument("--offline-report", type=Path, help="Local saved v1 report; NO WATCH")
     mode.add_argument("--focused-detail-ip", help="Read only three fixed original D-Bus policy XML files")
+    mode.add_argument("--offline-focused-report", type=Path, help="Review exact original three-file JSON without watch access")
     p.add_argument("--key-path", type=Path, default=Path.home()/".config/galaxy3/watch3-sdbkey")
     p.add_argument("--report", type=Path, default=None)
     args = p.parse_args(argv)
     output_path = args.report or Path.home() / ("watch3-r840x-dbus-policy-static-review.json"
-        if args.offline_report else "watch3-r840x-dbus-focused-original-rules.json"
+        if args.offline_report else "watch3-r840x-dbus-focused-default-rule-audit.json"
+        if args.offline_focused_report else "watch3-r840x-dbus-focused-original-rules.json"
         if args.focused_detail_ip else "watch3-r840x-dbus-policy-evidence.json")
     try:
         if output_path.exists() or output_path.is_symlink():
@@ -478,6 +644,9 @@ def main(argv=None) -> int:
         if args.offline_report:
             source, digest = read_existing_report(args.offline_report)
             result = review_saved_report(source, source_sha256=digest)
+        elif args.offline_focused_report:
+            source, digest = read_existing_report(args.offline_focused_report)
+            result = review_focused_report(source, source_sha256=digest)
         elif args.focused_detail_ip:
             result = collect_focused(args.focused_detail_ip, args.key_path)
         else:
@@ -497,6 +666,7 @@ def main(argv=None) -> int:
             else "LOCAL_OR_SDB_ERROR"), file=sys.stderr)
         return 1
     print(("OFFLINE_DBUS_POLICY_STATIC_REVIEW: " if args.offline_report else
+           "OFFLINE_DBUS_FOCUSED_RULE_AUDIT: " if args.offline_focused_report else
            "READ_ONLY_DBUS_FOCUSED_ORIGINAL_RULES: " if args.focused_detail_ip else
            "READ_ONLY_DBUS_POLICY_EVIDENCE: ")+str(output_path))
     print("Partial config evidence only; no service call, execution or watch write.")

@@ -1,133 +1,91 @@
-# UgLy|OS R840X bootloader and recovery
+# UgLy|OS Galaxy Watch3 R840X recovery and boot
 
-Updated October 30, 2026. Issue #47. Owner-owned Samsung Galaxy Watch3
-SM-R840X, NOBLESSE-LARGE-BT R08, stock R840XXXU1AUA2, CSC PAP candidate.
-Goal: verified exact-variant stock rescue and reproducible UgLy|OS custom
-boot. Android/Termux only, free only, preserve the working watch.
+Updated October 30, 2026. **Open issue #47.** Work is restricted to
+the owner's Samsung Galaxy Watch3 **SM-R840X**, NOBLESSE-LARGE-BT R08,
+stock version R840XXXU1AUA2, CSC PAP candidate. Android/Termux only,
+free only, preserve the working watch. The target is a verified
+**exact-variant stock rescue** followed by reproducible UgLy|OS boot.
 
-## Physical evidence and active state
+## Actual physical evidence
 
-PR #133 was merged into main at `3f7ca89`. The native reader executed
-on the physical watch as UID/EUID 5001, User::Shell. Effective/permitted
-capabilities both zero; inheritable mask `0x2000c2` is not root. Eight fixed
-updater targets have no security.capability attribute; FOTA service runs as
-`User=fota`. Earlier root-on was denied. The R840X ODIN/LOKE handshake is
-transport magic only, with no flash session or proven stock restoration.
+- **No unlock, root or custom recovery:** The native reader on the watch
+  ran as UID/EUID 5001, User::Shell, with zero effective/permitted caps;
+  earlier root-on failed. A prior ODIN/LOKE greeting proved transport
+  recognition, not image acceptance, PIT or flash recovery.
+- **Original private evidence pinned:** Owner's
+  `watch3-privilege-inventory.zip` SHA-256
+  `2454c2cbe7826a14984669bfad0e0da8ca92cfcacc51cfb59afd67c833c6083d`.
+  Original `/bin/bapd` ARM ELF32 SHA-256
+  `429d9611c47b2cebc8918294f076ce013c1947f74441b374b306e29d300b67ea`.
+  Keep raw vendor binaries, credentials and device evidence **out of Git**.
+  Physical privilege scan: 64 retained, 82 dropped records; 44
+  copy candidates not selected; stat errors/incomplete inventory.
+- **Original FOTA handoff:** Verified BAPD Thumb callsites send
+  `fota.consumer.LaunchFota` on `/fota/consumer` with `(is)` arguments.
+  A `dbus-connected` callback registration at `0xac7c` points to
+  `0xaad0`; nonzero state branches around the call at `0xab58`.
+  Static execution path only, not a user-triggerable update or bypass.
+- **Exact owner-captured system-bus policies:** Original
+  `/usr/share/dbus-1/system.conf` SHA-256
+  `df59ef6b3bd808b8b131fc5eef7c45dd98622d5a52473ab3dd1f4f542b0d7cb1`
+  has a default method-call deny and includes `/etc/dbus-1/system.d`.
+  Original `/etc/dbus-1/system.conf` SHA-256
+  `a6f50dc70ef082a110dcdb164579cd2af221b90226c5e0aca237edcad98a1c26`
+  has no extracted policy nodes. Original 811-byte
+  `/etc/dbus-1/system.d/fota-consumer.conf` SHA-256
+  `499ae912f2397720c952f27143d2112427509b95335c91d5b0ec7749e6999fec`
+  has explicit sender grants for root/fota/system, plus *within the
+  same default block* a deny for FOTA method calls followed by an allow
+  for destination+interface `fota.consumer` with **no method/path
+  restriction**. All 3 file hashes matched the first physical capture.
+  The effective policy remains **UNDETERMINED**: 103 other/unreported
+  override-directory entries were not individually inspected, actual
+  daemon loading/other policies/user-group-mandatory priority, sender
+  D-Bus identity, SMACK/Cynara and consumer-side checks are not proven.
+  An XML allow is not root or a firmware signature bypass.
 
-Owner supplied `watch3-privilege-inventory.zip`, SHA-256
-`2454c2cbe7826a14984669bfad0e0da8ca92cfcacc51cfb59afd67c833c6083d`.
-The raw probe matches the report; stage cleanup marker verified. Eight
-original ARM ELF32 helper inputs match their reported hashes and lengths.
-**64** candidate records retained; **82** candidate records dropped by
-inventory bounds. **44** eligible helper-copy plans not selected (a distinct
-limit). Scan stat errors persist. The directory inventory is incomplete.
-No setuid/setgid modes among retained candidates, although file capabilities
-are present. No helper executed or firmware changed.
+## Merged and validated development
 
-The original `/bin/bapd` now has **verified Thumb-2 call edges**:
-`0xab2a` invokes `g_variant_new`, and `0xab58` invokes
-`g_dbus_connection_call`. PLT/GOT relocations and PC-relative literal
-loads establish bus `fota.consumer`, object `/fota/consumer`, interface
-`fota.consumer`, method `LaunchFota` and parameter format `(is)` on the
-exact original SHA-256 `429d9611...` ARM ELF32. No runtime caller
-authorization, root, firmware signature bypass or rescue proven.
-The original `/bin/csc-util` includes firmware-mode CSC preparation strings.
-See [offline review](docs/watch3-r840x-privilege-offline-review.md)
-and [pinned bapd call review](docs/watch3-r840x-bapd-call-review.md).
+- PR #133: physical native reader and privilege inventory baseline.
+- PR #134: strict private original ZIP offline verification.
+- PR #135: pinned original BAPD callsite/Thumb/PLT analysis.
+- PR #136: registered `dbus-connected` callback/guard proof.
+- PR #137: read-only standard system-bus policy capture.
+- PR #138: offline review of first redacted policy report.
+- PR #139: 3-file exact original rule/include capture. Required NO WATCH
+  CI run `41095003011` passed Ubuntu 22.04 and 24.04.
+  Previous exact policy evidence capture and the v1 offline review
+  also ran on the physical owner's Termux successfully.
 
-## Current development
+### Current integration
 
-PR #134 merged at `02795ac`. PR #135 merged to main at `a5de1a4`;
-required Watch3 NO WATCH CI run `41082843518` passed both Linux versions.
-PR #136 merged at `24ac54f` with callback/guard validation in the
-same exact-input verifier `tools/watch3_r840x_bapd_call_review.py`.
-The required NO WATCH CI run `41084666846` passed on Ubuntu 22.04/24.04.
-No active overlapping pull request remains. The merged source branch
-`issue-47-bapd-trigger-boundary` should be retired if safe; GitHub branch
-deletion is not available through this connector.
-Previously merged callsite verifier:
-`tools/watch3_r840x_bapd_call_review.py`; synthetic tests and required
-NO WATCH CI matrix. Original binaries remain private. The earlier private-input verifier
-`tools/watch3_r840x_privilege_offline.py` checks ZIP structure/limits,
-report-to-probe consistency, cleanup/no-write flags, original hashes and
-ARM ELF32 headers, and FOTA static markers. It creates a local JSON report
-with restricted permissions; no SDB or binary execution. Synthetic tamper
-tests: `tests/test_watch3_r840x_privilege_offline.py`.
-Original Samsung executables and private reports remain **outside Git**.
+Branch: `issue-47-focused-policy-decision-audit` (CI / integration pending).
 
-The exact pinned original bapd call edge now also has a verified
-`bo_add_callback` registration (0xac7c): event `dbus-connected` at
-0x12134 points at handler 0xaad0 (Thumb pointer 0xaad1). A local
-state check at 0xaafe/0xab00 branches around the FOTA request at
-0xab58 when nonzero. This is a real static callback/guard connection,
-NOT an SDB-user trigger, sender/receiver authorization, firmware update
-acceptance or root. Synthetic regression tests and original byte review
-cover event pointers, call targets, label and branch guard.
+One cohesive update to the existing
+`tools/watch3_r840x_dbus_policy_readonly.py` adds
+`--offline-focused-report` for the **already obtained three-file JSON**.
+It validates pinned original file hashes, checks only the hypothetical
+BAPD target message against original **default** send-rule match
+attributes and order, and clearly separates an observed local-file
+exception from effective D-Bus/SMACK authorization. Regression tests
+cover changed hashes, changed interfaces/members, later denies, unknown
+attributes, malformed inputs, no networking and no-clobber output.
+No new watch capture or service call is needed for this milestone.
+See `docs/watch3-r840x-dbus-policy-readonly.md`.
 
-The physical read-only standard D-Bus policy capture is now available,
-so the next evidence gate is to distinguish possible overlapping default
-allow/deny from actual effective bus/security policy. No D-Bus update
-invocation or added root attempt is justified. Follow the offline review
-in `docs/watch3-r840x-dbus-policy-readonly.md` and preserve unknowns.
-Compare source policy with the original consumer handler and package
-registration; preserve explicit SMACK/Cynara unknowns. Resolve `/bin` vs `/usr/bin` alias
-questions, stat errors and dropped records in the inventory if needed.
-Continue *exact R840X* stock recovery provenance, partition identity,
-signed-boot checks and tested rescue feasibility before any write.
+## Next evidence gate / safety
 
+After green CI and merge, use only the owner's saved JSON for the next
+offline audit. Then determine actual live bus config and sender/receiver
+credentials, other applicable policy/SMACK/Cynara restrictions and
+signed exact-variant SM-R840X rescue provenance with **read-only**
+procedures. Do not repeatedly re-run prior captures or speculate
+that the shell can invoke a privileged firmware method.
 
-## Current branch / validation status
-
-PR #137 merged into `main` at `96ac836` (October 30, 2026).
-Required NO WATCH CI run `41091029357` passed on Ubuntu 22.04/24.04.
-Adds read-only standard D-Bus policy directory support to the shared
-SDB inventory decoder, a bounded policy reader, and 11 synthetic tests.
-The prior original `bapd` callsite report ran successfully in Termux as
-`PINNED_OFFLINE_BAPD_CALLSITE_VERIFIED`.
-**Physical policy capture received and analyzed, October 30:** the fixed
-source `fota-consumer.conf` has explicit send grants to root/fota/system,
-a default deny for FOTA method calls, and a later interface-specific
-default send allow. Core system.conf denies method calls by default.
-The standard override policy directory contains 103 other/unreported
-entries (not 103 confirmed FOTA rules). This is a **potential rule overlap**,
-not proof that User::Shell can send, trigger or install FOTA.
-The existing `watch3_r840x_dbus_policy_readonly.py` now supports
-`--offline-report` to review the owner's saved v1 JSON without another
-physical read or risking a method call. Strict interpretation marks
-effective bus policy, caller UID, SMACK/Cynara and consumer authorization
-UNDETERMINED. No further attempt is justified until those boundaries
-and exact-variant stock rescue are evidenced. PR #138 merged into `main` at `47b9c8f` after required NO WATCH CI
-run `41092362397` passed on both Ubuntu 22.04/24.04. The existing
-policy collector supports offline report review using only saved JSON.
-The owner has now physically confirmed the existing v1 policy review
-(source SHA-256 `334cb44218801bab510dd1ba23b055527a7eba3cb3592b5bd3b425dd7a15a4f7`),
-which reports ordered default `deny`, `allow` FOTA rules and still correctly
-marks `User::Shell` authorization UNDETERMINED. **Root cause of the
-uncertainty in this projection:** v1 discarded original D-Bus rule
-attributes (send_path, send_member, reply constraints, etc.) and ordered
-include declarations. These cannot be recovered from saved JSON.
-
-PR #139 merged into `main` at `6f37262` after passing no-watch CI
-`41095003011` on Ubuntu 22.04 and 24.04. The existing reader now
-supports `--focused-detail-ip` for **exactly three** already-observed
-D-Bus config files, preserving ordered includes and detailed rule
-matching attributes, with 10 new fake-watch regression tests. No new
-transport, arbitrary directory scan, FOTA method, service activation,
-root or firmware write. One physical read-only capture is now the
-next evidence gate, as documented in `docs/watch3-r840x-dbus-policy-readonly.md`.
-The merged source branch `issue-47-fota-dbus-full-attributes` awaits safe
-retirement; this connector does not expose branch deletion.
-Current objective: then check full rule attributes, actual daemon config and
-runtime bus sender, Tizen MAC policy, and exact-R840X signed rescue before
-any writes. Branch `issue-47-dbus-policy-review-v1` remains
-a safe retirement candidate; branch deletion is unavailable here.
-
-## Safety / definition of done
-
-Root: NOT PROVEN. Bootloader unlocked: NO. Custom boot: NO.
-Exact stock restoration: NOT PROVEN. Firmware writes: **NO-GO**.
-Never flash R840 images onto R840X by model similarity, issue blind Odin/PIT
-writes, call FOTA to test reachability, execute discovered privileged helpers
-or change security labels/capabilities. No claim of production boot readiness
-until signed-image acceptance and independent restoration are both proved.
-Issue #47 stays open. User's unrelated projects continue independently.
+**Firmware/partition writes: NO-GO.** Root not proven, bootloader
+not unlocked, recovery not installed, stock restore not verified,
+signed-image acceptance not tested. Never substitute SM-R840 firmware
+for SM-R840X by similarity, send FOTA requests to test reachability,
+flash blind Odin/PIT images, or execute a discovered vendor helper.
+Keep issue #47 open and related branch retirement safe; other projects
+remain independent.
