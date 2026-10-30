@@ -23,9 +23,9 @@ read with readlink, and no active process's loaded-library mapping was observed.
 
 `readelf` independently confirmed the ELF metadata, SONAME and build ID.
 On the actual original, the standard-library Thumb decoder and Capstone 5.0.6
-matched 30 selected calls; ARM PLT instructions and R_ARM_JUMP_SLOT records
-resolved 20 of those calls. Ten selected control/argument instruction checks
-and two literal references were also checked directly. A private review JSON
+matched 36 selected calls; ARM PLT instructions and R_ARM_JUMP_SLOT records
+resolved 26 of those calls. Eleven selected control/argument instruction checks
+and five literal references were also checked directly. A private review JSON
 and disassembly retain the detailed results outside the repository.
 Linear disassembly of literal pools is not treated as executable control flow.
 
@@ -60,7 +60,9 @@ It obtains the event's configured request type through `0x43c50`, retrieves
 the configured endpoint at `0x430bc`, copies the endpoint into sockaddr_un,
 then calls connect at `0x4f5e0`, write at `0x4f5f4` and read at `0x4f61c`.
 Endpoint construction elsewhere in the same library uses `/tmp/agent_fw_event_`
-plus a configured key. The actual key and live receiving process are not yet observed.
+plus a configured key. The subsequently acquired original initializer selects
+`omadm`, deriving `/tmp/agent_fw_event_omadm`. This is a static configuration
+derivation, not an observed socket connection or live receiving process.
 
 The generic listener's code calls bind at `0x447f4`, chmod with `0x1ff` (0777)
 at `0x44804`, accept at `0x448ba`, and read at `0x44906`. It obtains an event ID,
@@ -80,6 +82,43 @@ The important original configuration reference is concrete:
 
 The receiving callback and its configuration are the next boundary. Sending
 an installation event is not necessary to identify their declared files.
+
+## Actual initializer and the extensionless-file gap
+
+The owner supplied `watch3-sync-agent-context-evidence.zip`, SHA-256
+`6ce5c08e884046ea257082ceb09bb6222061f8889c763c1ecb47db66ccff873b`.
+It contains the 872-byte report (SHA-256
+`3709428ac246f55fc1966258ec39d0400b2ffeeebcf894840a56ebc20000174f`)
+and the 384-byte original initializer (SHA-256
+`29ab3dea6bfa21a28d7d148f943485fca7779df54c3ca9df276aea01c4939b92`).
+No event/notification definition or daemon binary is in that upload.
+
+| Original field | Value |
+| --- | --- |
+| Agent-Key | `omadm_fota_ui` |
+| Event-Key | `omadm` |
+| Event-Config | `/usr/share/oma-dm-cfg/ipc/eventconfig_omadm` |
+| RunEventHandler | `0` |
+| Noti-Key | `omadm_fota_ui` |
+| Noti-Config | `/usr/share/oma-dm-cfg/ipc/noticonfig_omadm` |
+
+The original library compares RunEventHandler with `1` at `0x54d88` and skips
+the handler-start call when it does not match at `0x54d8c`. This initializer
+therefore configures a client, not a local event listener. This says nothing
+about the state or privileges of another process.
+
+The v1 context reader followed only paths ending `.xml`, so it incorrectly
+omitted the two declared extensionless files. Its `CONTEXT_CAPTURED` result
+means the root XML was captured, not that the receiver context was complete.
+That suffix assumption is removed. The original Event-Config loader opens
+its path for reading at `0x43178`, then calls fscanf at `0x431b4` with a
+comma-separated four-integer/string format. These files are captured as
+opaque configuration bytes and are not passed to an XML parser.
+
+The updated actual-byte review additionally verifies those stdio calls,
+the text-format literal and the RunEventHandler comparison. The new parser
+also ran successfully on the actual 384-byte original and returned both
+extensionless paths. Neither the library nor any watch service was executed.
 
 ## MD5 is a separate routine
 
@@ -103,9 +142,15 @@ under `other_crypto`, and exposes the defined MD5 API as an allowlisted export.
 
 The context reader verifies the already copied library locally against its
 exact hash/length before contacting the watch. It reads the exact initialization
-XML above, follows only complete absolute XML references inside
-`/usr/share/oma-dm-cfg/`, and copies normal ELF paths explicitly declared by
-those XML fields under system library or `/usr/bin`/`/usr/sbin` directories.
+XML above and follows complete absolute configuration references inside
+`/usr/share/oma-dm-cfg/`, including the extensionless Event-Config/Noti-Config.
+It also uses existing native LIST to find only OMA-DM/sync-agent-family entries
+in `/usr/lib/systemd/system`, `/etc/systemd/system`, `/usr/bin` and the OMA
+`fw-init` directory. These are bounded discovery locations, not assertions that
+a particular unit or executable exists. Only actually listed candidates are read.
+Normal ELF paths explicitly declared by the XML or observed unit ExecStart
+fields are followed without interpreting their argument strings. The existing
+vendor executable validator also handles declared libexec and Tizen app paths.
 Copied ELF files are parsed without loading them and remain candidates, not
 attested runtime receivers. Relative names and command lines are retained in
 the private XML but are not guessed or interpreted as commands.
@@ -114,21 +159,27 @@ the private XML but are not guessed or interpreted as commands.
 cd ~/Galaxy-3 && git switch main && git pull --ff-only &&
 python tools/watch3_r08_fota_framework_context.py \
   --watch-ip 10.115.12.131 \
-  --archive ~/storage/downloads/watch3-sync-agent-context-evidence.zip
+  --output-dir ~/watch3-r840x-sync-agent-receiver-evidence \
+  --archive ~/storage/downloads/watch3-sync-agent-receiver-evidence.zip
 ```
 
-Attach `watch3-sync-agent-context-evidence.zip` from Downloads. The reader
+Attach `watch3-sync-agent-receiver-evidence.zip` from Downloads. The reader
 prints progress for each read, uses a new 0700 output folder, saves 0600 files,
 and creates a diagnostic ZIP even if a remote read fails. Previous library
 and failure evidence is preserved. Existing destinations are never overwritten.
 
-Limits: 16 XML files of at most 64 KiB each, 4 ELF files of at most 8 MiB each,
-4,096 nodes and 64 complete references per XML. DTDs/entities and unsupported
+Limits: 16 XML, 8 opaque configuration and 8 unit files of at most 64 KiB each;
+4 ELF files of at most 8 MiB each; 4,096 nodes and 64 complete references per
+XML. Directory reads retain 512 KiB / 8,192-entry limits and report at most
+32 matching filenames per scope, filtering other names. DTDs/entities and unsupported
 encodings are rejected. No watch-side helper, shell, event submission, service
 activation, SDB SEND, root-mode change, reboot or partition write is used.
-Physical validation of this context capture remains pending.
+The report schema is v2 and records discovery, copied counts by kind and whether
+candidate code was captured. `runtime_receiver_observed` remains false. The
+root initializer's capture succeeded; physical validation of the corrected,
+expanded capture remains pending. Earlier output folders and ZIPs are preserved.
 
 The analyzer's `--component sync-agent` profile can reproduce the original
-library's pinned generic ELF report locally. The 30-edge instruction review
+library's pinned generic ELF report locally. The 36-edge instruction review
 above is a separate actual-byte review, not a claim made by synthetic CI fixtures.
 Root, bootloader unlock, custom boot and tested stock restoration remain unproven.

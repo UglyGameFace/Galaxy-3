@@ -6,6 +6,11 @@ library capture has now succeeded. The original implementation has been
 examined; [its IPC path and next receiver-context capture](watch3-r840x-sync-agent-install-path.md)
 are documented separately. Do not repeat the completed library capture.
 
+The first context ZIP also succeeded in copying the 384-byte initializer.
+It selects `omadm` and declares extensionless event/notification files that
+the first context reader skipped. The linked instructions now use a new
+receiver ZIP/folder and capture those files plus observed daemon candidates.
+
 ## Successful native capture
 
 `watch3-sync-agent-native-evidence.zip`, SHA-256
