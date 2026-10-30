@@ -79,3 +79,67 @@ Reference: https://dbus.freedesktop.org/doc/dbus-daemon.1.html
 **NO-GO for firmware/bootloader/recovery writes** until exact R840X
 stock rescue, signature acceptance and fallback are independently verified.
 The collector does not bypass those requirements.
+
+
+## October 30 physical result: FOTA sender policy overlap
+
+The owner's original redacted `uglyos-r840x-dbus-policy-evidence-v1`
+report was returned by the physical SM-R840X without calling the consumer.
+The read-only fixed-path queries observed:
+
+| Source | Observed facts |
+| --- | --- |
+| `/usr/share/dbus-1/system.conf` | 4,353-byte valid XML; 3 includes, 2 includedirs, default deny for `send_type=method_call` |
+| `/etc/dbus-1/system.conf` | 833-byte valid XML, no selected FOTA method rules |
+| `/etc/dbus-1/system-local.conf` | Missing / denied / unreadable; no file bytes |
+| `/etc/dbus-1/system.d/fota-consumer.conf` | 811-byte valid XML; named send allows for users `root`, `fota` and `system`, plus a default deny targeting FOTA method calls and a **later default allow** with the `fota.consumer` destination and interface |
+| `/etc/dbus-1/system.d/com.samsung.updateservice.conf` | 1,546-byte valid XML, separate `com.samsung.updateservice` default method-call deny |
+
+The FOTA file reports source SHA-256
+`499ae912f2397720c952f27143d2112427509b95335c91d5b0ec7749e6999fec`;
+the original report's core system.conf SHA-256 is
+`df59ef6b3bd808b8b131fc5eef7c45dd98622d5a52473ab3dd1f4f542b0d7cb1`.
+
+The override policy directory reports 103 other/unreported *entries*,
+not 103 confirmed independent FOTA policy rules. The vendor policy
+directory reports two unrelated entries. This initial collector
+deliberately discards unrelated policy files and some original rule
+attributes, so it cannot prove merged effective authorization.
+
+**Important correction to a naive interpretation:** dbus-daemon applies
+later matching send rules after earlier rules within the applicable
+policy scope. The interface-scoped default allow in the original
+FOTA file is therefore a **possible exception** to the earlier
+default FOTA method-call deny when the message interface matches.
+The record does NOT establish actual access for the watch's
+`User::Shell`, since file inclusion order, other policy blocks,
+user/group/mandatory policy precedence, matching constraints omitted
+from the v1 projection, bus UID, SMACK/Cynara and consumer-side
+authorization remain unverified. Do not attempt `LaunchFota` to test it.
+
+Reference: https://manpages.debian.org/unstable/dbus/dbus-daemon.1.en.html
+
+### Reuse the existing captured JSON offline
+
+After the merge, no new watch contact is needed to review the evidence:
+
+```sh
+cd ~/Galaxy-3 && git switch main && git pull --ff-only
+python tools/watch3_r840x_dbus_policy_readonly.py \
+  --offline-report ~/watch3-r840x-dbus-policy-evidence.json \
+  --report ~/watch3-r840x-dbus-policy-static-review.json
+cat ~/watch3-r840x-dbus-policy-static-review.json
+```
+
+This validates the previous report's version, preserves its SHA-256,
+reports the extracted default send-rule sequence and explicitly
+listed FOTA user allowances. It **never** produces a permission
+verdict. The output is private mode 0600 and never overwrites
+an existing file. This reviewer does not open SDB, D-Bus or the watch.
+The prior `--watch-ip` capture workflow remains supported without change.
+
+**Next real evidence gate:** establish the actual bus daemon config
+load order, omitted relevant rules and applicable user/SMACK/Cynara
+restrictions by lawful read-only inspection. Exact-model stock
+recovery and signed-image acceptance are independent prerequisites
+for any firmware or partition write. Keep issue #47 open.
