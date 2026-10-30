@@ -111,6 +111,30 @@ def fake_elf(*, with_sections=True, corrupt=None, private_marker=b"",
 
 
 class R840XFotaOfflineElfTests(unittest.TestCase):
+    def test_pkey_and_certificate_checks_are_reported_separately_from_digest_primitives(self):
+        for name in ('EVP_PKEY_verify', 'X509_verify_cert'):
+            with self.subTest(name=name):
+                facts = module.parse_elf32(fake_elf(export=name, export_shindex=0))
+                self.assertEqual(facts['allowlisted_imports_by_category']['crypto_verification'], [name])
+                self.assertEqual(facts['allowlisted_function_exports'], [])
+        for name in ('EVP_DigestInit_ex', 'EVP_DigestUpdate', 'EVP_DigestFinal'):
+            with self.subTest(name=name):
+                facts = module.parse_elf32(fake_elf(export=name, export_shindex=0))
+                self.assertEqual(facts['allowlisted_imports_by_category']['crypto_verification'], [])
+                self.assertEqual(facts['allowlisted_imports_by_category']['other_crypto'], [name])
+
+    def test_original_daemon_and_device_plugin_profiles_reject_changed_bytes_and_custom_pins(self):
+        sample = fake_elf()
+        for component in ('oma-dm-agent', 'dm-device-plugin'):
+            with self.subTest(component=component):
+                digest, size = module.PINNED_PROFILES[component]
+                with self.assertRaisesRegex(module.OfflineELFError, 'SOURCE_FILE_SIZE_MISMATCH'):
+                    module.analyze(sample, component=component)
+                with self.assertRaisesRegex(module.OfflineELFError, 'SOURCE_SHA256_MISMATCH'):
+                    module.analyze(sample + b'\0' * (size - len(sample)), component=component)
+                with self.assertRaisesRegex(module.OfflineELFError, 'COMPONENT_PROFILE_MISMATCH'):
+                    module.analyze(sample, hashlib.sha256(sample).hexdigest(), len(sample), component=component)
+
     def test_digest_imports_are_distinct_from_signature_checks_and_md5_export_is_visible(self):
         facts = module.parse_elf32(fake_elf(export="gcry_md_open", export_shindex=0))
         self.assertEqual(facts["allowlisted_imports_by_category"]["other_crypto"], ["gcry_md_open"])

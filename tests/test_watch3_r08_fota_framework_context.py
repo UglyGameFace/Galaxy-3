@@ -266,5 +266,162 @@ class FrameworkContextTests(unittest.TestCase):
             self.assertEqual(connect.call_count, 1)
 
 
+class FirmwareFocusTests(unittest.TestCase):
+    """Declared synthetic pins test transport/selection, never owner firmware."""
+
+    PLUGIN = b'/usr/lib/sync-agent/dm-private/libplugin-mo-fumo.so'
+    CONFIG = (b'<INIT><PlugIn-Mgr><Domain name="MO">'
+              b'<!-- <Plug-In><Type>FUMO</Type><Path>/usr/lib/libignored.so</Path></Plug-In> -->'
+              b'<Plug-In><Type>FUMO</Type><Path>' + PLUGIN + b'</Path></Plug-In>'
+              b'<Plug-In><Type>DEVINFO</Type><Path>/usr/lib/libother.so</Path></Plug-In>'
+              b'</Domain></PlugIn-Mgr><private>unreported-value</private></INIT>')
+
+    def fixture(self, stack, root, sockets=(), config=None):
+        library = root / 'library.bin'
+        library.write_bytes(b'SYNTHETIC-LIBRARY')
+        daemon = b'SYNTHETIC-DAEMON\0' + context.PUBLIC_CERTIFICATE + b'\0'
+        config = self.CONFIG if config is None else config
+        receiver = root / 'receiver'
+        receiver.mkdir()
+        files = []
+        for remote, name, raw in (
+                ('/usr/bin/oma-dm-agent', 'context-07.bin', daemon),
+                (context.BACKEND_CONFIG, 'context-18.xml', config)):
+            (receiver / name).write_bytes(raw)
+            files.append(dict(remote_path=remote, local_file=name, bytes=len(raw),
+                              sha256=hashlib.sha256(raw).hexdigest(), status='COPIED'))
+        (receiver / context.REPORT_NAME).write_text(json.dumps({'files': files}))
+        for prefix, raw in [('LIBRARY', library.read_bytes()), ('OMADM_AGENT', daemon),
+                            ('BACKEND_CONFIG', config)]:
+            stack.enter_context(patch.object(context, prefix + '_BYTES', len(raw)))
+            stack.enter_context(patch.object(context, prefix + '_SHA256', hashlib.sha256(raw).hexdigest()))
+        connect = stack.enter_context(patch.object(context.socket, 'create_connection', side_effect=sockets))
+        discover = stack.enter_context(patch.object(context, 'discover_receiver_paths',
+                                                     side_effect=AssertionError('No discovery in focus mode')))
+        return library, receiver, connect, discover
+
+    def capture(self, root, library, receiver):
+        return context.capture_context('10.0.0.65', Path('/unused'), root / 'focus',
+                                       library_input=library, firmware_focus=True,
+                                       receiver_input_dir=receiver, archive=root / 'focus.zip')
+
+    def test_focus_native_recv_only_selects_fumo_and_public_certificate(self):
+        binary, certificate = fake_elf(), b'SYNTHETIC PUBLIC CERTIFICATE'
+        sockets = [successful(binary), successful(certificate)]
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            root = Path(tmp)
+            library, receiver, connect, discover = self.fixture(stack, root, sockets)
+            report = self.capture(root, library, receiver)
+            self.assertEqual(report['state'], 'FIRMWARE_FOCUS_CAPTURED')
+            self.assertEqual(report['capture_scope'], 'FIRMWARE_FOCUS')
+            self.assertTrue(report['firmware_focus_source']['sources_verified'])
+            self.assertEqual(report['copied_by_kind'], {'xml': 0, 'config': 1, 'unit': 0, 'elf': 1})
+            self.assertEqual(connect.call_count, 2)
+            discover.assert_not_called()
+            self.assertFalse(report['runtime_receiver_observed'])
+            self.assertFalse(report['watch_write_performed'])
+            self.assertNotIn('unreported-value', json.dumps(report))
+            with zipfile.ZipFile(root / 'focus.zip') as z:
+                self.assertEqual(z.namelist(), [context.REPORT_NAME, 'context-01.bin', 'context-02.conf'])
+                self.assertEqual(z.read('context-01.bin'), binary)
+                self.assertEqual(z.read('context-02.conf'), certificate)
+            for p in [root / 'focus', root / 'focus.zip', *(root / 'focus').iterdir()]:
+                self.assertEqual(p.stat().st_mode & 0o077, 0)
+        for sock, path in zip(sockets, (self.PLUGIN, context.PUBLIC_CERTIFICATE)):
+            frames = calls(bytes(sock.sent))
+            self.assertEqual([f[3] for f in frames if f[0] == b'OPEN'], [b'sync:\0'])
+            self.assertEqual([f[3] for f in frames if f[0] == b'WRTE'],
+                             [handoff.SYNC_HDR.pack(b'RECV', len(path)) + path])
+
+    def test_changed_source_bytes_are_rejected_before_connection(self):
+        for name in ('context-07.bin', 'context-18.xml'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+                root = Path(tmp)
+                library, receiver, connect, _ = self.fixture(stack, root)
+                path = receiver / name
+                raw = path.read_bytes()
+                path.write_bytes(bytes([raw[0] ^ 1]) + raw[1:])
+                report = self.capture(root, library, receiver)
+                self.assertEqual(report['state'], 'LOCAL_RECEIVER_SOURCE_PIN_MISMATCH')
+                connect.assert_not_called()
+                with zipfile.ZipFile(root / 'focus.zip') as z:
+                    self.assertEqual(z.namelist(), [context.REPORT_NAME])
+
+    def test_manifest_cannot_select_parent_path_duplicate_or_symlink(self):
+        for variant in ('parent', 'duplicate', 'symlink'):
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+                root = Path(tmp)
+                library, receiver, connect, _ = self.fixture(stack, root)
+                path = receiver / context.REPORT_NAME
+                report = json.loads(path.read_text())
+                if variant == 'parent':
+                    report['files'][0]['local_file'] = '../context-07.bin'
+                elif variant == 'duplicate':
+                    report['files'].append(report['files'][0])
+                else:
+                    source = receiver / 'context-07.bin'
+                    source.rename(root / 'daemon.bin')
+                    source.symlink_to(root / 'daemon.bin')
+                path.write_text(json.dumps(report))
+                result = self.capture(root, library, receiver)
+                self.assertEqual(result['state'], 'LOCAL_RECEIVER_SOURCE_RECORD_INVALID')
+                connect.assert_not_called()
+
+    def test_missing_or_malformed_report_has_specific_diagnostic(self):
+        for content, expected in ((None, 'LOCAL_RECEIVER_SOURCE_MISSING'),
+                                  ('{private-invalid', 'LOCAL_RECEIVER_REPORT_INVALID'),
+                                  ('x' * (128 * 1024 + 1), 'LOCAL_RECEIVER_REPORT_SIZE_INVALID')):
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+                root = Path(tmp)
+                library, receiver, connect, _ = self.fixture(stack, root)
+                path = receiver / context.REPORT_NAME
+                path.unlink() if content is None else path.write_text(content)
+                report = self.capture(root, library, receiver)
+                self.assertEqual(report['state'], expected)
+                self.assertNotIn('private-invalid', json.dumps(report))
+                connect.assert_not_called()
+
+    def test_fumo_selection_requires_one_valid_mo_declaration(self):
+        for config in (b'<INIT/>', self.CONFIG.replace(b'name="MO"', b'name="OTHER"'),
+                       self.CONFIG.replace(self.PLUGIN, b'/dev/mmcblk0'),
+                       self.CONFIG.replace(b'</Domain>', b'<Plug-In><Type>FUMO</Type>'
+                                           b'<Path>/usr/lib/libduplicate.so</Path></Plug-In></Domain>')):
+            with self.subTest(config_bytes=len(config)), tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+                root = Path(tmp)
+                library, receiver, connect, _ = self.fixture(stack, root, config=config)
+                report = self.capture(root, library, receiver)
+                self.assertEqual(report['state'], 'LOCAL_FUMO_DECLARATION_INVALID')
+                connect.assert_not_called()
+
+    def test_certificate_failure_preserves_plugin_and_diagnostic_zip(self):
+        binary = fake_elf()
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            root = Path(tmp)
+            library, receiver, connect, _ = self.fixture(stack, root, [successful(binary), denied()])
+            report = self.capture(root, library, receiver)
+            self.assertEqual(report['state'], 'CONTEXT_PARTIAL_OR_UNAVAILABLE')
+            self.assertEqual(report['files'][1]['status'], 'REMOTE_MISSING_DENIED_OR_UNREADABLE')
+            self.assertEqual(connect.call_count, 2)
+            with zipfile.ZipFile(root / 'focus.zip') as z:
+                self.assertEqual(z.read('context-01.bin'), binary)
+                self.assertEqual(len(z.namelist()), 2)
+
+    def test_cli_uses_fresh_focus_default_and_preserves_existing_capture(self):
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            root = Path(tmp)
+            library, receiver, connect, _ = self.fixture(stack, root, [successful(fake_elf()), successful(b'cert')])
+            stack.enter_context(patch.object(context.Path, 'home', return_value=root))
+            before = (receiver / context.REPORT_NAME).read_bytes()
+            args = ['--watch-ip', '10.0.0.65', '--firmware-focus', '--library-input', str(library),
+                    '--receiver-input-dir', str(receiver), '--archive', str(root / 'focus.zip')]
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(context.main(args), 0)
+            self.assertTrue((root / 'watch3-r840x-firmware-focus-evidence' / context.REPORT_NAME).is_file())
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(context.main(args), 1)
+            self.assertEqual(connect.call_count, 2)
+            self.assertEqual((receiver / context.REPORT_NAME).read_bytes(), before)
+
+
 if __name__ == '__main__':
     unittest.main()

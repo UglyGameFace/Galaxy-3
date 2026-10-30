@@ -20,6 +20,7 @@ import zipfile
 from analyze_watch3_r08_fota_elf import (
     OfflineELFError, parse_elf32, SYNC_AGENT_BYTES as LIBRARY_BYTES,
     SYNC_AGENT_SHA256 as LIBRARY_SHA256,
+    OMADM_AGENT_BYTES, OMADM_AGENT_SHA256,
 )
 from watch3_r08_android_sdb import PORT, SdbError, private_watch_ip
 from watch3_r08_fota_handoff_pull import HandoffError, _receive_bounded_file, private_write, inspect_unit
@@ -38,6 +39,11 @@ MAX_ELF_FILES = 4
 MAX_REFS = 64
 MAX_XML_NODES = 4096
 REPORT_NAME = "sync-agent-context-report.json"
+BACKEND_CONFIG = "/usr/share/oma-dm-cfg/fw-init/omadm_fw_config.xml"
+BACKEND_CONFIG_BYTES = 5296
+BACKEND_CONFIG_SHA256 = "f8ba15dde1bca536e16ee08149206d428b605e839667151a3d55056c49a7500e"
+# Literal referenced by the pinned daemon at 0x188e6 before verify_FOTA_image.
+PUBLIC_CERTIFICATE = b"/usr/share/oma-dm-cfg/certi/FOTA_ROOT.cer"
 XML_PATH = re.compile(r"/usr/share/oma-dm-cfg/[A-Za-z0-9_./+-]{1,180}[.]xml\Z")
 CONFIG_PATH = re.compile(r"/usr/share/oma-dm-cfg/[A-Za-z0-9_./+-]{1,180}\Z")
 UNIT_PATH = re.compile(r"/(?:usr/lib|etc)/systemd/system/([A-Za-z0-9_.@+-]{1,124})\Z")
@@ -128,6 +134,74 @@ def configuration_fields(raw: bytes) -> dict:
     return fields
 
 
+def firmware_focus_sources(folder: Path) -> tuple[list, dict]:
+    """Verify existing private capture before reading the FUMO declaration.
+
+    The old capture report selects flat local filenames only. Both source files
+    must match the reviewed originals, independently of the report's assertions.
+    No paths or arbitrary configuration values from it are copied to output.
+    """
+    folder = folder.expanduser()
+    try:
+        with (folder / REPORT_NAME).open("rb") as stream:
+            raw = stream.read(128 * 1024 + 1)
+        if len(raw) > 128 * 1024:
+            raise ContextError("LOCAL_RECEIVER_REPORT_SIZE_INVALID")
+        report = json.loads(raw)
+        if not isinstance(report, dict) or not isinstance(report.get("files"), list):
+            raise ContextError("LOCAL_RECEIVER_REPORT_INVALID")
+        if len(report["files"]) > 128 or any(not isinstance(r, dict) for r in report["files"]):
+            raise ContextError("LOCAL_RECEIVER_REPORT_INVALID")
+        sources = {}
+        for remote, size, digest, suffix in (
+                ("/usr/bin/oma-dm-agent", OMADM_AGENT_BYTES, OMADM_AGENT_SHA256, "bin"),
+                (BACKEND_CONFIG, BACKEND_CONFIG_BYTES, BACKEND_CONFIG_SHA256, "xml")):
+            matches = [r for r in report["files"] if r.get("remote_path") == remote]
+            if len(matches) != 1:
+                raise ContextError("LOCAL_RECEIVER_SOURCE_RECORD_INVALID")
+            record = matches[0]
+            name = record.get("local_file")
+            if (record.get("status") != "COPIED" or record.get("bytes") != size or
+                    record.get("sha256") != digest or not isinstance(name, str) or
+                    not re.fullmatch(r"context-[0-9]{2,3}[.]" + suffix, name)):
+                raise ContextError("LOCAL_RECEIVER_SOURCE_RECORD_INVALID")
+            path = folder / name
+            if path.is_symlink():
+                raise ContextError("LOCAL_RECEIVER_SOURCE_RECORD_INVALID")
+            with path.open("rb") as stream:
+                source = stream.read(size + 1)
+            if len(source) != size or hashlib.sha256(source).hexdigest() != digest:
+                raise ContextError("LOCAL_RECEIVER_SOURCE_PIN_MISMATCH")
+            sources[remote] = source
+    except FileNotFoundError:
+        raise ContextError("LOCAL_RECEIVER_SOURCE_MISSING") from None
+    except (ValueError, UnicodeDecodeError) as exc:
+        if isinstance(exc, ContextError):
+            raise
+        raise ContextError("LOCAL_RECEIVER_REPORT_INVALID") from None
+    except OSError:
+        raise ContextError("LOCAL_RECEIVER_SOURCE_IO_ERROR") from None
+
+    root = parse_xml(sources[BACKEND_CONFIG])
+    plugins = []
+    for manager in root.findall("./PlugIn-Mgr"):
+        for domain in manager.findall("./Domain"):
+            if domain.get("name") == "MO":
+                for plugin in domain.findall("./Plug-In"):
+                    if (plugin.findtext("Type") or "").strip() == "FUMO":
+                        plugins.append((plugin.findtext("Path") or "").strip())
+    if len(plugins) != 1 or classify_reference(plugins[0]) != "elf":
+        raise ContextError("LOCAL_FUMO_DECLARATION_INVALID")
+    if PUBLIC_CERTIFICATE + b"\0" not in sources["/usr/bin/oma-dm-agent"]:
+        raise ContextError("LOCAL_CERTIFICATE_REFERENCE_MISSING")
+    return [("elf", plugins[0].encode("ascii")), ("config", PUBLIC_CERTIFICATE)], {
+        "daemon_sha256": OMADM_AGENT_SHA256,
+        "backend_config_sha256": BACKEND_CONFIG_SHA256,
+        "sources_verified": True,
+        "plugin_selection": "MO_FUMO_DECLARATION",
+    }
+
+
 def discover_receiver_paths(ip: str, key_path: Path, timeout: int, discovery: list) -> list:
     """Find actual related entries; no guessed daemon or initializer filename."""
     paths = []
@@ -157,7 +231,8 @@ def discover_receiver_paths(ip: str, key_path: Path, timeout: int, discovery: li
 
 
 def capture_context(ip: str, key_path: Path, folder: Path, *, library_input: Path,
-                    archive: Path | None = None, timeout: int = 12, progress=None) -> dict:
+                    archive: Path | None = None, timeout: int = 12, progress=None,
+                    firmware_focus: bool = False, receiver_input_dir: Path | None = None) -> dict:
     ip = private_watch_ip(ip)
     folder = folder.expanduser()
     archive = archive.expanduser() if archive is not None else None
@@ -172,7 +247,9 @@ def capture_context(ip: str, key_path: Path, folder: Path, *, library_input: Pat
     report = {
         "schema": "uglyos-r840x-sync-agent-context-v2",
         "state": "NOT_CAPTURED", "source_library_verified": False,
-        "source_library_sha256": None, "root_config": ROOT_CONFIG.decode("ascii"),
+        "capture_scope": "FIRMWARE_FOCUS" if firmware_focus else "RECEIVER_CONTEXT",
+        "source_library_sha256": None,
+        "root_config": BACKEND_CONFIG if firmware_focus else ROOT_CONFIG.decode("ascii"),
         "files": [], "discovery": [], "limits_reached": False,
         "copied_by_kind": {}, "receiver_candidate_code_copied": False,
         "runtime_receiver_observed": False, "fota_method_called": False,
@@ -188,10 +265,15 @@ def capture_context(ip: str, key_path: Path, folder: Path, *, library_input: Pat
                 hashlib.sha256(original).hexdigest() != LIBRARY_SHA256):
             raise ContextError("LOCAL_ORIGINAL_LIBRARY_PIN_MISMATCH")
         report.update(source_library_verified=True, source_library_sha256=LIBRARY_SHA256)
-        if progress is not None:
-            progress("discovery", 0)
-        queue = [("xml", ROOT_CONFIG),
-                 *discover_receiver_paths(ip, key_path, timeout, report["discovery"])]
+        if firmware_focus:
+            if receiver_input_dir is None:
+                receiver_input_dir = Path.home() / "watch3-r840x-sync-agent-receiver-evidence"
+            queue, report["firmware_focus_source"] = firmware_focus_sources(receiver_input_dir)
+        else:
+            if progress is not None:
+                progress("discovery", 0)
+            queue = [("xml", ROOT_CONFIG),
+                     *discover_receiver_paths(ip, key_path, timeout, report["discovery"])]
         report["limits_reached"] = any(r.get("matching_names_truncated", False)
                                        for r in report["discovery"])
         seen = set()
@@ -251,7 +333,8 @@ def capture_context(ip: str, key_path: Path, folder: Path, *, library_input: Pat
         report["copied_by_kind"] = {kind: sum(r["kind"] == kind and r["status"] == "COPIED"
                                              for r in report["files"]) for kind in limits}
         report["receiver_candidate_code_copied"] = bool(report["copied_by_kind"]["elf"])
-        report["state"] = ("CONTEXT_CAPTURED" if not failures and not report["limits_reached"]
+        success = "FIRMWARE_FOCUS_CAPTURED" if firmware_focus else "CONTEXT_CAPTURED"
+        report["state"] = (success if not failures and not report["limits_reached"]
                            else "CONTEXT_PARTIAL_OR_UNAVAILABLE")
     except FileNotFoundError:
         report["state"] = "LOCAL_ORIGINAL_LIBRARY_MISSING"
@@ -282,13 +365,20 @@ def main(argv=None) -> int:
                         default=Path.home() / ".config/galaxy3/watch3-sdbkey")
     parser.add_argument("--library-input", type=Path, default=Path.home() /
                         "watch3-r840x-sync-agent-native-evidence/libsync-agent.so.0.bin")
-    parser.add_argument("--output-dir", type=Path, default=Path.home() /
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--firmware-focus", action="store_true",
+                        help="Read only the pinned configuration's FUMO plugin and public certificate")
+    parser.add_argument("--receiver-input-dir", type=Path, default=Path.home() /
                         "watch3-r840x-sync-agent-receiver-evidence")
     parser.add_argument("--archive", type=Path)
     args = parser.parse_args(argv)
+    if args.output_dir is None:
+        args.output_dir = Path.home() / ("watch3-r840x-firmware-focus-evidence" if args.firmware_focus
+                                        else "watch3-r840x-sync-agent-receiver-evidence")
     try:
         report = capture_context(args.watch_ip, args.key_path, args.output_dir,
                                  library_input=args.library_input, archive=args.archive,
+                                 firmware_focus=args.firmware_focus, receiver_input_dir=args.receiver_input_dir,
                                  progress=lambda kind, n: print(
                                      ("Finding related daemon/configuration entries" if kind == "discovery" else
                                       f"Reading {kind} file {n}"),
@@ -301,7 +391,7 @@ def main(argv=None) -> int:
     print("CONTEXT_REPORT: " + str(args.output_dir.expanduser() / REPORT_NAME))
     if args.archive is not None:
         print("CONTEXT_ARCHIVE: " + str(args.archive.expanduser()))
-    return 0 if report["state"] == "CONTEXT_CAPTURED" else 1
+    return 0 if report["state"] in ("CONTEXT_CAPTURED", "FIRMWARE_FOCUS_CAPTURED") else 1
 
 
 if __name__ == "__main__":

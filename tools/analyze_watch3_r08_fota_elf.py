@@ -25,6 +25,16 @@ CONSUMER_SHA256 = "19ad8468c5e73821359b140cd99f8c3bc072b2d73ed7766b082b88f26c676
 CONSUMER_BYTES = 89980
 SYNC_AGENT_SHA256 = "3fbebb3d55a7e6a132f3516af88280e63278a4b3bf51cb61cca194614b605a97"
 SYNC_AGENT_BYTES = 647076
+OMADM_AGENT_SHA256 = "32057c3ba2537b2632a5d73dc1397b919ad3bf9c58c446b11e48e3837ab99a05"
+OMADM_AGENT_BYTES = 525584
+DM_DEVICE_PLUGIN_SHA256 = "98c21b99b0c443e75f42e00cc990f6e4374fa8c398f8d3e8c82a4585d9f2f357"
+DM_DEVICE_PLUGIN_BYTES = 36184
+PINNED_PROFILES = {
+    "fota-consumer": (CONSUMER_SHA256, CONSUMER_BYTES),
+    "sync-agent": (SYNC_AGENT_SHA256, SYNC_AGENT_BYTES),
+    "oma-dm-agent": (OMADM_AGENT_SHA256, OMADM_AGENT_BYTES),
+    "dm-device-plugin": (DM_DEVICE_PLUGIN_SHA256, DM_DEVICE_PLUGIN_BYTES),
+}
 MAX_BYTES = 8 * 1024 * 1024
 ELF_HDR = struct.Struct("<16sHHIIIIIHHHHHH")
 PROGRAM_HDR = struct.Struct("<IIIIIIII")
@@ -57,15 +67,18 @@ IMPORT_GROUPS = {
     "crypto_verification": frozenset(("SHA256", "SHA256_Init", "SHA256_Update",
                                       "SHA256_Final", "EVP_DigestVerifyFinal",
                                       "RSA_verify", "X509_verify",
+                                      "EVP_PKEY_verify", "X509_verify_cert",
                                       "EVP_VerifyFinal")),
     "dbus_dispatch": frozenset(("g_bus_own_name", "g_dbus_connection_register_object",
                                  "g_variant_get", "g_dbus_method_invocation_return_value")),
     "update_agent": frozenset(("sync_agent_init", "sync_agent_is_existing_fs",
                                 "sync_agent_dm_fota_install", "sync_agent_dm_fota_force_install",
                                 "sync_agent_dm_fota_software_update", "device_power_reboot",
+                                "sync_agent_set_event_callback", "sync_agent_execute_dev_function",
                                 "vconf_notify_key_changed", "sync_agent_file_md5_validation")),
     # Digest/HMAC primitives are not, by themselves, signature verification.
     "other_crypto": frozenset(("DES_set_key", "DES_ecb_encrypt", "gcry_md_open",
+                               "EVP_DigestInit_ex", "EVP_DigestUpdate", "EVP_DigestFinal",
                                "gcry_md_write", "gcry_md_setkey", "gcry_md_close",
                                "gcry_md_get_algo_dlen", "gcry_md_copy", "gcry_md_read")),
 }
@@ -456,18 +469,14 @@ def analyze(data: bytes, expected_sha256: str | None = None,
             expected_bytes: int | None = None, *, component=None) -> dict[str, object]:
     if not isinstance(data, bytes):
         raise OfflineELFError("BINARY_INPUT_REQUIRED")
-    if component not in (None, "fota-service", "fota-consumer", "sync-agent"):
+    if component not in (None, "fota-service", *PINNED_PROFILES):
         raise OfflineELFError("UNKNOWN_FOTA_COMPONENT")
-    if component == "fota-consumer":
-        if (expected_sha256 not in (None, CONSUMER_SHA256) or
-                expected_bytes not in (None, CONSUMER_BYTES)):
+    if component in PINNED_PROFILES:
+        pinned_sha256, pinned_bytes = PINNED_PROFILES[component]
+        if (expected_sha256 not in (None, pinned_sha256) or
+                expected_bytes not in (None, pinned_bytes)):
             raise OfflineELFError("COMPONENT_PROFILE_MISMATCH")
-        expected_sha256, expected_bytes = CONSUMER_SHA256, CONSUMER_BYTES
-    elif component == "sync-agent":
-        if (expected_sha256 not in (None, SYNC_AGENT_SHA256) or
-                expected_bytes not in (None, SYNC_AGENT_BYTES)):
-            raise OfflineELFError("COMPONENT_PROFILE_MISMATCH")
-        expected_sha256, expected_bytes = SYNC_AGENT_SHA256, SYNC_AGENT_BYTES
+        expected_sha256, expected_bytes = pinned_sha256, pinned_bytes
     digest = hashlib.sha256(data).hexdigest()
     if expected_bytes is not None and len(data) != expected_bytes:
         raise OfflineELFError("SOURCE_FILE_SIZE_MISMATCH")
@@ -496,26 +505,28 @@ def analyze(data: bytes, expected_sha256: str | None = None,
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--component", choices=("fota-service", "fota-consumer", "sync-agent"), default="fota-service")
+    parser.add_argument("--component", choices=("fota-service", *PINNED_PROFILES), default="fota-service")
     parser.add_argument("--input", type=Path,
                         help="Local ELF extracted from R840X; exact physical hash required")
     parser.add_argument("--report", type=Path,
                         help="New local privacy-filtered JSON file; never overwrite")
     args = parser.parse_args(argv)
-    consumer = args.component == "fota-consumer"
-    library = args.component == "sync-agent"
+    default_inputs = {
+        "fota-service": "watch3-r840x-fota-service-readonly.bin",
+        "fota-consumer": "watch3-r840x-fota-unit-evidence/fota-configured-executable.bin",
+        "sync-agent": "watch3-r840x-sync-agent-native-evidence/libsync-agent.so.0.bin",
+        "oma-dm-agent": "watch3-r840x-sync-agent-receiver-evidence/context-03.bin",
+        "dm-device-plugin": "watch3-r840x-sync-agent-receiver-evidence/context-14.bin",
+    }
     if args.input is None:
-        args.input = (Path.home() / "watch3-r840x-sync-agent-native-evidence/libsync-agent.so.0.bin"
-                      if library else Path.home() / "watch3-r840x-fota-unit-evidence/fota-configured-executable.bin"
-                      if consumer else Path.home() / "watch3-r840x-fota-service-readonly.bin")
+        args.input = Path.home() / default_inputs[args.component]
     if args.report is None:
-        args.report = Path.home() / ("watch3-r840x-sync-agent-static-analysis.json" if library else
-                                   "watch3-r840x-fota-consumer-static-analysis.json"
-                                   if consumer else "watch3-r840x-fota-static-analysis.json")
+        label = "fota" if args.component == "fota-service" else args.component
+        args.report = Path.home() / f"watch3-r840x-{label}-static-analysis.json"
     try:
         if args.input.stat().st_size > MAX_BYTES:
             raise OfflineELFError("SOURCE_EXCEEDS_EIGHT_MIB")
-        result = (analyze(args.input.read_bytes(), component=args.component) if consumer or library else
+        result = (analyze(args.input.read_bytes(), component=args.component) if args.component in PINNED_PROFILES else
                   analyze(args.input.read_bytes(), EXPECTED_SHA256, EXPECTED_BYTES))
         if not args.report.parent.is_dir():
             raise OfflineELFError("REPORT_DIRECTORY_MISSING")
