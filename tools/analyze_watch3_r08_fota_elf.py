@@ -23,6 +23,8 @@ EXPECTED_SHA256 = "008c67e782eb3d97b0ddb7abc7606b86dc493576c24de476a2110d6e5a681
 EXPECTED_BYTES = 87036
 CONSUMER_SHA256 = "19ad8468c5e73821359b140cd99f8c3bc072b2d73ed7766b082b88f26c676a1a"
 CONSUMER_BYTES = 89980
+SYNC_AGENT_SHA256 = "3fbebb3d55a7e6a132f3516af88280e63278a4b3bf51cb61cca194614b605a97"
+SYNC_AGENT_BYTES = 647076
 MAX_BYTES = 8 * 1024 * 1024
 ELF_HDR = struct.Struct("<16sHHIIIIIHHHHHH")
 PROGRAM_HDR = struct.Struct("<IIIIIIII")
@@ -61,14 +63,17 @@ IMPORT_GROUPS = {
     "update_agent": frozenset(("sync_agent_init", "sync_agent_is_existing_fs",
                                 "sync_agent_dm_fota_install", "sync_agent_dm_fota_force_install",
                                 "sync_agent_dm_fota_software_update", "device_power_reboot",
-                                "vconf_notify_key_changed")),
-    "other_crypto": frozenset(("DES_set_key", "DES_ecb_encrypt")),
+                                "vconf_notify_key_changed", "sync_agent_file_md5_validation")),
+    # Digest/HMAC primitives are not, by themselves, signature verification.
+    "other_crypto": frozenset(("DES_set_key", "DES_ecb_encrypt", "gcry_md_open",
+                               "gcry_md_write", "gcry_md_setkey", "gcry_md_close",
+                               "gcry_md_get_algo_dlen", "gcry_md_copy", "gcry_md_read")),
 }
 ALLOWED_IMPORTS = frozenset().union(*IMPORT_GROUPS.values())
 # Weak strings hints are NOT call sites, privileges or proof of vulnerability.
 MARKERS = (
     "fota", "firmware", "update", "signature", "verify", "rollback",
-    "sha256", "rsa", "openssl", "libarchive", "zip", "tar", "sapd",
+    "sha256", "md5", "rsa", "openssl", "libarchive", "zip", "tar", "sapd",
     "samsung", "dbus", "omadm", "delta", "reboot", "recovery",
     "http", "https", "ssl", "chmod", "rename",
 )
@@ -451,13 +456,18 @@ def analyze(data: bytes, expected_sha256: str | None = None,
             expected_bytes: int | None = None, *, component=None) -> dict[str, object]:
     if not isinstance(data, bytes):
         raise OfflineELFError("BINARY_INPUT_REQUIRED")
-    if component not in (None, "fota-service", "fota-consumer"):
+    if component not in (None, "fota-service", "fota-consumer", "sync-agent"):
         raise OfflineELFError("UNKNOWN_FOTA_COMPONENT")
     if component == "fota-consumer":
         if (expected_sha256 not in (None, CONSUMER_SHA256) or
                 expected_bytes not in (None, CONSUMER_BYTES)):
             raise OfflineELFError("COMPONENT_PROFILE_MISMATCH")
         expected_sha256, expected_bytes = CONSUMER_SHA256, CONSUMER_BYTES
+    elif component == "sync-agent":
+        if (expected_sha256 not in (None, SYNC_AGENT_SHA256) or
+                expected_bytes not in (None, SYNC_AGENT_BYTES)):
+            raise OfflineELFError("COMPONENT_PROFILE_MISMATCH")
+        expected_sha256, expected_bytes = SYNC_AGENT_SHA256, SYNC_AGENT_BYTES
     digest = hashlib.sha256(data).hexdigest()
     if expected_bytes is not None and len(data) != expected_bytes:
         raise OfflineELFError("SOURCE_FILE_SIZE_MISMATCH")
@@ -486,23 +496,26 @@ def analyze(data: bytes, expected_sha256: str | None = None,
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--component", choices=("fota-service", "fota-consumer"), default="fota-service")
+    parser.add_argument("--component", choices=("fota-service", "fota-consumer", "sync-agent"), default="fota-service")
     parser.add_argument("--input", type=Path,
                         help="Local ELF extracted from R840X; exact physical hash required")
     parser.add_argument("--report", type=Path,
                         help="New local privacy-filtered JSON file; never overwrite")
     args = parser.parse_args(argv)
     consumer = args.component == "fota-consumer"
+    library = args.component == "sync-agent"
     if args.input is None:
-        args.input = (Path.home() / "watch3-r840x-fota-unit-evidence/fota-configured-executable.bin"
+        args.input = (Path.home() / "watch3-r840x-sync-agent-native-evidence/libsync-agent.so.0.bin"
+                      if library else Path.home() / "watch3-r840x-fota-unit-evidence/fota-configured-executable.bin"
                       if consumer else Path.home() / "watch3-r840x-fota-service-readonly.bin")
     if args.report is None:
-        args.report = Path.home() / ("watch3-r840x-fota-consumer-static-analysis.json"
+        args.report = Path.home() / ("watch3-r840x-sync-agent-static-analysis.json" if library else
+                                   "watch3-r840x-fota-consumer-static-analysis.json"
                                    if consumer else "watch3-r840x-fota-static-analysis.json")
     try:
         if args.input.stat().st_size > MAX_BYTES:
             raise OfflineELFError("SOURCE_EXCEEDS_EIGHT_MIB")
-        result = (analyze(args.input.read_bytes(), component="fota-consumer") if consumer else
+        result = (analyze(args.input.read_bytes(), component=args.component) if consumer or library else
                   analyze(args.input.read_bytes(), EXPECTED_SHA256, EXPECTED_BYTES))
         if not args.report.parent.is_dir():
             raise OfflineELFError("REPORT_DIRECTORY_MISSING")

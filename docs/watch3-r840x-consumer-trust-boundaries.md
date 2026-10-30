@@ -139,11 +139,16 @@ argument 1 into `r0` and calls imported `sync_agent_dm_fota_install` at
 `0x7e32` through PLT `0x3a44`, GOT `0x252a8`.
 
 The original ELF's dynamic dependency list includes `libsync-agent.so.0`.
-The implementation of the imported call is not in the captured consumer;
-its runtime provider, installed file path and validation behavior remain
-unobserved. Thus a visible caller without a signature check cannot establish
-that the full installation pipeline omits one. This identifies a concrete
-missing implementation rather than another guessed script name.
+The implementation is not in the captured consumer. The owner subsequently
+copied `/usr/lib/libsync-agent.so.0`: 647,076 bytes, SHA-256
+`3fbebb3d55a7e6a132f3516af88280e63278a4b3bf51cb61cca194614b605a97`.
+Its exported install function is an IPC client: it creates event 4 and sends
+it over a configuration-selected Unix socket. The original library also
+contains a separate MD5 file-comparison routine and generic event listener.
+[Original library review and receiver-context acquisition](watch3-r840x-sync-agent-install-path.md)
+records the verified edges, exact configuration literal and remaining boundary.
+An observed installed file still does not establish the active loaded provider,
+backend callback or full-pipeline signature behavior.
 
 The [existing artifact reader](watch3-r08-fota-artifact-readonly.md) now has
 an explicit `sync-agent` mode that resolves this SONAME from the watch's
@@ -151,7 +156,8 @@ system-library directory metadata, copies and identifies one library, and
 packages the result in a single Termux run. The original cache-command
 variant ran on the watch and reported `DEPENDENCY_CACHE_TOOL_UNAVAILABLE`;
 its ZIP contained only a failure report. The corrected native LIST/RECV
-variant has not yet been run on the watch.
+variant succeeded on the watch and supplied the original library above.
+Do not repeat that completed capture.
 
 Independently matched six selected immediate calls with the existing
 standard-library decoder and Capstone, three actual PLT/GOT relocations,

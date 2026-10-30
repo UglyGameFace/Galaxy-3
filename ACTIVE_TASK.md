@@ -5,40 +5,46 @@ on the owner's SM-R840X / NOBLESSE-LARGE-BT R08, R840XXXU1AUA2, CSC PAP candidat
 Root, bootloader unlock, custom boot and tested restoration remain unverified.
 Owner authorization is established.
 
-## Current physical result and root cause
+## Current physical result and original-code review
 
-Base main `719625f` includes PR #123. No overlapping open PR was present.
-Owner uploaded `watch3-sync-agent-evidence.zip`. Verified ZIP SHA-256:
-`b13d005fb5432e3cbe0c4ca41de682c9901ac276fa9eecc504b6f51f4a8161f4`.
-It contains only `sync-agent-report.json` (782 bytes), SHA-256:
-`5885d6a9a42f9e0e7bd9db91f37f68d04c624a7d93edcb6b38118f2a9042584d`.
+Base main `25dc9c0` includes PR #124. The corrected native library capture
+succeeded. No overlapping open PR was present. Uploaded
+`watch3-sync-agent-native-evidence.zip` SHA-256:
+`331b97505a06dc0a3c8dd45cf08b3e42d269151f9e1dd1f756818eb5c8ba374e`.
+It contains the 4,211-byte report and 647,076-byte ARM ELF32 library copied
+from `/usr/lib/libsync-agent.so.0`, SHA-256:
+`3fbebb3d55a7e6a132f3516af88280e63278a4b3bf51cb61cca194614b605a97`.
+GNU build ID: `07783d299457ad74f7c232f1941446060aa6a1a9`.
 
-Actual result: DEPENDENCY_CACHE_TOOL_UNAVAILABLE, stage linker_cache.
-The original consumer was verified, and the watch replied; no path or
-library bytes were acquired. This is a failed shell-helper dependency
-in the lookup method, not evidence that the library is absent or unreadable.
-Do not repeat the original cache-command capture.
+Actual-byte review matched 30 immediate calls with independent decoders,
+20 PLT/GOT relocations, 10 control/argument instructions and 2 literals.
+The public Install wrapper creates event 4 and sends a configuration-selected
+Unix socket request. The library's generic listener dispatches a registered
+callback; the actual receiver/callback has not yet been identified.
+A separate MD5 file-comparison routine exists. Do not conflate it with the
+Install wrapper or assert that the backend omits signature verification.
 
 ## Current implementation and next phone action
 
-Source branch: `issue-47-native-sync-agent-discovery`.
-The existing artifact reader's sync-agent mode now uses existing native
-SDB LIST/RECV exclusively. The obsolete cache query/probe/parser and
-shell fixtures are removed after checking their references.
+Source branch: `issue-47-sync-agent-receiver-context`.
+`watch3_r08_fota_framework_context.py` verifies the existing original library
+locally, reads its exact initialization XML, follows declared absolute XML
+references under the OMA config root, and captures any explicitly declared
+system ELF candidates. It uses the existing native bounded RECV transport,
+prints progress and preserves private originals/report/diagnostic ZIP.
+16 XML / 4 ELF limits, no entities/relative-path guesses/command execution.
 
-- Verify the already captured original consumer locally.
-- List /usr/lib, then /lib only if needed; report the exact evidenced
-  SONAME/version family and copy only an actually observed candidate.
-- Reuse the existing bounded RECV reader; check ARM32/ET_DYN/DT_SONAME and
-  a defined public install function in executable file-backed memory.
-- Recheck selected directory metadata and preserve binary/report/ZIP.
-  Directory identity is not an observation of an active runtime provider.
-- Use a new output folder and ZIP so the owner's first failure evidence
-  is preserved. New report schema v2 records native directory resolution.
+The exact root XML is referenced by original code at `0x483ac` and passed
+to initialization at `0x483ae`; its files are not yet acquired. This bundles
+the declared context into one owner run instead of requesting each path
+separately. The existing five-file handoff mode and 8 KiB limit are preserved.
+The generic analyzer also gains the pinned sync-agent profile and explicitly
+reports libgcrypt digest/HMAC imports apart from signature checks.
 
-[Current one-run instructions](docs/watch3-r08-fota-artifact-readonly.md).
-Physical native acquisition remains pending the owner's phone run. This
-workspace has no authenticated direct connection to the watch.
+[Original review and next one-run command](docs/watch3-r840x-sync-agent-install-path.md).
+Physical context acquisition remains pending the owner's phone run. This
+workspace has no authenticated direct connection to the watch. Do not repeat
+the completed library capture or the earlier unavailable cache-helper query.
 
 ## Preserved evidence
 
@@ -54,8 +60,8 @@ workspace has no authenticated direct connection to the watch.
   states (50/60), vconf notification and consumer update callback.
 - The consumer executes archive-supplied pre_update_client_2 in reviewed
   wrappers; earlier/library/later validation and actual privileges are open.
-- Separate Install reaches imported sync_agent_dm_fota_install; the original
-  ELF's libsync-agent.so.0 dependency is the current missing implementation.
+- Separate Install reaches sync_agent_dm_fota_install, now acquired and traced
+  to an IPC request. The receiving callback/configuration is the missing boundary.
 - Failed preparation/recovery-script sync reads remain ambiguous. The TV
   tar route lacks sdbd-tarlauncher; R500/retail firmware observations do not
   establish exact-R840X compatibility.
@@ -66,18 +72,20 @@ existing evidence remains valid.
 
 ## Validation and remaining work
 
-Local focused suite: 195 passing cases, one compiler-only fixture skipped
-because clang/lld are absent locally. CI requires all 196 cases including
+Local focused suite: 205 passing cases, one compiler-only fixture skipped
+because clang/lld are absent locally. CI requires all 206 cases including
 the cross-compiled ARM/readelf fixture, plus two real private D-Bus tests
 and one real systemd test on Ubuntu 22.04 and 24.04 without skips.
-Fake-SDB assertions verify only sync LIST/RECV, no watch shell/helper requests.
+Fake-SDB context tests verify complete chained RECV, source pinning, diagnostic
+ZIPs, read/encoding/ELF errors, private values, cycles and file/byte limits.
+Those fixtures do not establish a physical receiver or a working unlock.
 Samsung originals are not committed, executed or uploaded to CI.
 
-The missing original library must be acquired and examined before its
-installation/validation behavior can be determined. Exact R840X S-BOOT,
+The original library has been acquired and examined. Its receiving updater
+and full validation behavior remain open. Exact R840X S-BOOT,
 complete signed rescue firmware or verified compatible replacement,
 unsigned-kernel acceptance and tested return to stock remain missing.
-Issue #47 stays open. This collector changes no firmware or service state.
+Issue #47 stays open. This context reader changes no firmware or service state.
 
 Android/Termux only, free only, no PC or hardware purchases.
 Earlier merged remote branches remain retained: direct Git deletion has no
