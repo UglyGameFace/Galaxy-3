@@ -651,5 +651,137 @@ class OriginalWatchPolicyRuleClassificationTests(unittest.TestCase):
             self.assertFalse(result["watch_contacted"])
             self.assertEqual(out.stat().st_mode & 0o077,0)
 
+
+RUNTIME_UNIT_SAMPLE = """Id=dbus.service
+LoadState=loaded
+ActiveState=active
+SubState=running
+MainPID=247
+ExecStart={ path=/usr/bin/dbus-daemon ; argv[]=/usr/bin/dbus-daemon --system --nofork --config-file=/usr/share/dbus-1/system.conf ; ignore_errors=no ; start_time=[unknown] ; stop_time=[unknown] ; pid=247 ; code=(null) ; status=0/0 }
+"""
+RUNTIME_PS_SAMPLE = """PID USER VSZ STAT COMMAND
+1 root 12345 S /usr/lib/systemd/systemd
+247 messagebus 3456 S /usr/bin/dbus-daemon --system --nofork --config-file=/usr/share/dbus-1/system.conf
+298 sh 500 S /bin/sh -c dbus-daemon --system --test
+309 fota 500 S /usr/bin/fota-consumer
+"""
+
+
+class RunningBusProvenanceTests(unittest.TestCase):
+    def test_runtime_operations_are_only_fixed_literals(self):
+        from watch3_r08_android_sdb import ALLOWED_PROBES, DBUS_RUNTIME_PROBES
+        self.assertEqual(policy.RUNTIME_ALLOWED_OPS,
+                         frozenset(("dbus_runtime_unit","service_process_snapshot")))
+        self.assertEqual(set(DBUS_RUNTIME_PROBES),{"dbus_runtime_unit"})
+        self.assertIn("dbus.service",ALLOWED_PROBES["dbus_runtime_unit"])
+        self.assertEqual(ALLOWED_PROBES["service_process_snapshot"],"ps")
+        self.assertNotIn("restart",ALLOWED_PROBES["dbus_runtime_unit"])
+        self.assertNotIn("LaunchFota",ALLOWED_PROBES["dbus_runtime_unit"])
+
+    def test_read_only_unit_parse_redacts_command_and_pid(self):
+        result=policy.parse_runtime_unit(RUNTIME_UNIT_SAMPLE)
+        self.assertTrue(result["unit_active"])
+        self.assertTrue(result["main_pid_present"])
+        self.assertEqual(result["configured_daemon_family"],"DBUS_DAEMON")
+        self.assertEqual(result["configured_explicit_config_class"],
+                         "CAPTURED_CORE_SYSTEM_CONF")
+        self.assertFalse(result["unit_is_runtime_process_attestation"])
+        self.assertNotIn("247",json.dumps(result))
+        self.assertNotIn("argv",json.dumps(result))
+
+    def test_unit_inactive_or_other_config_is_not_runtime_proof(self):
+        raw=RUNTIME_UNIT_SAMPLE.replace("ActiveState=active","ActiveState=inactive").replace(
+            "MainPID=247","MainPID=0").replace(
+            "/usr/share/dbus-1/system.conf","/custom/sensitive/location.conf")
+        result=policy.parse_runtime_unit(raw)
+        self.assertFalse(result["unit_active"])
+        self.assertFalse(result["main_pid_present"])
+        self.assertEqual(result["configured_explicit_config_class"],
+                         "OTHER_EXPLICIT_CONFIG_REDACTED")
+        self.assertNotIn("sensitive",json.dumps(result))
+
+    def test_unit_alias_and_malformed_duplicate_property_rejected(self):
+        raw=RUNTIME_UNIT_SAMPLE.replace("Id=dbus.service","Id=dbus-broker.service")
+        self.assertEqual(policy.parse_runtime_unit(raw)["unit_id_class"],
+                         "dbus-broker.service")
+        with self.assertRaisesRegex(policy.PolicyError,"RUNTIME_UNIT_UNEXPECTED_ID"):
+            policy.parse_runtime_unit(RUNTIME_UNIT_SAMPLE.replace(
+                "Id=dbus.service","Id=secret.service"))
+        with self.assertRaisesRegex(policy.PolicyError,"RUNTIME_UNIT_OUTPUT_INVALID"):
+            policy.parse_runtime_unit(RUNTIME_UNIT_SAMPLE+"MainPID=999\n")
+
+    def test_ps_uses_only_real_argv0_not_sh_arguments(self):
+        result=policy.parse_runtime_ps(RUNTIME_PS_SAMPLE)
+        self.assertEqual(result["status"],"PS_SNAPSHOT_PARSED")
+        self.assertEqual(len(result["candidate_processes"]),1)
+        self.assertEqual(result["candidate_processes"][0]["daemon_family"],"DBUS_DAEMON")
+        self.assertTrue(result["candidate_processes"][0]["system_flag_observed"])
+        self.assertEqual(result["candidate_processes"][0]["explicit_config_class"],
+                         "CAPTURED_CORE_SYSTEM_CONF")
+        self.assertNotIn("247",json.dumps(result))
+        self.assertFalse(result["candidate_processes"][0]["process_is_system_bus_attested"])
+
+    def test_unsupported_ps_layout_cannot_claim_active_bus(self):
+        result=policy.parse_runtime_ps("USER PID PPID VSZ COMMAND\nroot 247 1 100 dbus-daemon\n")
+        self.assertEqual(result["status"],"PS_LAYOUT_UNSUPPORTED")
+        self.assertEqual(result["candidate_processes"],[])
+
+    def test_processes_bounded_and_unrelated_args_not_saved(self):
+        lines=["PID USER VSZ STAT COMMAND"]
+        for i in range(10):
+            lines.append(f"{200+i} root 1024 S dbus-daemon --system --private-flag=SECRET{i}")
+        result=policy.parse_runtime_ps("\n".join(lines)+"\n")
+        self.assertEqual(len(result["candidate_processes"]),4)
+        self.assertTrue(result["truncated"])
+        self.assertNotIn("SECRET",json.dumps(result))
+
+    def test_unknown_or_missing_bus_never_claims_policy(self):
+        with patch.object(policy,"runtime_bus_query",side_effect=policy.PolicyError(
+                "RUNTIME_SDB_SHELL_UNAVAILABLE")):
+            result=policy.collect_runtime_bus("10.115.12.131",Path("/unused"))
+        self.assertFalse(result["complete_effective_dbus_policy_verified"])
+        self.assertEqual(result["effective_dbus_send_permission_for_shell"],
+                         "UNDETERMINED")
+        self.assertFalse(result["fota_method_called"])
+        self.assertFalse(result["watch_write_performed"])
+        self.assertEqual(result["sources"]["dbus_runtime_unit"]["status"],
+                         "RUNTIME_SDB_SHELL_UNAVAILABLE")
+
+    def test_collector_queries_exactly_two_known_ops(self):
+        observed=[]
+        def query(ip,key,op):
+            observed.append(op)
+            return RUNTIME_UNIT_SAMPLE if op=="dbus_runtime_unit" else RUNTIME_PS_SAMPLE
+        with patch.object(policy,"runtime_bus_query",side_effect=query):
+            result=policy.collect_runtime_bus("10.115.12.131",Path("/unused"))
+        self.assertEqual(observed,["dbus_runtime_unit","service_process_snapshot"])
+        self.assertEqual(result["state"],"PARTIAL_READONLY_RUNTIME_PROVENANCE")
+        self.assertFalse(result["running_daemon_arguments_independently_attested"])
+        self.assertFalse(result["root_proven"])
+
+    def test_reject_arbitrary_shell_operation_before_connecting(self):
+        with patch.object(policy.socket,"create_connection",side_effect=AssertionError("NO NETWORK")):
+            with self.assertRaisesRegex(policy.PolicyError,"RUNTIME_OPERATION_NOT_ALLOWLISTED"):
+                policy.runtime_bus_query("10.115.12.131",Path("/unused"),"arbitrary_shell")
+
+    def test_runtime_cli_creates_private_json_and_refuses_overwrite(self):
+        with tempfile.TemporaryDirectory() as td:
+            path=Path(td)/"runtime.json"
+            with patch.object(policy,"collect_runtime_bus",return_value={
+                    "state":"PARTIAL_READONLY_RUNTIME_PROVENANCE",
+                    "watch_write_performed":False}),patch.object(
+                    policy.socket,"create_connection",side_effect=AssertionError("NO NETWORK")):
+                self.assertEqual(policy.main(["--runtime-ip","10.115.12.131",
+                                               "--report",str(path)]),0)
+                self.assertEqual(policy.main(["--runtime-ip","10.115.12.131",
+                                               "--report",str(path)]),1)
+            self.assertEqual(path.stat().st_mode & 0o077,0)
+            self.assertEqual(json.loads(path.read_text())["watch_write_performed"],False)
+
+    def test_runtime_and_offline_modes_exclusive(self):
+        with self.assertRaises(SystemExit):
+            policy.main(["--runtime-ip","10.115.12.131",
+                         "--offline-focused-report","/unused/report.json"])
+
 if __name__=="__main__":
     unittest.main()
