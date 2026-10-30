@@ -54,7 +54,7 @@ def build_probe(directory: Path, compiler=None, *, fixture=None, host_test=False
     else:
         flags += ["--target=armv7-linux-gnueabi", "-marm", "-mfloat-abi=soft", "-nostdlib",
                   "-ffreestanding", "-fno-stack-protector", "-fomit-frame-pointer",
-                  "-fno-unwind-tables", "-fno-asynchronous-unwind-tables", "-fno-pie", "-no-pie",
+                  "-fno-unwind-tables", "-fno-asynchronous-unwind-tables", "-fno-pie",
                   "-static", "-fuse-ld=lld", "-Wl,-e,_start,--build-id=none,-z,noexecstack"]
     if fixture is not None:
         flags += ["-DPROBE_TEST", "-DPROBE_TEST_PREFIX=" + json.dumps(str(fixture))]
