@@ -64,12 +64,29 @@ NOT an SDB-user trigger, sender/receiver authorization, firmware update
 acceptance or root. Synthetic regression tests and original byte review
 cover event pointers, call targets, label and branch guard.
 
-Next research: determine real caller/receiver authorization for the
-verified D-Bus call, compare original consumer D-Bus method interface,
-package registration and caller policies *offline*. Resolve `/bin` vs `/usr/bin` alias
+Next physical dependency: one bounded, read-only standard D-Bus
+policy capture via `tools/watch3_r840x_dbus_policy_readonly.py`, with
+fixed system.conf files and two system.d directories only. A short
+parsed local JSON records relevant allow/deny rules, but **never**
+concludes effective authorization from a partial policy view. No
+FOTA invocation. Analyze the actual result before choosing further work.
+Compare source policy with the original consumer handler and package
+registration; preserve explicit SMACK/Cynara unknowns. Resolve `/bin` vs `/usr/bin` alias
 questions, stat errors and dropped records in the inventory if needed.
 Continue *exact R840X* stock recovery provenance, partition identity,
 signed-boot checks and tested rescue feasibility before any write.
+
+
+## Current branch / validation status
+
+Branch: `issue-47-dbus-policy-readonly`. No overlapping open PR at
+branch creation. Adds read-only standard D-Bus policy directory support
+to the existing SDB inventory decoder and a bounded policy reader,
+with synthetic no-watch regression tests in the existing Linux CI.
+The previous original `bapd` callsite report ran successfully in
+Termux as `PINNED_OFFLINE_BAPD_CALLSITE_VERIFIED`.
+CI and on-watch D-Bus policy capture are pending. Do not claim
+D-Bus sender authorization, root or custom boot.
 
 ## Safety / definition of done
 
