@@ -49,6 +49,26 @@ does not prove that a recovery image booted or restored the watch. A full
 CapabilityBoundingSet is a ceiling, not a grant of effective capabilities;
 NoNewPrivileges=no also does not establish privilege escalation.
 
+## First native-reader attempt: advertised directory missing
+
+The owner's `watch3-security-metadata-evidence.zip` is 884 bytes, SHA-256
+`be7b2b5349c39ab81c4d6c40a96d2050976aa9ca69e382c1ebd5667d998f238b`.
+Its 874-byte report, SHA-256
+`447d90baf5c5402d6c0e23bf0e7d75b262d648fc97732341ac313d75221cb131`,
+records a successful phone build: 7,444-byte ARM ELF, SHA-256
+`76f8f1df022a7dc3e4d0b7864dae2c7434850c8175006c40bf99b9c92e4e82e8`.
+The unchanged C source hash is
+`a157c47b16c5a30dafeca8d826811812cca02f72227df85335f5861b0706f962`.
+
+The 142-byte `stage-create.response`, SHA-256
+`14df1545ac823d62661ca68f27a7f3a317d4d8f81cfb1d912a4dc0b0d4541039`,
+explicitly reports `No such file or directory` when creating the random child
+under advertised `/home/owner/share/tmp/sdk_tools`. This establishes a missing
+parent/path component for that mkdir, not a denied probe execution. No probe
+was uploaded or executed; no metadata was captured. That mkdir did not create
+the requested child, so no cleanup of that old path is needed. Preserve the
+old local evidence; the retry below uses new output names.
+
 ## Own ARM reader: fixed metadata, reversible staging
 
 `tools/native/watch3_security_metadata.c` has no libc dependency. It uses the
@@ -67,36 +87,45 @@ and [capability structures](https://github.com/torvalds/linux/blob/v4.9/include/
 The reader does not call setuid, capset, setxattr, ioctl, mount or reboot.
 
 The controller builds a static, bounded ARM ELF from this source with clang/
-lld on the phone. It uses the authenticated device's sdk_toolpath, validates
-the home/tmp root and normal path segments, creates one random private child
-directory, and sends only our program there with mode 0700. It runs the reader,
+lld on the phone. It validates the authenticated sdk_toolpath, then tries at
+most three temporary locations: the advertised directory; its immediate parent
+only when the final segment is `sdk_tools`; and `/tmp`. Each attempt creates
+one random mode-0700 child under an existing parent. Missing parents are never
+created, and the controller does not walk farther up the directory tree. Only
+our program is sent into that new child with mode 0700. It runs the reader,
 then removes only that program and its now-empty directory. No generic remote
 path/binary argument is exposed. No FOTA service, vendor recovery script,
 firmware file or partition is modified. This mode does write and execute our
 own temporary SDK program; it is not an entirely read-only transport mode.
 
-Unverified creation never causes deletion of a potentially pre-existing
-directory. Upload/run failures still attempt cleanup after verified creation.
-Cleanup failure is explicit, retaining the exact stage path and diagnostics.
-Raw create/run/cleanup responses and parsed metadata are stored privately;
-existing evidence is never overwritten. A failure still creates the report/ZIP.
+The shell returns explicit markers for missing parents or failed mkdir. Those
+permit the next candidate without deleting anything. Unverified creation or a
+transport error stops fallback and never causes deletion of a potentially
+pre-existing directory. An upload refusal or invalid/denied program response
+permits another candidate only after verified cleanup of the created child.
+Cleanup failure stops fallback and retains the exact stage path and diagnostics.
+Each attempt has separate private creation/upload/run/cleanup responses and
+report fields. A failed staging run also collects fixed read-only identity,
+directory mode/owner and mount details. Existing evidence is never overwritten;
+a failure still creates the report/ZIP. Compiler failures make no watch contact.
 
 ## One phone command
 
 ```sh
 cd ~/Galaxy-3 && git switch main && git pull --ff-only &&
-pkg install -y clang &&
 python tools/watch3_r840x_security_metadata.py \
   --watch-ip 10.115.12.131 \
-  --archive ~/storage/downloads/watch3-security-metadata-evidence.zip
+  --output-dir ~/watch3-r840x-security-metadata-retry-evidence \
+  --archive ~/storage/downloads/watch3-security-metadata-retry.zip
 ```
 
 Termux's [clang package](https://github.com/termux/termux-packages/blob/master/packages/libllvm/clang.subpackage.sh)
 depends on lld; its [LLVM recipe](https://github.com/termux/termux-packages/blob/master/packages/libllvm/build.sh)
-builds all target backends. No PC, paid tooling or Tizen SDK is needed. The
-actual phone build and watch execution still require physical validation.
+builds all target backends. Clang is already installed and the owner's first
+phone build succeeded. No PC, paid tooling or Tizen SDK is needed. Execution
+of the reader on the watch still requires physical validation.
 
-Attach `watch3-security-metadata-evidence.zip` from Downloads, including if
+Attach `watch3-security-metadata-retry.zip` from Downloads, including if
 the state is partial/failed. A successful metadata capture does not prove root,
 a signature bypass, bootloader unlock, custom boot or tested recovery.
 
@@ -111,4 +140,10 @@ and rejected by the production metadata parser. It is not a watch/root proof.
 Fake-SDB tests check the exact bounded SEND destination/mode, forbidden stage
 paths, root/firmware separation, complete acquisition and cleanup, upload/run
 failures, uncertain creation without deletion, explicit cleanup failure and
-private/exclusive diagnostic ZIPs. Older metadata readers remain unchanged.
+private/exclusive diagnostic ZIPs. Regression cases cover the actual advertised
+missing directory, deduplicated/bounded fallback, denied execution with cleanup
+before retry, unavailable parents with mount diagnostics, transport/cleanup
+failures stopping fallback and cleanup despite a local diagnostic-write error.
+A real host shell/filesystem test verifies the missing-parent and existing-child
+markers without creating parents or claiming a pre-existing directory. Older
+metadata readers remain unchanged.
