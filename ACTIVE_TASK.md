@@ -59,7 +59,11 @@ free only, preserve the working watch. The target is a verified
 
 ### Current integration
 
-Branch: `issue-47-focused-policy-decision-audit` (CI / integration pending).
+PR #140 merged to `main` at `fbc7faa` and required NO WATCH
+CI run `41096937375` passed both Ubuntu 22.04 and 24.04.
+The source branch `issue-47-focused-policy-decision-audit` is a safe
+retirement candidate after preservation checks; this connector does
+not expose branch deletion.
 
 One cohesive update to the existing
 `tools/watch3_r840x_dbus_policy_readonly.py` adds
@@ -75,8 +79,8 @@ See `docs/watch3-r840x-dbus-policy-readonly.md`.
 
 ## Next evidence gate / safety
 
-After green CI and merge, use only the owner's saved JSON for the next
-offline audit. Then determine actual live bus config and sender/receiver
+Use only the owner's saved focused three-file JSON for the next
+**offline** audit; this new mode is merged and CI-validated. Then determine actual live bus config and sender/receiver
 credentials, other applicable policy/SMACK/Cynara restrictions and
 signed exact-variant SM-R840X rescue provenance with **read-only**
 procedures. Do not repeatedly re-run prior captures or speculate
