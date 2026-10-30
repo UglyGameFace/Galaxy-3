@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build/run our ARM attribute reader in a temporary SDB SDK directory.
+"""Build/run our ARM attribute reader in a checked owner/SDK directory.
 
 Requires clang/lld on the phone. Writes only our compiled program into a new
-SDK subdirectory, executes it for fixed read-only metadata, then removes that
+owner/SDK subdirectory, executes it for fixed read-only metadata, then removes that
 program/subdirectory. No root request, FOTA action, vendor-script execution,
 partition access, firmware write or security-attribute modification.
 """
@@ -35,8 +35,9 @@ TARGETS = ("/usr/bin/fota-consumer", "/usr/bin/oma-dm-agent", "/usr/bin/launch_a
            "/usr/bin/recovery-update.sh", "/usr/bin/rw-update-prepare.sh",
            "/usr/bin/rw-update-systemd.sh", "/opt/usr/data/fota/save", "/opt/data/recovery")
 ATTRIBUTES = ("security.capability", "security.SMACK64", "security.SMACK64EXEC")
-STAGE = re.compile(r"(?P<base>/(?:tmp|(?:opt/usr/)?home/(?:owner|developer|sdk))"
+STAGE = re.compile(r"(?P<base>/(?:tmp|(?:opt/(?:usr/)?)?home/(?:owner|developer|sdk))"
                    r"(?:/[A-Za-z0-9_.+-]+)*)/uglyos-metadata-[a-f0-9]{32}\Z")
+MAX_PREFLIGHT = 256 * 1024
 
 
 class MetadataError(ValueError):
@@ -91,15 +92,109 @@ def sdk_stage(raw: str, nonce: str) -> str:
     return validate_stage(paths[0].rstrip("/") + "/uglyos-metadata-" + nonce)
 
 
-def sdk_stages(raw: str, nonce: str) -> list[str]:
-    """Bounded SDK/temp candidates; never create a missing parent directory."""
-    advertised = sdk_stage(raw, nonce)
-    parent, suffix = advertised.rsplit("/", 1)
-    bases = [parent]
-    if parent.endswith("/sdk_tools"):
-        bases.append(parent.rsplit("/", 1)[0])
-    bases.append("/tmp")
-    return list(dict.fromkeys(validate_stage(base + "/" + suffix) for base in bases))
+def stage_bases(raw: str) -> tuple[str, ...]:
+    """Read candidates only; neither an ancestor walk nor an upload retry list."""
+    advertised = sdk_stage(raw, "0" * 32).rsplit("/", 1)[0]
+    return tuple(dict.fromkeys((advertised, "/home/owner/share",
+                               "/opt/home/owner/share", "/opt/usr/home/owner/share")))
+
+
+def preflight_command(bases: tuple[str, ...]) -> str:
+    if not 1 <= len(bases) <= 4 or len(set(bases)) != len(bases):
+        raise MetadataError("STAGING_PREFLIGHT_INVALID")
+    for base in bases:
+        validate_stage(base + "/uglyos-metadata-" + "0" * 32)
+    return ("printf 'UGLYOS_PREFLIGHT_V1\\n'; for uglyos_dir in " + " ".join(bases) + "; do "
+            "printf 'UGLYOS_DIR %s\\n' \"$uglyos_dir\"; "
+            "if [ -d \"$uglyos_dir\" ]; then "
+            "readlink -f \"$uglyos_dir\" 2>/dev/null || printf 'UNRESOLVED\\n'; "
+            "if [ -w \"$uglyos_dir\" ] && [ -x \"$uglyos_dir\" ]; "
+            "then printf 'ACCESS_OK\\n'; else printf 'ACCESS_DENIED\\n'; fi; "
+            "else printf 'MISSING\\nACCESS_DENIED\\n'; fi; printf 'UGLYOS_DIR_END\\n'; done; "
+            "printf 'UGLYOS_MOUNTINFO\\n'; cat /proc/self/mountinfo; printf 'UGLYOS_PREFLIGHT_END\\n'")
+
+
+def parse_mountinfo(raw: str) -> list[dict]:
+    """Read per-mount flags, retaining bind/stacked mount distinctions."""
+    mounts = []
+    try:
+        if not raw or len(raw) > MAX_PREFLIGHT or len(raw.splitlines()) > 4096:
+            raise ValueError
+        for line in raw.splitlines():
+            fields = line.split()
+            sep = fields.index("-")
+            if (sep < 6 or len(fields) != sep + 4 or not fields[0].isdigit() or
+                    not fields[1].isdigit() or not re.fullmatch(r"[0-9]+:[0-9]+", fields[2])):
+                raise ValueError
+            point = re.sub(r"\\(040|011|012|134)", lambda m: chr(int(m[1], 8)), fields[4])
+            if not point.startswith("/") or any(p in (".", "..") for p in point.split("/")):
+                raise ValueError
+            options, super_options = fields[5].split(","), fields[sep + 3].split(",")
+            if (sum(x in options for x in ("ro", "rw")) != 1 or
+                    sum(x in super_options for x in ("ro", "rw")) != 1):
+                raise ValueError
+            mounts.append(dict(id=int(fields[0]), parent=int(fields[1]), point=point,
+                               options=options, super_options=super_options))
+        if len({m["id"] for m in mounts}) != len(mounts):
+            raise ValueError
+    except (ValueError, IndexError):
+        raise MetadataError("STAGING_MOUNTINFO_INVALID") from None
+    return mounts
+
+
+def containing_mount(path: str, mounts: list[dict]) -> dict:
+    matches = [m for m in mounts if path == m["point"] or path.startswith(m["point"].rstrip("/") + "/")]
+    if not matches:
+        raise MetadataError("STAGING_MOUNT_NOT_FOUND")
+    deepest = max(len(m["point"]) for m in matches)
+    matches = [m for m in matches if len(m["point"]) == deepest]
+    # Refuse ambiguous stacked mounts instead of assuming file order is visibility.
+    if len(matches) != 1:
+        raise MetadataError("STAGING_MOUNT_AMBIGUOUS")
+    return matches[0]
+
+
+def parse_preflight(raw: bytes, bases: tuple[str, ...]) -> dict:
+    try:
+        if not raw or len(raw) > MAX_PREFLIGHT:
+            raise ValueError
+        lines = raw.decode("utf-8").splitlines()
+        if lines[0] != "UGLYOS_PREFLIGHT_V1" or lines[-1] != "UGLYOS_PREFLIGHT_END":
+            raise ValueError
+        boundary = 1 + 4 * len(bases)
+        if lines[boundary] != "UGLYOS_MOUNTINFO":
+            raise ValueError
+        mounts = parse_mountinfo("\n".join(lines[boundary + 1:-1]))
+        records = []
+        for number, base in enumerate(bases):
+            header, resolved, access, end = lines[1 + number * 4:5 + number * 4]
+            if (header != "UGLYOS_DIR " + base or end != "UGLYOS_DIR_END" or
+                    access not in ("ACCESS_OK", "ACCESS_DENIED")):
+                raise ValueError
+            record = dict(path=base, resolved=None, eligible=False, access_ok=access == "ACCESS_OK")
+            records.append(record)
+            if resolved in ("MISSING", "UNRESOLVED"):
+                record["reason"] = resolved
+                continue
+            try:
+                validate_stage(resolved + "/uglyos-metadata-" + "0" * 32)
+                record["resolved"] = resolved
+                record["mount"] = containing_mount(resolved, mounts)
+            except MetadataError as exc:
+                record["reason"] = str(exc)
+                continue
+            flags = record["mount"]["options"] + record["mount"]["super_options"]
+            if "noexec" in flags:
+                record["reason"] = "MOUNT_NOEXEC"
+            elif "ro" in flags:
+                record["reason"] = "MOUNT_READ_ONLY"
+            elif not record["access_ok"]:
+                record["reason"] = "ACCESS_DENIED"
+            else:
+                record.update(eligible=True, reason="MOUNT_AND_DIRECTORY_ELIGIBLE")
+        return dict(candidates=records, selected_base=next((r["resolved"] for r in records if r["eligible"]), None))
+    except (ValueError, IndexError, UnicodeError):
+        raise MetadataError("STAGING_PREFLIGHT_INVALID") from None
 
 
 def stage_command(operation: str, stage: str) -> str:
@@ -114,21 +209,27 @@ def stage_command(operation: str, stage: str) -> str:
     }[operation]
 
 
-def request(ip: str, key: Path, operation: str, *, stage=None, timeout=8):
-    if operation not in ("capabilities", "create", "run", "cleanup", "stage_context"):
+def request(ip: str, key: Path, operation: str, *, stage=None, bases=None, timeout=8):
+    if operation not in ("capabilities", "preflight", "create", "run", "cleanup", "stage_context", "probe_context"):
         raise MetadataError("OPERATION_NOT_ALLOWLISTED")
-    if operation not in ("capabilities", "stage_context"):
+    if operation not in ("capabilities", "preflight", "stage_context"):
         stage = validate_stage(stage)
+    preflight = preflight_command(bases) if operation == "preflight" else None
     with socket.create_connection((ip, PORT), timeout=timeout) as sock:
         sock.settimeout(timeout)
         conn = Connection(sock, key)
         conn.handshake()
         if operation == "capabilities":
             return conn.capabilities()
-        if operation == "stage_context":
+        if operation == "preflight":
+            command = preflight
+        elif operation == "probe_context":
+            command = (f"stat -c '%a %u %g %s %n' {stage} {stage}/probe; "
+                       f"ls -ldZ {stage} {stage}/probe; cat /proc/self/attr/current")
+        elif operation == "stage_context":
             command = ("id; stat -c '%a %u %g %s %n' /tmp /home/owner "
-                       "/home/owner/share /home/owner/share/tmp /home/owner/share/tmp/sdk_tools "
-                       "/opt/usr/home/owner/share/tmp; cat /proc/mounts")
+                       "/home/owner/share /opt/home/owner/share /opt/usr/home/owner/share; "
+                       "cat /proc/self/mountinfo")
         else:
             command = stage_command(operation, stage)
         return conn._read_service(("shell:" + command).encode() + b"\0", raw=True)
@@ -236,7 +337,8 @@ def capture(ip: str, key: Path, folder: Path, *, archive: Path | None = None,
               "root_mode_requested": False, "vendor_script_executed": False,
               "existing_security_attributes_modified": False, "fota_method_called": False,
               "partition_reads_attempted": False, "firmware_written": False,
-              "bootloader_unlock_proven": False, "stock_recovery_proven": False}
+              "bootloader_unlock_proven": False, "stock_recovery_proven": False,
+              "staging_preflight": None}
     saved = []
     report["stage_attempts"] = []
 
@@ -244,12 +346,12 @@ def capture(ip: str, key: Path, folder: Path, *, archive: Path | None = None,
         private_write(folder / name, raw)
         saved.append(name)
 
-    def cleanup(attempt, prefix):
+    def cleanup(attempt):
         if progress: progress("Removing the temporary probe and its directory")
         try:
             raw = request(ip, key, "cleanup", stage=attempt["stage"])
             attempt["cleanup_verified"] = raw.strip() == b"UGLYOS_STAGE_REMOVED"
-            save(prefix + "stage-cleanup.response", raw)
+            save("stage-cleanup.response", raw)
         except (OSError, SdbError, MetadataError):
             attempt["cleanup_verified"] = False
         report["stage_cleanup_verified"] = attempt["cleanup_verified"]
@@ -261,50 +363,57 @@ def capture(ip: str, key: Path, folder: Path, *, archive: Path | None = None,
         if progress: progress("Building our static ARM metadata reader")
         with tempfile.TemporaryDirectory(prefix="uglyos-metadata-build-") as tmp:
             binary, report["build"] = build_probe(Path(tmp), compiler)
-        stages = sdk_stages(request(ip, key, "capabilities"), uuid.uuid4().hex)
-        for number, stage in enumerate(stages, 1):
-            prefix = "" if number == 1 else f"attempt-{number}-"
-            attempt = {"stage": stage, "created": False, "uploaded": False,
-                       "execution_requested": False, "cleanup_verified": False}
-            report["stage_attempts"].append(attempt)
-            report["temporary_sdk_write_requested"] = True
-            report["unverified_sdk_stage"] = stage
-            creation = request(ip, key, "create", stage=stage)
-            attempt["created"] = creation.strip() == b"UGLYOS_STAGE_CREATED"
-            if attempt["created"]:
+        bases = stage_bases(request(ip, key, "capabilities"))
+        if progress: progress("Checking existing directories, resolved paths and mount flags before upload")
+        raw = request(ip, key, "preflight", bases=bases)
+        save("stage-preflight.response", raw)
+        report["staging_preflight"] = parse_preflight(raw, bases)
+        selected = report["staging_preflight"]["selected_base"]
+        if selected is None:
+            raise MetadataError("NO_WRITABLE_EXECUTABLE_STAGE")
+        stage = validate_stage(selected + "/uglyos-metadata-" + uuid.uuid4().hex)
+        attempt = {"stage": stage, "created": False, "uploaded": False,
+                   "execution_requested": False, "cleanup_verified": False}
+        report["stage_attempts"].append(attempt)
+        report["temporary_sdk_write_requested"] = True
+        report["unverified_sdk_stage"] = stage
+        creation = request(ip, key, "create", stage=stage)
+        attempt["created"] = creation.strip() == b"UGLYOS_STAGE_CREATED"
+        if attempt["created"]:
+            report.pop("unverified_sdk_stage", None)
+        try:
+            save("stage-create.response", creation)
+            marker = creation.strip().splitlines()[-1:]
+            if marker in ([b"UGLYOS_STAGE_PARENT_MISSING"], [b"UGLYOS_STAGE_NOT_CREATED"]):
+                attempt["creation_result"] = marker[0].decode()
                 report.pop("unverified_sdk_stage", None)
-            retry = False
-            try:
-                save(prefix + "stage-create.response", creation)
-                marker = creation.strip().splitlines()[-1:]  # Diagnostics may precede a failure marker.
-                if marker in ([b"UGLYOS_STAGE_PARENT_MISSING"], [b"UGLYOS_STAGE_NOT_CREATED"]):
-                    attempt["creation_result"] = marker[0].decode()
-                    report.pop("unverified_sdk_stage", None)
-                    report["state"] = "SDK_STAGE_UNAVAILABLE"
-                    if progress: progress("Temporary parent unavailable; trying the next fixed candidate")
-                    continue
-                if not attempt["created"]:
-                    raise MetadataError("SDK_STAGE_CREATION_NOT_VERIFIED")
-                if progress: progress("Uploading our reader into the new temporary directory")
-                send_probe(ip, key, stage, binary)
-                attempt["uploaded"] = report["probe_uploaded"] = True
-                attempt["execution_requested"] = report["probe_execution_requested"] = True
-                if progress: progress("Reading file capabilities, labels and access checks")
-                raw = request(ip, key, "run", stage=stage)
-                save(prefix + "probe-output.response", raw)
-                report["probe"] = parse_probe(raw)
-                report["state"] = "NATIVE_SECURITY_METADATA_CAPTURED"
-            except MetadataError as exc:
-                report["state"] = attempt["error"] = str(exc)
-                if getattr(exc, "upload_response", None):
-                    save(prefix + "probe-upload.response", exc.upload_response)
-                retry = str(exc) in ("PROBE_UPLOAD_DENIED", "PROBE_OUTPUT_INVALID")
-                if not retry: raise
-            finally:
-                if attempt["created"]:
-                    cleanup(attempt, prefix)
-            if not retry or not report["stage_cleanup_verified"]:
-                break
+                raise MetadataError("SDK_STAGE_UNAVAILABLE")
+            if not attempt["created"]:
+                raise MetadataError("SDK_STAGE_CREATION_NOT_VERIFIED")
+            if progress: progress("Uploading our reader into the checked owner directory")
+            send_probe(ip, key, stage, binary)
+            attempt["uploaded"] = report["probe_uploaded"] = True
+            attempt["execution_requested"] = report["probe_execution_requested"] = True
+            if progress: progress("Reading file capabilities, labels and access checks")
+            raw = request(ip, key, "run", stage=stage)
+            save("probe-output.response", raw)
+            if b"Permission denied" in raw:
+                raise MetadataError("PROBE_EXECUTION_DENIED")
+            report["probe"] = parse_probe(raw)
+            report["state"] = "NATIVE_SECURITY_METADATA_CAPTURED"
+        except MetadataError as exc:
+            attempt["error"] = str(exc)
+            if getattr(exc, "upload_response", None):
+                save("probe-upload.response", exc.upload_response)
+            if attempt["created"]:
+                try:
+                    save("probe-context.response", request(ip, key, "probe_context", stage=stage))
+                except (OSError, SdbError, MetadataError):
+                    pass
+            raise
+        finally:
+            if attempt["created"]:
+                cleanup(attempt)
     except (MetadataError, OfflineELFError) as exc:
         report["state"] = str(exc)
         if isinstance(exc, MetadataError) and getattr(exc, "diagnostic", None):
