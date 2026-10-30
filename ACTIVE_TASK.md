@@ -37,8 +37,9 @@ and [pinned bapd call review](docs/watch3-r840x-bapd-call-review.md).
 
 ## Current development
 
-PR #134 merged to main at `02795ac`; current branch
-`issue-47-bapd-callsite-offline`. New exact-input pinned callsite verifier:
+PR #134 merged at `02795ac`. PR #135 merged to main at `a5de1a4`;
+required Watch3 NO WATCH CI run `41082843518` passed both Linux versions.
+No active overlapping PR. New exact-input pinned callsite verifier:
 `tools/watch3_r840x_bapd_call_review.py`; synthetic tests and required
 NO WATCH CI matrix. Original binaries remain private. The earlier private-input verifier
 `tools/watch3_r840x_privilege_offline.py` checks ZIP structure/limits,
