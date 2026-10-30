@@ -195,3 +195,73 @@ the daemon-authenticated UID for `User::Shell`, Tizen SMACK/Cynara
 authorization, receiver-side checks and exact-model rescue.
 Even a matching allow in these three files does not resolve those
 questions or authorize firmware writes. Issue #47 remains open.
+
+
+## October 30 owner result: original rule attributes verified
+
+The owner completed `--focused-detail-ip` on the physical watch.
+All **three original policy-file SHA-256 hashes match** the
+previous capture, and no FOTA method, vendor binary or firmware write
+was performed.
+
+The original `/usr/share/dbus-1/system.conf` defines a default
+`<deny send_type="method_call"/>`. Its ordered includes contain
+`/etc/dbus-1/system.conf`, a relative `system.d` directory,
+`/etc/dbus-1/system.d`, optional
+`/etc/dbus-1/system-local.conf` and a conditional SELinux contexts
+file. `/etc/dbus-1/system.conf` contains no reported policy nodes.
+The actual daemon launch configuration and contents/order of *other*
+included policy files are not confirmed. The earlier policy
+directory inventory included **103 other/unreported entries**;
+this is *not* proof of 103 FOTA policy files.
+
+The exact 811-byte original FOTA config contains, in the same
+`context=default` policy block, these ordered send rules:
+
+1. `<deny send_destination="fota.consumer" send_type="method_call"/>`
+2. `<allow send_destination="fota.consumer" send_interface="fota.consumer"/>`
+
+The later allow carries **no method name, object path or other
+recognized matching qualifier** in the owner's capture. The first
+rule matches the outgoing BAPD `LaunchFota` message, and the second
+would match it too, by its destination and interface.
+
+The authoritative D-Bus manual states that send rules are evaluated
+in order and **the last matching rule wins**. It also documents a
+separate precedence order for group-, user- and mandatory-context
+policies. Therefore the later FOTA allow wins **within this
+observed default-rule sequence**. That observation does NOT prove
+that a normal SDB shell has effective send permission on the
+watch's live system bus, nor that the consumer would accept a method,
+perform an update, or bypass firmware verification.
+
+Official source:
+https://dbus.freedesktop.org/doc/dbus-daemon.1.html
+
+### Zero-watch offline audit of this exact report
+
+Use the saved JSON already on the phone; do NOT repeat the physical
+capture. After the new offline-audit PR merges and CI passes:
+
+```sh
+cd ~/Galaxy-3 && git switch main && git pull --ff-only
+python tools/watch3_r840x_dbus_policy_readonly.py \
+  --offline-focused-report ~/watch3-r840x-dbus-focused-original-rules.json \
+  --report ~/watch3-r840x-dbus-focused-default-rule-audit.json
+cat ~/watch3-r840x-dbus-focused-default-rule-audit.json
+```
+
+It checks the exact three expected source hashes and the shape of a
+**hypothetical** matching method-call message against the original
+default rules. It reports the matched deny/allow sequence and the
+original include declarations, and keeps final permission status
+`UNDETERMINED`. An unknown rule, unexpected additional match,
+or changed original hash makes the subset conclusion inconclusive.
+No network code executes in this mode.
+
+**Next actual blocker:** actual running daemon policy configuration,
+user/group/mandatory policy priority across *all* relevant include
+files, the bus sender's real UID and Tizen SMACK/Cynara and consumer-side
+checks. These cannot be bypassed or inferred from a default allow
+alone. Independent exact SM-R840X signed stock rescue is still
+required before any firmware writes or alternate-OS attempt.
