@@ -99,13 +99,37 @@ saved JSON remains the next user-operated verification step. Branch
 `issue-47-fota-audit-nonmatching-rules` is a safe retirement candidate,
 but this connector lacks branch deletion.
 
+## October 30 physical v2 audit and current development
+
+Owner's v2 offline audit successfully verified the three original
+policy-file hashes, default FOTA method-call sequence `deny -> allow`,
+last matching *observed file-level default rule* `allow`, **15 known
+nonmatching default rules excluded** and **no unknowns or drift in that
+limited file subset**. Sender authorization, full effective merged
+policy, SMACK/Cynara, recovery acceptance and root remain unknown.
+
+Current branch `issue-47-running-system-bus-provenance` adds a single
+read-only runtime evidence mode to the **existing** policy analyzer,
+not a new competing script. It uses one fixed `systemctl show`
+query for the configured `dbus.service` and reuses the **existing**
+allowlisted `ps` query, displaying only bounded and redacted daemon
+family/flags/unit metadata. It never starts/reloads a bus, invokes
+FOTA, requests root or writes to the watch. Tests cover parser
+privacy, unsupported BusyBox layouts, restricted commands, no-network
+unit fixtures and legacy mode compatibility. CI/merge pending.
+
+After merge, owner should run this one bounded physical runtime
+snapshot from Termux and return only the JSON. It cannot by itself
+attest complete live D-Bus security policy or unlock capability.
+No other code should be added until that evidence is analyzed.
+
 ## Next evidence gate / safety
 
-Use only the owner's saved focused three-file JSON for the next
-**offline** audit; this new mode is merged and CI-validated. Then determine actual live bus config and sender/receiver
-credentials, other applicable policy/SMACK/Cynara restrictions and
-signed exact-variant SM-R840X rescue provenance with **read-only**
-procedures. Do not repeatedly re-run prior captures or speculate
+The offline default-rule audit is **already complete** and must not
+be repeated. Establish the actual runtime system-bus daemon metadata,
+then address sender/receiver credentials, other included policies,
+SMACK/Cynara enforcement, and signed exact SM-R840X restoration from
+read-only evidence. Do not repeatedly re-run prior captures or speculate
 that the shell can invoke a privileged firmware method.
 
 **Firmware/partition writes: NO-GO.** Root not proven, bootloader
