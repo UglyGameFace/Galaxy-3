@@ -79,14 +79,16 @@ signed-boot checks and tested rescue feasibility before any write.
 
 ## Current branch / validation status
 
-Branch: `issue-47-dbus-policy-readonly`. No overlapping open PR at
-branch creation. Adds read-only standard D-Bus policy directory support
-to the existing SDB inventory decoder and a bounded policy reader,
-with synthetic no-watch regression tests in the existing Linux CI.
-The previous original `bapd` callsite report ran successfully in
-Termux as `PINNED_OFFLINE_BAPD_CALLSITE_VERIFIED`.
-CI and on-watch D-Bus policy capture are pending. Do not claim
-D-Bus sender authorization, root or custom boot.
+PR #137 merged into `main` at `96ac836` (October 30, 2026).
+Required NO WATCH CI run `41091029357` passed on Ubuntu 22.04/24.04.
+Adds read-only standard D-Bus policy directory support to the shared
+SDB inventory decoder, a bounded policy reader, and 11 synthetic tests.
+The prior original `bapd` callsite report ran successfully in Termux as
+`PINNED_OFFLINE_BAPD_CALLSITE_VERIFIED`.
+**Pending physical evidence:** run the merged policy reader once with the
+watch's current IP and supply the redacted report. No authorization
+conclusion until that report is reviewed. The source branch can be
+retired after verifying no unmerged work; connector cannot delete it.
 
 ## Safety / definition of done
 
