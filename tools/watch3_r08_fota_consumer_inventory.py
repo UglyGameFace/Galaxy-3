@@ -93,6 +93,20 @@ SYNC_AGENT_SONAME = "libsync-agent.so.0"
 SYNC_AGENT_LIBRARY_NAME = re.compile(re.escape(SYNC_AGENT_SONAME) + r"(?:[.][0-9]+)*\Z")
 MAX_LIBRARY_DENTS = 8192
 MAX_REPORTED_LIBRARIES = 16
+# Receiver-family metadata, used only by the explicit context capture. The
+# owner's original initialization XML selects Event-Key=omadm. These fixed
+# directories are discovery locations, not assertions that a daemon is running.
+FOTA_FRAMEWORK_DIRECTORIES = {
+    "sync_agent_receiver_units": b"/usr/lib/systemd/system",
+    "sync_agent_receiver_overrides": b"/etc/systemd/system",
+    "sync_agent_receiver_binaries": b"/usr/bin",
+    "sync_agent_receiver_initializers": b"/usr/share/oma-dm-cfg/fw-init",
+}
+FRAMEWORK_FILE_NAME = re.compile(
+    r"[a-z0-9_.@+-]{0,80}(?:oma[-_]?dm|sync[-_]?agent)[a-z0-9_.@+-]{0,40}\Z",
+    re.IGNORECASE,
+)
+MAX_REPORTED_FRAMEWORK_FILES = 32
 CANDIDATE_NAME = re.compile(r"(?:fota|update)[a-z0-9._-]{0,63}\Z")
 EXACT_BIN_NAMES = frozenset((
     "fota-service", "fota-consumer", "fota_consumer",
@@ -167,7 +181,8 @@ class DirectoryDecoder:
             del self.buffer[:namelen]
             self.pending = None
             self.count += 1
-            if self.count > (MAX_LIBRARY_DENTS if scope in FOTA_LIBRARY_DIRECTORIES else
+            if self.count > (MAX_LIBRARY_DENTS if scope in FOTA_LIBRARY_DIRECTORIES or
+                             scope in FOTA_FRAMEWORK_DIRECTORIES else
                              MAX_PACKAGE_INDEX_DENTS
                              if scope in PACKAGE_INDEX_DIRECTORIES else
                              MAX_SYSTEMD_DENTS if scope in SYSTEMD_DIRECTORIES else
@@ -224,6 +239,12 @@ class DirectoryDecoder:
                         "kind": mode_kind(mode),
                         "bytes": size if size <= 8 * 1024 * 1024 else "OVER_8_MIB",
                     }
+            elif scope in FOTA_FRAMEWORK_DIRECTORIES and FRAMEWORK_FILE_NAME.fullmatch(name):
+                if len(self.candidates) < MAX_REPORTED_FRAMEWORK_FILES:
+                    self.candidates[name] = {
+                        "kind": mode_kind(mode),
+                        "bytes": size if size <= 8 * 1024 * 1024 else "OVER_8_MIB",
+                    }
             elif scope == "fota_save_directory" and name == "delta.tar":
                 self.archive = {
                     "kind": mode_kind(mode),
@@ -241,6 +262,13 @@ class DirectoryDecoder:
                 "status": "LIST_COMPLETE" if self.count else "EMPTY_OR_INACCESSIBLE",
                 "matching_sync_agent_libraries": self.candidates,
                 "matching_names_truncated": len(self.candidates) >= MAX_REPORTED_LIBRARIES,
+                "other_or_unreported_entries": max(0, self.count - len(self.candidates)),
+            }
+        if scope in FOTA_FRAMEWORK_DIRECTORIES:
+            return {
+                "status": "LIST_COMPLETE" if self.count else "EMPTY_OR_INACCESSIBLE",
+                "matching_framework_files": self.candidates,
+                "matching_names_truncated": len(self.candidates) >= MAX_REPORTED_FRAMEWORK_FILES,
                 "other_or_unreported_entries": max(0, self.count - len(self.candidates)),
             }
         if scope == "consumer_binary_directory":
@@ -329,6 +357,8 @@ def list_one(sock, key_path: Path, scope: str) -> dict:
         path = SYSTEMD_DIRECTORIES[scope]
     elif scope in FOTA_LIBRARY_DIRECTORIES:
         path = FOTA_LIBRARY_DIRECTORIES[scope]
+    elif scope in FOTA_FRAMEWORK_DIRECTORIES:
+        path = FOTA_FRAMEWORK_DIRECTORIES[scope]
     else:
         raise InventoryError("SCOPE_NOT_ALLOWED")
     conn = Connection(sock, key_path)

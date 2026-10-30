@@ -22,17 +22,25 @@ from analyze_watch3_r08_fota_elf import (
     SYNC_AGENT_SHA256 as LIBRARY_SHA256,
 )
 from watch3_r08_android_sdb import PORT, SdbError, private_watch_ip
-from watch3_r08_fota_handoff_pull import HandoffError, _receive_bounded_file, private_write
+from watch3_r08_fota_handoff_pull import HandoffError, _receive_bounded_file, private_write, inspect_unit
+from watch3_r08_fota_artifact_pull import ArtifactPullError, vendor_executable_path
+from watch3_r08_fota_consumer_inventory import (
+    FOTA_FRAMEWORK_DIRECTORIES, FRAMEWORK_FILE_NAME, InventoryError, list_one,
+)
 
 # Original library: 0x483ac resolves this literal; 0x483ae passes it to sync_agent_init.
 ROOT_CONFIG = b"/usr/share/oma-dm-cfg/fw-init/omadmfotaui_fw_config.xml"
 MAX_XML_BYTES = 64 * 1024
 MAX_XML_FILES = 16
+MAX_CONFIG_FILES = 8
+MAX_UNIT_FILES = 8
 MAX_ELF_FILES = 4
 MAX_REFS = 64
 MAX_XML_NODES = 4096
 REPORT_NAME = "sync-agent-context-report.json"
 XML_PATH = re.compile(r"/usr/share/oma-dm-cfg/[A-Za-z0-9_./+-]{1,180}[.]xml\Z")
+CONFIG_PATH = re.compile(r"/usr/share/oma-dm-cfg/[A-Za-z0-9_./+-]{1,180}\Z")
+UNIT_PATH = re.compile(r"/(?:usr/lib|etc)/systemd/system/([A-Za-z0-9_.@+-]{1,124})\Z")
 ELF_PATH = re.compile(
     r"/(?:usr/)?lib/(?:[A-Za-z0-9_+.-]+/)*lib[A-Za-z0-9_+.-]+[.]so(?:[.][0-9]+)*\Z"
     r"|/usr/(?:s?bin)/[A-Za-z0-9_+.-]{1,100}\Z")
@@ -43,22 +51,29 @@ class ContextError(ValueError):
 
 
 def classify_reference(value: str) -> str | None:
-    if (not isinstance(value, str) or len(value) > 240 or
+    if (not isinstance(value, str) or len(value) > 240 or value != value.strip() or
             any(p in ("", ".", "..") for p in value.split("/")[1:])):
         return None
     if XML_PATH.fullmatch(value):
         return "xml"
+    if CONFIG_PATH.fullmatch(value):
+        return "config"
+    unit = UNIT_PATH.fullmatch(value)
+    if (unit and unit[1].endswith((".service", ".socket")) and
+            FRAMEWORK_FILE_NAME.fullmatch(unit[1])):
+        return "unit"
     if ELF_PATH.fullmatch(value):
         return "elf"
-    return None
+    try:
+        # Reuse the established normal vendor executable validator, including
+        # libexec and Tizen app code paths supplied by an observed unit/XML.
+        vendor_executable_path(value)
+    except ArtifactPullError:
+        return None
+    return "elf"
 
 
-def declared_references(raw: bytes) -> list[tuple[str, bytes]]:
-    """Follow only complete absolute system paths actually present in XML fields.
-
-    No guessed filenames, shell splitting, URLs, entities, relative-path
-    interpretation or arbitrary metadata values appear in the public report.
-    """
+def parse_xml(raw: bytes):
     if not raw or len(raw) > MAX_XML_BYTES:
         raise ContextError("CONTEXT_XML_SIZE_INVALID")
     try:
@@ -73,10 +88,20 @@ def declared_references(raw: bytes) -> list[tuple[str, bytes]]:
         root = ET.fromstring(text)
     except ET.ParseError:
         raise ContextError("CONTEXT_XML_MALFORMED") from None
-    refs = []
     for count, node in enumerate(root.iter(), 1):
         if count > MAX_XML_NODES:
             raise ContextError("CONTEXT_XML_NODE_LIMIT")
+    return root
+
+
+def declared_references(raw: bytes) -> list[tuple[str, bytes]]:
+    """Follow complete absolute declarations, including extensionless config.
+
+    No guessed filenames, shell splitting, URLs, entities or relative paths.
+    Extensionless Event-Config/Noti-Config files are not assumed to be XML.
+    """
+    refs = []
+    for node in parse_xml(raw).iter():
         for value in (node.text or "", *node.attrib.values()):
             value = value.strip()
             kind = classify_reference(value)
@@ -85,6 +110,50 @@ def declared_references(raw: bytes) -> list[tuple[str, bytes]]:
                 if len(refs) > MAX_REFS:
                     raise ContextError("CONTEXT_REFERENCE_LIMIT")
     return refs
+
+
+def configuration_fields(raw: bytes) -> dict:
+    """Only the framework's bounded routing identifiers, never arbitrary values."""
+    fields = {}
+    names = {"Agent-Key": "agent_key", "Event-Key": "event_key", "Noti-Key": "noti_key"}
+    for node in parse_xml(raw).iter():
+        tag = node.tag.rsplit("}", 1)[-1]
+        value = (node.text or "").strip()
+        if tag in names and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", value):
+            fields[names[tag]] = value
+        elif tag == "RunEventHandler" and value in ("0", "1"):
+            fields["run_event_handler_declared"] = value == "1"
+    if "event_key" in fields:
+        fields["event_socket_from_config"] = "/tmp/agent_fw_event_" + fields["event_key"]
+    return fields
+
+
+def discover_receiver_paths(ip: str, key_path: Path, timeout: int, discovery: list) -> list:
+    """Find actual related entries; no guessed daemon or initializer filename."""
+    paths = []
+    for scope, directory in FOTA_FRAMEWORK_DIRECTORIES.items():
+        record = {"directory": directory.decode("ascii")}
+        discovery.append(record)
+        try:
+            with socket.create_connection((ip, PORT), timeout=timeout) as sock:
+                sock.settimeout(timeout)
+                listing = list_one(sock, key_path, scope)
+            record.update(listing)
+            # Prefer observed daemon names over UI helper names within the cap.
+            entries = sorted(listing["matching_framework_files"].items(),
+                             key=lambda item: ("agent" not in item[0].lower(), item[0]))
+            for name, info in entries:
+                if info["kind"] not in ("REGULAR_FILE", "SYMLINK"):
+                    continue
+                path = directory.decode("ascii") + "/" + name
+                kind = classify_reference(path)
+                if kind:
+                    paths.append((kind, path.encode("ascii")))
+        except InventoryError as exc:
+            record["status"] = str(exc)
+        except (OSError, SdbError, TimeoutError):
+            record["status"] = "CONTEXT_DIRECTORY_OR_SDB_IO_ERROR"
+    return paths
 
 
 def capture_context(ip: str, key_path: Path, folder: Path, *, library_input: Path,
@@ -101,10 +170,11 @@ def capture_context(ip: str, key_path: Path, folder: Path, *, library_input: Pat
     except FileExistsError:
         raise ContextError("LOCAL_OUTPUT_ALREADY_EXISTS") from None
     report = {
-        "schema": "uglyos-r840x-sync-agent-context-v1",
+        "schema": "uglyos-r840x-sync-agent-context-v2",
         "state": "NOT_CAPTURED", "source_library_verified": False,
         "source_library_sha256": None, "root_config": ROOT_CONFIG.decode("ascii"),
-        "files": [], "limits_reached": False,
+        "files": [], "discovery": [], "limits_reached": False,
+        "copied_by_kind": {}, "receiver_candidate_code_copied": False,
         "runtime_receiver_observed": False, "fota_method_called": False,
         "binary_executed": False, "watch_write_performed": False,
         "root_obtained": False, "bootloader_unlock_proven": False,
@@ -118,16 +188,24 @@ def capture_context(ip: str, key_path: Path, folder: Path, *, library_input: Pat
                 hashlib.sha256(original).hexdigest() != LIBRARY_SHA256):
             raise ContextError("LOCAL_ORIGINAL_LIBRARY_PIN_MISMATCH")
         report.update(source_library_verified=True, source_library_sha256=LIBRARY_SHA256)
-        queue = [("xml", ROOT_CONFIG)]
+        if progress is not None:
+            progress("discovery", 0)
+        queue = [("xml", ROOT_CONFIG),
+                 *discover_receiver_paths(ip, key_path, timeout, report["discovery"])]
+        report["limits_reached"] = any(r.get("matching_names_truncated", False)
+                                       for r in report["discovery"])
         seen = set()
-        counts = {"xml": 0, "elf": 0}
-        failures = 0
+        limits = {"xml": MAX_XML_FILES, "config": MAX_CONFIG_FILES,
+                  "unit": MAX_UNIT_FILES, "elf": MAX_ELF_FILES}
+        counts = dict.fromkeys(limits, 0)
+        failures = sum(r.get("status") not in ("LIST_COMPLETE", "EMPTY_OR_INACCESSIBLE")
+                       for r in report["discovery"])
         while queue:
             kind, path = queue.pop(0)
             if path in seen:
                 continue
             seen.add(path)
-            limit = MAX_XML_FILES if kind == "xml" else MAX_ELF_FILES
+            limit = limits[kind]
             if counts[kind] >= limit:
                 report["limits_reached"] = True
                 continue
@@ -137,14 +215,15 @@ def capture_context(ip: str, key_path: Path, folder: Path, *, library_input: Pat
             record = {"remote_path": path.decode("ascii"), "kind": kind}
             report["files"].append(record)
             try:
-                # Only ROOT_CONFIG and already parsed absolute declarations enter the queue.
+                # Sources are fixed, XML/unit declared, or actually LIST-observed.
                 if classify_reference(path.decode("ascii")) != kind:
                     raise ContextError("CONTEXT_SOURCE_PATH_REJECTED")
                 with socket.create_connection((ip, PORT), timeout=timeout) as sock:
                     sock.settimeout(timeout)
                     raw = _receive_bounded_file(sock, key_path, path,
-                                                MAX_XML_BYTES if kind == "xml" else 8 * 1024 * 1024)
-                name = f"context-{len(report['files']):02d}.{'xml' if kind == 'xml' else 'bin'}"
+                                                8 * 1024 * 1024 if kind == "elf" else MAX_XML_BYTES)
+                suffix = {"xml": "xml", "config": "conf", "unit": "service", "elf": "bin"}[kind]
+                name = f"context-{len(report['files']):02d}.{suffix}"
                 if kind == "elf":
                     record["elf"] = parse_elf32(raw)
                 private_write(folder / name, raw)
@@ -152,7 +231,15 @@ def capture_context(ip: str, key_path: Path, folder: Path, *, library_input: Pat
                 record.update(status="COPIED", local_file=name, bytes=len(raw),
                               sha256=hashlib.sha256(raw).hexdigest())
                 if kind == "xml":
+                    record["framework_fields"] = configuration_fields(raw)
                     for ref in declared_references(raw):
+                        if ref[1] not in seen and ref not in queue:
+                            queue.append(ref)
+                elif kind == "unit":
+                    record["configured_unit"] = inspect_unit(raw)
+                    path = record["configured_unit"].get("exec_path", "")
+                    if classify_reference(path) == "elf":
+                        ref = ("elf", path.encode("ascii"))
                         if ref[1] not in seen and ref not in queue:
                             queue.append(ref)
             except (ContextError, HandoffError, OfflineELFError) as exc:
@@ -161,6 +248,9 @@ def capture_context(ip: str, key_path: Path, folder: Path, *, library_input: Pat
             except (OSError, SdbError, TimeoutError):
                 record["status"] = "CONTEXT_LOCAL_OR_SDB_IO_ERROR"
                 failures += 1
+        report["copied_by_kind"] = {kind: sum(r["kind"] == kind and r["status"] == "COPIED"
+                                             for r in report["files"]) for kind in limits}
+        report["receiver_candidate_code_copied"] = bool(report["copied_by_kind"]["elf"])
         report["state"] = ("CONTEXT_CAPTURED" if not failures and not report["limits_reached"]
                            else "CONTEXT_PARTIAL_OR_UNAVAILABLE")
     except FileNotFoundError:
@@ -193,14 +283,15 @@ def main(argv=None) -> int:
     parser.add_argument("--library-input", type=Path, default=Path.home() /
                         "watch3-r840x-sync-agent-native-evidence/libsync-agent.so.0.bin")
     parser.add_argument("--output-dir", type=Path, default=Path.home() /
-                        "watch3-r840x-sync-agent-context-evidence")
+                        "watch3-r840x-sync-agent-receiver-evidence")
     parser.add_argument("--archive", type=Path)
     args = parser.parse_args(argv)
     try:
         report = capture_context(args.watch_ip, args.key_path, args.output_dir,
                                  library_input=args.library_input, archive=args.archive,
                                  progress=lambda kind, n: print(
-                                     f"Reading {'configuration' if kind == 'xml' else 'declared code file'} {n}",
+                                     ("Finding related daemon/configuration entries" if kind == "discovery" else
+                                      f"Reading {kind} file {n}"),
                                      flush=True))
     except (ContextError, HandoffError, OSError, SdbError) as exc:
         print("CONTEXT_ERROR: " + (str(exc) if isinstance(exc, ContextError)

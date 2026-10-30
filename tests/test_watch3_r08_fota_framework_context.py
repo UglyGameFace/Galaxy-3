@@ -17,22 +17,39 @@ import watch3_r08_fota_framework_context as context
 import watch3_r08_fota_handoff_pull as handoff
 from test_watch3_r08_fota_handoff_pull import successful, denied, calls
 from test_watch3_r08_fota_elf_offline import fake_elf
+from test_watch3_r08_fota_consumer_inventory import peer as directory_peer, dent, done
+from watch3_r08_fota_consumer_inventory import DirectoryDecoder
 
 CHILD = b"/usr/share/oma-dm-cfg/events/fota.xml"
 LIB = b"/usr/lib/libframework-test.so.0"
 ROOT_XML = (b'<Framework><Event-Config>' + CHILD + b'</Event-Config>'
             b'<private>not-a-report-value</private></Framework>')
 LIB_XML = b'<Events plugin="' + LIB + b'"/>'
+# Production-shaped initializer: these two declared files have no .xml suffix.
+EVENT_CONFIG = b'/usr/share/oma-dm-cfg/ipc/eventconfig_omadm'
+NOTI_CONFIG = b'/usr/share/oma-dm-cfg/ipc/noticonfig_omadm'
+EXTENSIONLESS_XML = (b'<INIT><Agent-Key>omadm_fota_ui</Agent-Key><Event>'
+                     b'<Event-Key>omadm</Event-Key><Event-Config>' + EVENT_CONFIG +
+                     b'</Event-Config><RunEventHandler>0</RunEventHandler></Event>'
+                     b'<Noti><Noti-Config>' + NOTI_CONFIG + b'</Noti-Config></Noti></INIT>')
+
+
+def directory_listing(names):
+    return directory_peer([b''.join(dent(name) for name in names) + done()])
 
 
 class FrameworkContextTests(unittest.TestCase):
-    def setup_capture(self, stack, root, sockets):
+    def setup_capture(self, stack, root, sockets, *, native_discovery=False, discovered=()):
         source = root / "original.bin"
         # Source pin matching is tested with a declared synthetic local input.
         source.write_bytes(b"LOCAL-LIBRARY-FIXTURE")
         stack.enter_context(patch.object(context, "LIBRARY_BYTES", source.stat().st_size))
         stack.enter_context(patch.object(context, "LIBRARY_SHA256",
                                          hashlib.sha256(source.read_bytes()).hexdigest()))
+        if not native_discovery:
+            # These cases isolate file chaining. A separate case below exercises
+            # every native LIST and RECV without replacing discovery.
+            stack.enter_context(patch.object(context, 'discover_receiver_paths', return_value=list(discovered)))
         connect = stack.enter_context(patch.object(context.socket, "create_connection", side_effect=sockets))
         return source, connect
 
@@ -68,6 +85,97 @@ class FrameworkContextTests(unittest.TestCase):
             self.assertNotIn(b"shell:", sock.sent)
             self.assertNotIn(b"SEND", sock.sent)
 
+    def test_actual_extensionless_configuration_shape_reads_both_plain_files(self):
+        events, notices = b'4, 1, 1, 1, I\n', b'1, 0, 0, private-notice-value\n'
+        sockets = [successful(EXTENSIONLESS_XML), successful(events), successful(notices)]
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            root = Path(tmp)
+            source, connect = self.setup_capture(stack, root, sockets)
+            report = context.capture_context('10.0.0.65', Path('/unused'), root / 'context',
+                                              library_input=source, archive=root / 'context.zip')
+            self.assertEqual(report['schema'], 'uglyos-r840x-sync-agent-context-v2')
+            self.assertEqual(report['copied_by_kind']['config'], 2)
+            self.assertFalse(report['receiver_candidate_code_copied'])
+            self.assertEqual(connect.call_count, 3)
+            fields = report['files'][0]['framework_fields']
+            self.assertEqual(fields['event_key'], 'omadm')
+            self.assertFalse(fields['run_event_handler_declared'])
+            self.assertEqual(fields['event_socket_from_config'], '/tmp/agent_fw_event_omadm')
+            self.assertNotIn('private-notice-value', json.dumps(report))
+            with zipfile.ZipFile(root / 'context.zip') as z:
+                self.assertEqual(z.read('context-02.conf'), events)
+                self.assertEqual(z.read('context-03.conf'), notices)
+        self.assertEqual(context.declared_references(EXTENSIONLESS_XML),
+                         [('config', EVENT_CONFIG), ('config', NOTI_CONFIG)])
+
+    def test_native_discovery_captures_observed_daemon_unit_binary_and_initializer_once(self):
+        unit = b'[Service]\nUser=root\nExecStart=/usr/bin/oma-dm-agent --private-token=hidden\n'
+        binary = fake_elf(soname='libsimulated-daemon.so.0')
+        listings = [directory_listing(['oma-dm.service', 'private-unit.service']),
+                    directory_listing([]),
+                    directory_listing(['oma-dm-agent', 'private-executable']),
+                    directory_listing(['omadmagent_fw_config.xml'])]
+        sockets = listings + [successful(EXTENSIONLESS_XML), successful(unit), successful(binary),
+                              successful(b'<INIT/>'), successful(b'4, 1, 1, 1, I\n'), successful(b'1, 0\n')]
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            root = Path(tmp)
+            source, connect = self.setup_capture(stack, root, sockets, native_discovery=True)
+            report = context.capture_context('10.0.0.65', Path('/unused'), root / 'context',
+                                              library_input=source, archive=root / 'context.zip')
+            self.assertEqual(report['state'], 'CONTEXT_CAPTURED')
+            self.assertEqual(connect.call_count, 10)
+            self.assertEqual(report['copied_by_kind'], {'xml': 2, 'config': 2, 'unit': 1, 'elf': 1})
+            self.assertTrue(report['receiver_candidate_code_copied'])
+            self.assertFalse(report['runtime_receiver_observed'])
+            self.assertFalse(report['root_obtained'])
+            paths = [r['remote_path'] for r in report['files']]
+            self.assertEqual(paths.count('/usr/bin/oma-dm-agent'), 1)
+            self.assertNotIn('private-token', json.dumps(report))
+            self.assertNotIn('private-executable', json.dumps(report))
+            self.assertNotIn('private-unit', json.dumps(report))
+        for sock, directory in zip(listings, context.FOTA_FRAMEWORK_DIRECTORIES.values()):
+            frames = calls(bytes(sock.sent))
+            self.assertEqual([f[3] for f in frames if f[0] == b'WRTE'],
+                             [handoff.SYNC_HDR.pack(b'LIST', len(directory)) + directory])
+        for sock in sockets:
+            self.assertNotIn(b'shell:', sock.sent)
+            self.assertNotIn(b'SEND', sock.sent)
+
+    def test_discovery_denial_is_categorical_and_other_directories_continue(self):
+        message = b'private-device-label: permission denied'
+        blocked = directory_peer([handoff.SYNC_HDR.pack(b'FAIL', len(message)) + message])
+        sockets = [blocked, directory_listing([]), directory_listing(['oma-dm-agent']), directory_listing([])]
+        with patch.object(context.socket, 'create_connection', side_effect=sockets):
+            reports = []
+            paths = context.discover_receiver_paths('10.0.0.65', Path('/unused'), 12, reports)
+        self.assertEqual(paths, [('elf', b'/usr/bin/oma-dm-agent')])
+        self.assertEqual(reports[0]['status'], 'DIRECTORY_LIST_DENIED_OR_UNSUPPORTED')
+        self.assertNotIn('private-device-label', json.dumps(reports))
+
+    def test_observed_unit_can_declare_an_executable_not_matched_by_the_bin_inventory(self):
+        unit_path = b'/usr/lib/systemd/system/oma-dm.service'
+        unit = b'[Service]\nExecStart=/usr/libexec/device-management --private-token=hidden\n'
+        binary = fake_elf()
+        sockets = [successful(b'<INIT/>'), successful(unit), successful(binary)]
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            root = Path(tmp)
+            source, connect = self.setup_capture(stack, root, sockets, discovered=[('unit', unit_path)])
+            report = context.capture_context('10.0.0.65', Path('/unused'), root / 'context',
+                                              library_input=source)
+            self.assertEqual(connect.call_count, 3)
+            self.assertEqual(report['files'][-1]['remote_path'], '/usr/libexec/device-management')
+            self.assertTrue(report['receiver_candidate_code_copied'])
+            self.assertFalse(report['runtime_receiver_observed'])
+            self.assertNotIn('private-token', json.dumps(report))
+
+    def test_receiver_inventory_handles_large_bin_directories_without_reporting_other_names(self):
+        decoder = DirectoryDecoder()
+        payload = b''.join(dent('unreported-' + str(i)) for i in range(1500))
+        decoder.feed(payload + dent('oma-dm-agent') + done(), 'sync_agent_receiver_binaries')
+        report = decoder.report('sync_agent_receiver_binaries')
+        self.assertEqual(set(report['matching_framework_files']), {'oma-dm-agent'})
+        self.assertNotIn('unreported-', json.dumps(report))
+
     def test_failed_root_read_still_creates_diagnostic_zip_without_private_error_text(self):
         with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
             root = Path(tmp)
@@ -101,6 +209,7 @@ class FrameworkContextTests(unittest.TestCase):
         self.assertEqual(context.declared_references(ROOT_XML), [("xml", CHILD)])
         self.assertEqual(context.declared_references(LIB_XML), [("elf", LIB)])
         self.assertEqual(context.classify_reference("/usr/bin/oma-dm-agent"), "elf")
+        self.assertEqual(context.classify_reference("/usr/apps/com.samsung.omadm/bin/daemon"), "elf")
 
     def test_entities_utf16_malformed_and_oversized_xml_are_rejected(self):
         for raw in (b'<!DOCTYPE x [<!ENTITY y "secret">]><x>&y;</x>',
