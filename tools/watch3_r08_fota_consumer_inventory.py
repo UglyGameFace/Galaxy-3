@@ -42,6 +42,18 @@ DBUS_DIRECTORIES = {
     "dbus_session_vendor": b"/usr/share/dbus-1/services",
 }
 DBUS_ACTIVATION_FILENAME = "fota.consumer.service"
+# Read-only metadata for the *standard* system bus policy directories.
+# These are not guaranteed to be the full effective config on this watch.
+DBUS_POLICY_DIRECTORIES = {
+    "dbus_system_vendor_policy": b"/usr/share/dbus-1/system.d",
+    "dbus_system_override_policy": b"/etc/dbus-1/system.d",
+}
+DBUS_FOTA_POLICY_NAME = re.compile(
+    r"[A-Za-z0-9_.+-]{0,60}(?:fota|firmware|update)[A-Za-z0-9_.+-]{0,60}\.conf\Z",
+    re.IGNORECASE,
+)
+MAX_FOTA_POLICY_FILES = 8
+
 # The owner's actual fota-service ELF pins the package's bin directory;
 # Samsung's published Tizen package layout places the manifest in the root.
 # The RECV of this exact manifest returned FAIL on the physical watch.
@@ -228,6 +240,12 @@ class DirectoryDecoder:
                     "bytes": size if size <= 64 * 1024 else "OVER_64_KIB",
                     "readable_by_someone_dac": bool(mode & 0o444),
                 }
+            elif scope in DBUS_POLICY_DIRECTORIES and DBUS_FOTA_POLICY_NAME.fullmatch(name):
+                if len(self.candidates) < MAX_FOTA_POLICY_FILES:
+                    self.candidates[name] = {
+                        "kind": mode_kind(mode),
+                        "bytes": size if size <= 64 * 1024 else "OVER_64_KIB",
+                    }
             elif scope in DBUS_DIRECTORIES and name == DBUS_ACTIVATION_FILENAME:
                 self.candidates[name] = {
                     "kind": mode_kind(mode),
@@ -322,6 +340,16 @@ class DirectoryDecoder:
                             "or missing filename is not proof of absent package metadata "
                             "elsewhere. DAC bits cannot prove access under Tizen SMACK."),
             }
+        if scope in DBUS_POLICY_DIRECTORIES:
+            return {
+                "status": "LIST_COMPLETE" if self.count else "EMPTY_OR_INACCESSIBLE",
+                "matching_fota_policy_files": self.candidates,
+                "matching_names_truncated": len(self.candidates) >= MAX_FOTA_POLICY_FILES,
+                "other_or_unreported_entries": max(0, self.count - len(self.candidates)),
+                "meaning": ("Only FOTA/firmware/update-named .conf files in this "
+                            "single directory are reported. No claim that other-named "
+                            "policy files or nonstandard includes are absent."),
+            }
         if scope in DBUS_DIRECTORIES:
             return {
                 "status": "LIST_COMPLETE" if self.count else "EMPTY_OR_INACCESSIBLE",
@@ -351,6 +379,8 @@ def list_one(sock, key_path: Path, scope: str) -> dict:
         path = DIRECTORIES[scope]
     elif scope in DBUS_DIRECTORIES:
         path = DBUS_DIRECTORIES[scope]
+    elif scope in DBUS_POLICY_DIRECTORIES:
+        path = DBUS_POLICY_DIRECTORIES[scope]
     elif scope in PACKAGE_INDEX_DIRECTORIES:
         path = PACKAGE_INDEX_DIRECTORIES[scope]
     elif scope in SYSTEMD_DIRECTORIES:
