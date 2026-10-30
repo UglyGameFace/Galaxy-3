@@ -203,6 +203,145 @@ def collect(ip: str, key: Path) -> dict:
 
 
 
+
+# Focused physical capture after the v1 report discarded matching attributes.
+# Exactly three previously observed files; no unknown directory names or paths.
+FOCUSED_FILES = (
+    b"/usr/share/dbus-1/system.conf",
+    b"/etc/dbus-1/system.conf",
+    b"/etc/dbus-1/system.d/fota-consumer.conf",
+)
+EXPECTED_FOCUSED_SHA256 = {
+    "/usr/share/dbus-1/system.conf":
+        "df59ef6b3bd808b8b131fc5eef7c45dd98622d5a52473ab3dd1f4f542b0d7cb1",
+    "/etc/dbus-1/system.conf":
+        "a6f50dc70ef082a110dcdb164579cd2af221b90226c5e0aca237edcad98a1c26",
+    "/etc/dbus-1/system.d/fota-consumer.conf":
+        "499ae912f2397720c952f27143d2112427509b95335c91d5b0ec7749e6999fec",
+}
+MAX_FOCUSED_RULES = 96
+SCOPE_ATTRIBUTES = frozenset(("context", "user", "group", "at_console"))
+RULE_ATTRIBUTES = frozenset((
+    "send_destination", "send_destination_prefix", "send_interface",
+    "send_member", "send_path", "send_type", "send_error",
+    "send_requested_reply", "send_broadcast", "receive_sender",
+    "receive_interface", "receive_member", "receive_path", "receive_type",
+    "receive_error", "receive_requested_reply", "own", "own_prefix",
+    "eavesdrop", "user", "group", "min_fds", "max_fds",
+))
+INCLUDE_ATTRIBUTES = frozenset((
+    "ignore_missing", "if_selinux_enabled", "selinux_root_relative",
+))
+# Configuration paths are system metadata, not arbitrary user-controlled paths.
+SAFE_CONFIG_TOKEN = re.compile(r"[A-Za-z0-9_./:@*+-]{1,192}\Z")
+
+
+def focused_policy_xml(raw: bytes) -> dict:
+    """Extract ordered original XML rules, preserving matching constraints.
+
+    No policy evaluation or include loading is performed. The generic v1
+    projection silently omitted important D-Bus rule attributes, so this
+    intentionally reports unknown attributes rather than losing them.
+    """
+    base = analyze_xml(raw)  # reuse strict size, entity and root checks
+    root = ET.fromstring(raw)
+    details = []
+    unreported_nodes = 0
+    for node in root:
+        if len(details) >= MAX_FOCUSED_RULES:
+            raise PolicyError("FOCUSED_XML_NODE_LIMIT")
+        if node.tag in ("include", "includedir"):
+            item = {
+                "kind": node.tag,
+                "path": node.text.strip() if node.text and
+                    SAFE_CONFIG_TOKEN.fullmatch(node.text.strip()) else "UNREPORTED",
+                "attributes": {k: v for k, v in node.attrib.items()
+                               if k in INCLUDE_ATTRIBUTES and
+                               SAFE_CONFIG_TOKEN.fullmatch(v)},
+                "unrecognized_attribute_names": sorted(
+                    k for k in node.attrib if k not in INCLUDE_ATTRIBUTES),
+            }
+            details.append(item)
+        elif node.tag == "policy":
+            if len(node) > MAX_FOCUSED_RULES:
+                raise PolicyError("FOCUSED_XML_RULE_LIMIT")
+            scope = {k: v for k, v in node.attrib.items()
+                     if k in SCOPE_ATTRIBUTES and SAFE_CONFIG_TOKEN.fullmatch(v)}
+            item = {
+                "kind": "policy",
+                "scope": scope,
+                "unrecognized_scope_names": sorted(
+                    k for k in node.attrib if k not in SCOPE_ATTRIBUTES),
+                "rules": [],
+                "other_nodes": 0,
+            }
+            for rule in node:
+                if rule.tag not in ("allow", "deny"):
+                    item["other_nodes"] += 1
+                    continue
+                safe = {k: v for k, v in rule.attrib.items()
+                        if k in RULE_ATTRIBUTES and SAFE_CONFIG_TOKEN.fullmatch(v)}
+                unsupported = sorted(
+                    k for k, v in rule.attrib.items()
+                    if k not in safe)
+                item["rules"].append({
+                    "action": rule.tag,
+                    "attributes": safe,
+                    "unreported_attribute_names": unsupported,
+                })
+                if len(item["rules"]) > MAX_FOCUSED_RULES:
+                    raise PolicyError("FOCUSED_XML_RULE_LIMIT")
+            details.append(item)
+        else:
+            unreported_nodes += 1
+    return {
+        "xml_valid": True,
+        "sha256": base["sha256"],
+        "bytes": len(raw),
+        "ordered_config_nodes": details,
+        "other_config_nodes": unreported_nodes,
+        "effective_sender_permission": "UNDETERMINED",
+    }
+
+
+def collect_focused(ip: str, key: Path) -> dict:
+    """Read only three exact observed files; no LIST, D-Bus or service action."""
+    ip = private_watch_ip(ip)
+    files = {}
+    for path in FOCUSED_FILES:
+        name = path.decode("ascii")
+        try:
+            result = focused_policy_xml(read_file(ip, key, path))
+            result["matches_october_30_v1_sha256"] = (
+                result["sha256"] == EXPECTED_FOCUSED_SHA256[name]
+            )
+            files[name] = result
+        except PolicyError as exc:
+            files[name] = {"status": str(exc)}
+    return {
+        "schema": "uglyos-r840x-dbus-focused-original-rules-v1",
+        "state": "FOCUSED_FILES_ONLY",
+        "source_paths": list(EXPECTED_FOCUSED_SHA256),
+        "policy_files": files,
+        "bus_config_load_order_verified": False,
+        "other_103_directory_entries_inspected": False,
+        "dbus_sender_shell_credential_verified": False,
+        "smack_cynara_authorization": "UNDETERMINED",
+        "effective_dbus_send_permission_for_shell": "UNDETERMINED",
+        "fota_consumer_method_authorization": "UNDETERMINED",
+        "fota_method_called": False, "watch_write_performed": False,
+        "root_proven": False, "bootloader_unlocked": False,
+        "stock_recovery_proven": False,
+        "interpretation": (
+            "Only the original ordered XML rules and include declarations of "
+            "three fixed files have been read; attributes that could alter a "
+            "match are retained or explicitly flagged. This is not the running "
+            "daemon's merged configuration, sender authorization, signature "
+            "acceptance, root or stock restoration."
+        ),
+    }
+
+
 MAX_PREVIOUS_REPORT = 256 * 1024
 FOTA_POLICY = "/etc/dbus-1/system.d/fota-consumer.conf"
 SYSTEM_POLICY = "/usr/share/dbus-1/system.conf"
@@ -324,11 +463,13 @@ def main(argv=None) -> int:
     mode = p.add_mutually_exclusive_group(required=True)
     mode.add_argument("--watch-ip", help="Authenticated read-only physical policy capture")
     mode.add_argument("--offline-report", type=Path, help="Local saved v1 report; NO WATCH")
+    mode.add_argument("--focused-detail-ip", help="Read only three fixed original D-Bus policy XML files")
     p.add_argument("--key-path", type=Path, default=Path.home()/".config/galaxy3/watch3-sdbkey")
     p.add_argument("--report", type=Path, default=None)
     args = p.parse_args(argv)
     output_path = args.report or Path.home() / ("watch3-r840x-dbus-policy-static-review.json"
-        if args.offline_report else "watch3-r840x-dbus-policy-evidence.json")
+        if args.offline_report else "watch3-r840x-dbus-focused-original-rules.json"
+        if args.focused_detail_ip else "watch3-r840x-dbus-policy-evidence.json")
     try:
         if output_path.exists() or output_path.is_symlink():
             raise PolicyError("POLICY_REPORT_ALREADY_EXISTS")
@@ -337,6 +478,8 @@ def main(argv=None) -> int:
         if args.offline_report:
             source, digest = read_existing_report(args.offline_report)
             result = review_saved_report(source, source_sha256=digest)
+        elif args.focused_detail_ip:
+            result = collect_focused(args.focused_detail_ip, args.key_path)
         else:
             result = collect(args.watch_ip, args.key_path)
         payload = (json.dumps(result, indent=2)+"\n").encode("utf-8")
@@ -354,6 +497,7 @@ def main(argv=None) -> int:
             else "LOCAL_OR_SDB_ERROR"), file=sys.stderr)
         return 1
     print(("OFFLINE_DBUS_POLICY_STATIC_REVIEW: " if args.offline_report else
+           "READ_ONLY_DBUS_FOCUSED_ORIGINAL_RULES: " if args.focused_detail_ip else
            "READ_ONLY_DBUS_POLICY_EVIDENCE: ")+str(output_path))
     print("Partial config evidence only; no service call, execution or watch write.")
     return 0
