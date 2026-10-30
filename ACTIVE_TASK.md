@@ -1,96 +1,92 @@
 # UgLy|OS R840X bootloader and recovery
 
-Updated October 30, 2026. Issue #47: restore stock reliably and boot UgLy|OS
-on the owner's SM-R840X / NOBLESSE-LARGE-BT R08, R840XXXU1AUA2, CSC PAP candidate.
-Root, bootloader unlock, custom boot and tested restoration remain unverified.
-Owner authorization is established. Android/Termux only, free only, no PC or
-hardware purchases. Preserve the single working watch and existing evidence.
+Updated October 30, 2026. Objective: verified recovery/stock restoration and
+UgLy|OS custom boot on the owner's SM-R840X, NOBLESSE-LARGE-BT R08,
+R840XXXU1AUA2, CSC PAP candidate. Root, bootloader unlock, custom boot and
+restoration remain unverified. Owner authorization is established. Termux/
+Android only, free only, no PC/hardware purchases. Preserve the working watch.
 
-## Current evidence and actual-code review
+## Current physical result
 
-Base main `d0843c6` contains PR #127. No overlapping open PR was present.
-The owner supplied `watch3-firmware-focus-evidence.zip`, SHA-256
-`461b424a40ef512b4bdca83fcfa6ab8682a7202226a5b643e8e6eb98c10cdabb`.
-All three members match the report: FIRMWARE_FOCUS_CAPTURED, 5,032-byte FUMO
-plugin and 1,058-byte DER public certificate. Originals stay private.
+Base main inspected at start: `2ee0f74`, merged PR #128. No overlapping open
+PR was present. New owner upload `watch3-native-root-evidence.zip`: 666 bytes,
+SHA-256 `aa0ab67fd0d941ceb955e63fb745b40a1e929194fdf3cd7dd570451b0360db70`.
+Its sole 1,560-byte report has SHA-256
+`f2f6cee9639a909acb053fe2aa47c81d93f0474d02d4ea067354234bc0d747bf`.
+Inventory/hash verified and preserved privately.
 
-FUMO SHA-256 `e3993a58bfc904730a0e753de188e5ab61cef7fb9e52de75899270477ed99458`;
-build ID `06d04977f8e458215a73fa1153ff9795896b3bf6`. Four exports implement
-server-list/MO metadata and logging stubs. All 17 selected immediate calls
-match independent Thumb/Capstone decoding and original PLT/GOT: only logging,
-malloc, calloc and strcmp. State uses the literal 10 plus NUL, not live status.
-The pinned fumo-plugin analyzer exposes these exact exports. No code executed.
+Result NATIVE_ROOT_NOT_GRANTED. Board matched; advertised sdbd_rootperm and
+rootonoff_support disabled. One root:on request explicitly denied. Before and
+after: UID 5001, UID tuple [5001,5001,5001,5001], GIDs [100,100,100,100],
+CapEff 0000000000000000, standard shell. No partition read, script acquisition,
+service activation, FOTA call or firmware write. Do not repeat the closed native
+root switch without a relevant change/different evidenced route. This is an
+actual device denial, not an owner-permission policy or collector failure.
 
-Certificate SHA-256 `196a09eb31f957fcca49bae20c427070c38cca59cddefaf1874ab2173c20a70c`;
-RSA-2048 public CA, self-issued, self-signature verified with SHA-512/RSA.
-Encoded validity 2013-11-21 through 2068-08-24. No private signing key and no
-package-acceptance or watch-clock observation. Do not confuse the certificate's
-own signature algorithm with the update archive's digest algorithm.
+## Current implementation and next physical input
 
-Earlier receiver ZIP `b07635c3...` remains preserved. Pinned daemon
-`32057c3b...` registers event 4 at callback code 0x23748. Further original-byte
-checks map task ID 8 registration/request to callback 0x1feac, then selected
-state-dependent segments through service_engine_start, fumo_exec and firmware
-update/state operations. Eight more calls, two PLT/GOT bindings, one callback
-literal and both task-ID instructions match. Complete live dispatch is open.
+Source branch: `issue-47-recovery-shell-access`.
+Earlier recovery-script failures came only through sync RECV and combined
+missing/denied/unreadable into one result. Ordinary shell access is now proven
+by the native-root identity reads. That does not prove ordinary cat can read
+the scripts; it is the next distinct access boundary to test.
 
-Daemon _pre_update_client verifies its pre_update.tar through certificate and
-EVP_PKEY verification before executing the inner helper; outer parsing precedes
-that check. The device plugin's failure branch rejoins later preparation.
-The standalone consumer helper is a separate implementation. Neither the check
-nor continuation proves whole-firmware acceptance or a bypass.
+Extend the authoritative recovery-script reader with --shell-context rather
+than creating another collector. Eight fixed reads cover the three original-
+unit/binary referenced scripts, the observed OMA-DM unit, file/directory stat,
+getcap, current SMACK label and updater systemctl show settings. Shared native
+stream code can return bytes without UTF-8 replacement; prior string callers
+and default sync-RECV behavior remain. Script paths are centralized. No root
+request, recovered-script execution, unit start or partition access. Payload
+hashes describe shell output, not independent disk hashes/completeness.
 
-[Original-code review](docs/watch3-r840x-omadm-install-verification.md).
+Private raw diagnostics remain distinct from script/unit-looking payloads.
+The fresh recovery-shell folder/ZIP is created even for failed/partial reads,
+without overwriting prior captures. Existing output/private-key behavior stays.
+The one phone command is in the
+[current recovery guide](docs/watch3-r840x-native-root-and-backup.md#current-next-command-ordinary-shell-recovery-context).
+This cloud workspace cannot authenticate directly to the watch. Capture/upload
+is the physical dependency. Do not repeat completed native-root/FUMO/library/
+receiver capture or identical unprivileged sync-RECV failures.
 
-## Current implementation and next physical run
+## Preserved original-code findings
 
-Source branch: `issue-47-native-root-recovery`.
-The new native-root entry point explicitly requests Tizen's normal root:on
-service at most once; this is an account-mode change request, not a read-only
-claim. Existing metadata/context collectors never invoke it. Fresh authenticated
-id -u and /proc/self/status UID/EUID reads establish actual root, independently
-of the service message/capability flags. No root or unlock has yet been observed
-on the owner's watch through this mode.
+FUMO ZIP `461b424a...` captured the original 5,032-byte metadata plugin and
+1,058-byte DER public CA. Seventeen original plugin calls resolve only to
+allocation/logging/comparison; State literal 10 is not live status. Certificate
+contains an RSA-2048 public key; verified self-signature is SHA-512/RSA, not
+proof of update-archive algorithm/acceptance or availability of a private key.
 
-If root is verified, it automatically rechecks p13 boot/p14 recovery labels and
-geometry against earlier kernel observations, then requests read-only full
-18 MiB copies of each. Truncated/oversized copies are not published. It then
-copies recovery-update.sh, rw-update-prepare.sh and the LIST-observed OMA-DM unit.
-The shared bounded decoder supports this explicit larger cap; previous ELF/
-metadata limits remain. No payload, SDB SEND, service activation, reboot or
-firmware write. Root-mode persistence and stock restoration are not assumed.
+Receiver ZIP `b07635c3...`: original daemon registers Install event 4 at code
+0x23748, task ID 8 spec/request callback 0x1feac. Selected state-dependent
+segments reach service_engine_start/fumo_exec/update operations. Full live
+execution is unobserved. Daemon pre-update helper verifies its nested archive;
+outer parsing precedes that check. Device-plugin helper failure rejoins later
+preparation. Standalone consumer has a separate helper implementation. Neither
+continuation nor a missing local check proves complete firmware acceptance.
+[Detailed original review](docs/watch3-r840x-omadm-install-verification.md).
 
-The phone run/upload remains necessary: this workspace has no authenticated
-watch connection. Use the one command in the
-[native root/backup guide](docs/watch3-r840x-native-root-and-backup.md).
-Fresh output folder/ZIP preserve all previous captures, including diagnostics
-if root is refused. Do not repeat completed FUMO/library/context acquisitions.
-Old preparation-script failures were ambiguous; retry is now conditional on
-new, verified root access, rather than an identical unprivileged request.
+Earlier evidence: non-root ARMv7 Tizen SDB, Linux 4.9.59, 21 partition labels
+and critical kernel geometry; original accessory service, consumer and sync
+library. Fota-consumer configured fota:fota/inactive with no live owner in the
+earlier snapshot. Owner completed only ODIN/LOKE handshake, returned to stock.
+Historical R500/retail firmware does not establish exact R840X compatibility.
 
-## Validation and unresolved project goals
+## Validation, issues and cleanup
 
-Local focused suite: 234 passing cases plus one compiler-only fixture skipped
-because clang/lld are absent locally. CI requires all 235 cases including
-the compiled ARM/readelf fixture, plus two real private D-Bus and one real
-systemd test per Ubuntu 22.04/24.04, with no skips. New fake-SDB cases verify
-root-message/UID disagreements, control-stream close, already-root behavior,
-identity fallback, diagnostics, geometry rejection, complete conditional copies,
-incomplete images and larger bounded transfer with legacy limits intact. Fixtures do
-not establish a physical receiver, exploit, bootloader unlock or recovery.
+Local focused suite: 240 passing cases, one compiler-only fixture unavailable
+locally. CI requires all 241 plus two private D-Bus and one real systemd case
+per Ubuntu 22.04/24.04, no skips. New fake-SDB cases cover fixed shell-only
+requests, byte preservation, cat-error diagnostics, refused/oversized output,
+private/exclusive ZIPs and default-mode compatibility. Fixtures do not prove
+physical script access or exploitation. Vendor originals stay private and are
+not executed, committed or uploaded to CI.
 
-Preserved earlier evidence: authenticated non-root ARMv7 Tizen Wi-Fi SDB,
-Linux 4.9.59, 21 partition names and critical sysfs geometry; original
-fota-service, fota-consumer and libsync-agent; consumer configured fota:fota,
-inactive/dead, no current D-Bus owner in the earlier snapshot. The owner
-completed only ODIN/LOKE handshake, then returned to stock. Historical R500
-and retail firmware findings do not establish exact-R840X compatibility.
+Remaining: physical shell-context result, actual writable archive/caller/MAC
+boundaries and complete verification chain, exact R840X S-BOOT/boot/recovery
+bytes, a verified rescue route, accepted custom boot and tested restoration.
+Issue #47 stays open. No unlock/root/recovery success claim is supported.
 
-Remaining: physical native-root result, full firmware verification and runtime privilege,
-exact R840X physical S-BOOT/boot/recovery bytes, complete signed rescue or
-verified compatible replacement, custom-kernel acceptance and tested stock
-restoration. Issue #47 stays open. PR #122 removed hard-coded NO_GO permission-like
-output; evidence flags describe observations, not authorization.
-
-Earlier remote branches remain retained because direct Git deletion has no
-authentication and the connector lacks delete-ref. Do not discard owner work.
+Merged remote branches remain retained: direct Git deletion lacks credentials
+and the connector has no delete-ref operation. Retire local merged branches
+without discarding owner work. Task records do not lock other conversations.

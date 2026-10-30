@@ -5,7 +5,66 @@ Issue #47, October 30, 2026. The FUMO plugin and public certificate are now
 They do not supply a demonstrated unlock. The next phone operation attempts
 Tizen's normal root-mode service once, verifies the actual shell identity,
 then acquires original boot/recovery and recovery-script inputs if permitted.
-This mode has not yet been tested on the physical owner's R840X.
+The owner has now run this mode: the watch explicitly denied the request.
+The current next operation is the shell-context read below.
+
+## Actual root attempt: denied
+
+The owner supplied `watch3-native-root-evidence.zip`, 666 bytes, SHA-256
+`aa0ab67fd0d941ceb955e63fb745b40a1e929194fdf3cd7dd570451b0360db70`.
+Its only member is the 1,560-byte `native-root-report.json`, SHA-256
+`f2f6cee9639a909acb053fe2aa47c81d93f0474d02d4ea067354234bc0d747bf`.
+Both the ZIP member inventory and report hash were verified and preserved.
+
+The board matched. `sdbd_rootperm` and `rootonoff_support` both advertised
+disabled; the root service explicitly reported denial. Before and after the
+request, `id -u` returned 5001 and the status UID tuple was
+`[5001,5001,5001,5001]`, GID tuple `[100,100,100,100]`, effective capabilities
+`0000000000000000`. The result is `NATIVE_ROOT_NOT_GRANTED`. No partition
+reads, script copies, FOTA calls, service activation or firmware writes ran.
+This closes the normal SDB root-switch route for this observed build/state.
+Do not repeat it without a relevant change or a different evidenced route.
+
+## Current next command: ordinary-shell recovery context
+
+The earlier script acquisition failures came from native sync RECV, which
+does not distinguish a missing file, denied access or another unreadable
+condition. They did not establish what a fixed `cat` through the already
+working ordinary shell returns. Root denial is not proof that those files
+are unreadable through this separate service.
+
+The existing recovery reader now has `--shell-context`. It reads exactly:
+
+- `recovery-update.sh`, `rw-update-prepare.sh`, `rw-update-systemd.sh`, whose
+  paths came from the original updater units/binaries;
+- the LIST-observed `oma-dm-agent.service`;
+- fixed `stat` metadata for these updater files and the FOTA/recovery directories;
+- fixed `getcap -v`, the current SMACK label and `systemctl show` settings for
+  the five known updater units.
+
+These are eight fixed shell requests, using cat/stat/getcap/systemctl show.
+No recovered script is executed, no root switch is retried, no unit is started
+and no partition or firmware is written. A missing utility or access error
+is kept privately as diagnostic output rather than treated as proof of absence.
+Script-looking payloads and diagnostic responses have separate statuses/names.
+Payloads remain byte-preserved within the shared bounded SDB stream reader.
+Their hashes describe captured shell output; on-disk completeness and an
+independent disk hash are not established by this transport alone.
+
+```sh
+cd ~/Galaxy-3 && git switch main && git pull --ff-only &&
+python tools/watch3_r08_recovery_script_pull.py \
+  --watch-ip 10.115.12.131 --shell-context \
+  --archive ~/storage/downloads/watch3-recovery-shell-evidence.zip
+```
+
+Attach `watch3-recovery-shell-evidence.zip` from Downloads, even for a partial
+state. The new 0700 folder/0600 files preserve all earlier evidence. A diagnostic
+ZIP is created even when every read fails; existing destinations are never
+overwritten. `RECOVERY_SCRIPTS_CAPTURED_VIA_SHELL` means three script-looking
+payloads were acquired, not that recovery or an exploit worked. Further analysis
+will use the captured contents and privilege metadata; root, custom boot,
+bootloader unlock and tested restoration remain unproven.
 
 ## Protocol and observed success requirements
 
@@ -62,7 +121,7 @@ the ZIP are 0600, and existing destinations are never overwritten. Denied root
 or partial acquisition still saves the categorical report/ZIP. Raw status,
 capability private paths, device names and control replies are not reported.
 
-## One phone command
+## Completed native-root command (retained as history)
 
 ```sh
 cd ~/Galaxy-3 && git switch main && git pull --ff-only &&
@@ -71,8 +130,8 @@ python tools/watch3_r840x_native_root.py \
   --archive ~/storage/downloads/watch3-native-root-evidence.zip
 ```
 
-Attach `watch3-native-root-evidence.zip` from Downloads, including after a
-failure state. The command uses a new `~/watch3-r840x-native-root-evidence`
+The owner supplied `watch3-native-root-evidence.zip`; do not repeat this
+completed command. It used a new `~/watch3-r840x-native-root-evidence`
 folder and preserves the earlier firmware-focused capture. It returns zero
 when root is independently observed, even if a later file read is partial.
 
@@ -94,4 +153,5 @@ diagnostics, complete conditional acquisition and exact RECV-only requests.
 Backup cases reject changed/duplicate metadata and incomplete copies. A
 synthetic transfer crosses the previous 8 MiB boundary while a legacy decoder
 still rejects it. No original firmware, physical watch or real host root switch
-is part of those fixtures. Physical validation remains the owner's phone run.
+is part of those fixtures. The native-root phone run was denied as recorded
+above. Physical validation of the distinct shell-context capture remains pending.

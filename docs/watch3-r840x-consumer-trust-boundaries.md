@@ -185,6 +185,12 @@ must receive a separate review and cannot inherit these findings.
 
 ## Preparation-script acquisition result: blocked
 
+Update October 30: the owner's standard SDB root request was explicitly denied,
+with UID/EUID 5001 and zero effective capabilities before and after. The next
+[recovery shell-context read](watch3-r840x-native-root-and-backup.md#current-next-command-ordinary-shell-recovery-context)
+uses fixed cat/metadata operations through the proven ordinary shell. This is
+a distinct transport from the failed RECV operations, not another root attempt.
+
 The actual original instruction at `0x63da` resolves the literal
 `/usr/bin/rw-update-prepare.sh FOTA` and passes it to `system_cmd` at
 `0x63de`. The owner ran merged PR #121's exact `--component update-prepare`
