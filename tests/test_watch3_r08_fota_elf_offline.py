@@ -125,7 +125,7 @@ class R840XFotaOfflineElfTests(unittest.TestCase):
 
     def test_original_daemon_and_device_plugin_profiles_reject_changed_bytes_and_custom_pins(self):
         sample = fake_elf()
-        for component in ('oma-dm-agent', 'dm-device-plugin'):
+        for component in ('oma-dm-agent', 'dm-device-plugin', 'fumo-plugin'):
             with self.subTest(component=component):
                 digest, size = module.PINNED_PROFILES[component]
                 with self.assertRaisesRegex(module.OfflineELFError, 'SOURCE_FILE_SIZE_MISMATCH'):
@@ -134,6 +134,11 @@ class R840XFotaOfflineElfTests(unittest.TestCase):
                     module.analyze(sample + b'\0' * (size - len(sample)), component=component)
                 with self.assertRaisesRegex(module.OfflineELFError, 'COMPONENT_PROFILE_MISMATCH'):
                     module.analyze(sample, hashlib.sha256(sample).hexdigest(), len(sample), component=component)
+
+    def test_plugin_exports_are_distinct_from_imports_and_not_install_proof(self):
+        facts = module.parse_elf32(fake_elf(export='sync_agent_plugin_get_mo_value'))
+        self.assertEqual(facts['allowlisted_function_exports'][0]['name'], 'sync_agent_plugin_get_mo_value')
+        self.assertEqual(facts['allowlisted_imports_by_category']['framework_plugin'], [])
 
     def test_digest_imports_are_distinct_from_signature_checks_and_md5_export_is_visible(self):
         facts = module.parse_elf32(fake_elf(export="gcry_md_open", export_shindex=0))

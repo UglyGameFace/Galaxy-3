@@ -6,77 +6,77 @@ Root, bootloader unlock, custom boot and tested restoration remain unverified.
 Owner authorization is established. Android/Termux only, free only, no PC or
 hardware purchases. Preserve the single working watch and existing evidence.
 
-## Current original capture and findings
+## Current evidence and actual-code review
 
-Base main `c84e40a` contains PR #126. The owner supplied
-`watch3-sync-agent-receiver-evidence.zip`, SHA-256
-`b07635c319f89c64daef262e6fac700af785cb3c852a342e6f3bd310e77ccdc9`.
-Its 14 members contain a 16,247-byte report and 13 original copied files:
-seven XML, two opaque config and four ARM ELF32 binaries. All member paths,
-lengths and hashes were verified. Originals remain private and unexecuted.
+Base main `d0843c6` contains PR #127. No overlapping open PR was present.
+The owner supplied `watch3-firmware-focus-evidence.zip`, SHA-256
+`461b424a40ef512b4bdca83fcfa6ab8682a7202226a5b643e8e6eb98c10cdabb`.
+All three members match the report: FIRMWARE_FOCUS_CAPTURED, 5,032-byte FUMO
+plugin and 1,058-byte DER public certificate. Originals stay private.
 
-The captured daemon `/usr/bin/oma-dm-agent` is 525,584 bytes, SHA-256
-`32057c3ba2537b2632a5d73dc1397b919ad3bf9c58c446b11e48e3837ab99a05`.
-The DM device plugin is 36,184 bytes, SHA-256
-`98c21b99b0c443e75f42e00cc990f6e4374fa8c398f8d3e8c82a4585d9f2f357`.
-The backend initializer is 5,296 bytes, SHA-256
-`f8ba15dde1bca536e16ee08149206d428b605e839667151a3d55056c49a7500e`.
+FUMO SHA-256 `e3993a58bfc904730a0e753de188e5ab61cef7fb9e52de75899270477ed99458`;
+build ID `06d04977f8e458215a73fa1153ff9795896b3bf6`. Four exports implement
+server-list/MO metadata and logging stubs. All 17 selected immediate calls
+match independent Thumb/Capstone decoding and original PLT/GOT: only logging,
+malloc, calloc and strcmp. State uses the literal 10 plus NUL, not live status.
+The pinned fumo-plugin analyzer exposes these exact exports. No code executed.
 
-The event file labels event 4 EVENT_INSTALL. The daemon's bounded TBB entry
-and callback setter register Thumb pointer 0x23749 / code 0x23748 for event 4.
-The callback opens a management object and requests an asynchronous FUMO task.
-The backend initializer selects Event-Key=omadm, RunEventHandler=1; main
-references that exact XML. This identifies a static registration, not a live
-receiver or UID. The complete async dispatch remains open.
+Certificate SHA-256 `196a09eb31f957fcca49bae20c427070c38cca59cddefaf1874ab2173c20a70c`;
+RSA-2048 public CA, self-issued, self-signature verified with SHA-512/RSA.
+Encoded validity 2013-11-21 through 2068-08-24. No private signing key and no
+package-acceptance or watch-clock observation. Do not confuse the certificate's
+own signature algorithm with the update archive's digest algorithm.
 
-Daemon _pre_update_client at 0x187e8 calls verify_FOTA_image at 0x188ea,
-using /usr/share/oma-dm-cfg/certi/FOTA_ROOT.cer. Actual calls and branches
-check X509_verify_cert and EVP_PKEY_verify before extracting/executing the
-inner pre_update_client_2. Outer archive parsing occurs before that check.
-This daemon implementation differs from the standalone fota-consumer helper.
-The device plugin's nonzero-helper-return path rejoins later update preparation;
-the helper signature check alone does not establish whole-update abortion.
-This continuation is also not proof of unsigned-firmware acceptance.
+Earlier receiver ZIP `b07635c3...` remains preserved. Pinned daemon
+`32057c3b...` registers event 4 at callback code 0x23748. Further original-byte
+checks map task ID 8 registration/request to callback 0x1feac, then selected
+state-dependent segments through service_engine_start, fumo_exec and firmware
+update/state operations. Eight more calls, two PLT/GOT bindings, one callback
+literal and both task-ID instructions match. Complete live dispatch is open.
 
-Private independent review: 25 immediate calls match standard-library decoding
-and Capstone; 18 PLT/GOT bindings, seven branches, eight literals and the event-4
-TBB entry match original bytes. readelf confirms metadata/build IDs/symbols.
-The analyzer now pins both originals and reports the formerly omitted
-EVP_PKEY_verify / X509_verify_cert imports. No absence inference is valid from
-the earlier narrow allowlist.
+Daemon _pre_update_client verifies its pre_update.tar through certificate and
+EVP_PKEY verification before executing the inner helper; outer parsing precedes
+that check. The device plugin's failure branch rejoins later preparation.
+The standalone consumer helper is a separate implementation. Neither the check
+nor continuation proves whole-firmware acceptance or a bypass.
 
-[Detailed review and next command](docs/watch3-r840x-omadm-install-verification.md).
+[Original-code review](docs/watch3-r840x-omadm-install-verification.md).
 
-## Next physical input: firmware focus
+## Current implementation and next physical run
 
-Source branch: `issue-47-fumo-signature-boundary`.
-The four-ELF limit consumed the daemon, HTTP and two device plugins. It did
-not attempt the backend-declared MO/FUMO plugin:
-`/usr/lib/sync-agent/dm-private/libplugin-mo-fumo.so`.
-Native LIST observed the 453-byte oma-dm-agent.service, but its RECV returned
-REMOTE_MISSING_DENIED_OR_UNREADABLE; the failure reason is not resolved.
+Source branch: `issue-47-native-root-recovery`.
+The new native-root entry point explicitly requests Tizen's normal root:on
+service at most once; this is an account-mode change request, not a read-only
+claim. Existing metadata/context collectors never invoke it. Fresh authenticated
+id -u and /proc/self/status UID/EUID reads establish actual root, independently
+of the service message/capability flags. No root or unlock has yet been observed
+on the owner's watch through this mode.
 
-The existing context reader's --firmware-focus option verifies the existing
-library, daemon and backend config before connecting, derives the unique FUMO
-plugin from that exact XML, and copies only that plugin plus the daemon's
-referenced public certificate. Two bounded RECV operations, no rediscovery.
-Fresh default folder watch3-r840x-firmware-focus-evidence; explicit ZIP in
-Downloads. Failures retain partial files and a diagnostic report/ZIP.
-No watch shell, helper execution, service/event invocation or firmware write.
-Original captures and the phone's SDB key remain untouched.
+If root is verified, it automatically rechecks p13 boot/p14 recovery labels and
+geometry against earlier kernel observations, then requests read-only full
+18 MiB copies of each. Truncated/oversized copies are not published. It then
+copies recovery-update.sh, rw-update-prepare.sh and the LIST-observed OMA-DM unit.
+The shared bounded decoder supports this explicit larger cap; previous ELF/
+metadata limits remain. No payload, SDB SEND, service activation, reboot or
+firmware write. Root-mode persistence and stock restoration are not assumed.
 
 The phone run/upload remains necessary: this workspace has no authenticated
-watch connection. Do not repeat the completed broad capture, old library
-capture, unavailable cache-helper query or ambiguous preparation-script read.
+watch connection. Use the one command in the
+[native root/backup guide](docs/watch3-r840x-native-root-and-backup.md).
+Fresh output folder/ZIP preserve all previous captures, including diagnostics
+if root is refused. Do not repeat completed FUMO/library/context acquisitions.
+Old preparation-script failures were ambiguous; retry is now conditional on
+new, verified root access, rather than an identical unprivileged request.
 
 ## Validation and unresolved project goals
 
-Local focused suite: 219 passing cases plus one compiler-only fixture skipped
-because clang/lld are absent locally. CI requires all 220 cases including
+Local focused suite: 234 passing cases plus one compiler-only fixture skipped
+because clang/lld are absent locally. CI requires all 235 cases including
 the compiled ARM/readelf fixture, plus two real private D-Bus and one real
 systemd test per Ubuntu 22.04/24.04, with no skips. New fake-SDB cases verify
-two-file selection, source pins, bounded diagnostics, private ZIPs, no discovery,
-unchanged prior captures, and invalid/deceptive local manifests. Fixtures do
+root-message/UID disagreements, control-stream close, already-root behavior,
+identity fallback, diagnostics, geometry rejection, complete conditional copies,
+incomplete images and larger bounded transfer with legacy limits intact. Fixtures do
 not establish a physical receiver, exploit, bootloader unlock or recovery.
 
 Preserved earlier evidence: authenticated non-root ARMv7 Tizen Wi-Fi SDB,
@@ -86,7 +86,7 @@ inactive/dead, no current D-Bus owner in the earlier snapshot. The owner
 completed only ODIN/LOKE handshake, then returned to stock. Historical R500
 and retail firmware findings do not establish exact-R840X compatibility.
 
-Remaining: full FUMO/firmware verification chain and runtime privilege,
+Remaining: physical native-root result, full firmware verification and runtime privilege,
 exact R840X physical S-BOOT/boot/recovery bytes, complete signed rescue or
 verified compatible replacement, custom-kernel acceptance and tested stock
 restoration. Issue #47 stays open. PR #122 removed hard-coded NO_GO permission-like
