@@ -58,12 +58,16 @@ class ThreeOriginalOpcodePairs(unittest.TestCase):
         with self.assertRaises(ValueError):
             emu.emulate_pairs(bytes(blob), self.anchor, 0, 0x2000, 0)
 
-    def test_32_bit_length_comparison_is_rejected(self):
+    def test_32_bit_length_comparison_truncates_high_bits(self):
         blob = bytearray(self.blob)
         old = int.from_bytes(blob[0x1024:0x1028], "little")
         put(blob, 0x1024, old & ~(1 << 31))
-        with self.assertRaises(ValueError):
-            emu.emulate_pairs(bytes(blob), self.anchor, 0, 0x2000, 0)
+        w = emu.emulate_pairs(bytes(blob), self.anchor, 0, 0x1_0000_0000, 0)
+        x = emu.emulate_pairs(self.blob, self.anchor, 0, 0x1_0000_0000, 0)
+        self.assertEqual(w["original_length_operand_bits"], 32)
+        self.assertEqual(x["original_length_operand_bits"], 64)
+        self.assertFalse(w["observed_guard_branch_taken"]["unsigned_length_greater_than_0x2000"])
+        self.assertTrue(x["observed_guard_branch_taken"]["unsigned_length_greater_than_0x2000"])
 
     def test_wrong_header_register_or_branch_rejected(self):
         for offset, word in ((0x1050, 0x6B04005F), (0x1054, 0x54000181)):
@@ -96,7 +100,7 @@ class ThreeOriginalOpcodePairs(unittest.TestCase):
     def test_case_table_has_unique_scenarios(self):
         names = [x[0] for x in emu.CASES]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(len(names), 6)
+        self.assertEqual(len(names), 7)
         self.assertTrue(all(x[0] != "signed_image_accepted" for x in emu.CASES))
 
 
