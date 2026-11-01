@@ -19,12 +19,13 @@ from watch3_sboot_pit_control_flow import (
 from watch3_sboot_pit_semantic_diff import REFERENCES, decode, inspect, read_pinned
 
 UINT32_MAX = (1 << 32) - 1
+UINT64_MAX = (1 << 64) - 1
 CASES = (
     ("precheck_error_bit", 0x80000000, 0, 0x12349876),
     ("zero_length", 0, 0, 0x12349876),
     ("length_at_limit", 0, 0x2000, 0x12349876),
     ("length_above_limit", 0, 0x2001, 0x12349876),
-    ("length_unsigned_max", 0, UINT32_MAX, 0x12349876),
+    ("length_unsigned_max", 0, UINT64_MAX, 0x12349876),
     ("header_mismatch", 0, 0x2000, 0),
 )
 
@@ -57,21 +58,23 @@ def _guard_site(blob: bytes, anchor: int) -> dict:
         raise ValueError("MAGIC_MATERIALIZATION_CHANGED")
     mask = 0xFFFF << mk["shift"]
     magic = ((mz["imm"] << mz["shift"]) & ~mask) | (mk["imm"] << mk["shift"])
-    if magic != 0x12349876 or length["register"] != 21:
+    length_word = instruction(blob, length["cmp_offset"])
+    if magic != 0x12349876 or length["register"] != 21 or not (length_word & (1 << 31)):
         raise ValueError("UNRECOGNIZED_GUARD_OPERANDS")
     return {"status": status, "length": length, "header": header, "magic": magic}
 
 
 def emulate_pairs(blob: bytes, anchor: int, precheck_w0: int,
-                  length_w21: int, header_w2: int) -> dict:
+                  length_x21: int, header_w2: int) -> dict:
     """Exercise observed original ARM64 instruction operands/conditions only.
 
     Each guard is run independently with synthetic W-register values; the
     prelude/other calls are NOT executed. No positive verdict means an image
     was accepted by the ROM or that the real bootloader exposes this route.
     """
-    precheck_w0, length_w21, header_w2 = map(
-        _u32, (precheck_w0, length_w21, header_w2))
+    precheck_w0, header_w2 = map(_u32, (precheck_w0, header_w2))
+    if type(length_x21) is not int or not 0 <= length_x21 <= UINT64_MAX:
+        raise ValueError("INVALID_SYNTHETIC_X21")
     site = _guard_site(blob, anchor)
     status, length, header = site["status"], site["length"], site["header"]
     s = branch(instruction(blob, status["branch_offset"]), status["branch_offset"])
@@ -85,7 +88,9 @@ def emulate_pairs(blob: bytes, anchor: int, precheck_w0: int,
             or length_compare["imm"] != 0x2000 or not length_branch
             or length_branch["op"] != "B_COND" or length_branch["condition"] != 12):
         raise ValueError("LENGTH_OPCODE_CHANGED")
-    too_long = length_w21 > length_compare["imm"]  # AArch64 unsigned B.HI
+    if not (instruction(blob, length["cmp_offset"]) & (1 << 31)):
+        raise ValueError("LENGTH_COMPARISON_NOT_64BIT")
+    too_long = length_x21 > length_compare["imm"]  # AArch64 64-bit unsigned B.HI
 
     header_word = instruction(blob, header["cmp_offset"])
     h = branch(instruction(blob, header["branch_offset"]), header["branch_offset"])
@@ -146,7 +151,7 @@ def compare(older: bytes, newer: bytes) -> dict:
         "source": "Two SHA-256-pinned public SM-R500 original S-BOOT blobs",
         "source_model": "SM-R500; not owner's SM-R840X",
         "firmware_hashes_sha256": {k: REFERENCES[k][0] for k in REFERENCES},
-        "execution_model": "three original AArch64 guard-opcode semantics, synthetic register inputs",
+        "execution_model": "three original AArch64 guard-opcode semantics, synthetic W0/X21/W2 inputs",
         "synthetic_scenarios": results,
         "both_donor_builds_same_observed_guard_decisions": same,
         "recovery_mechanism_equivalence_between_R840_and_R840X": "NOT_TESTED",
