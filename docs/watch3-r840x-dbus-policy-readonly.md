@@ -318,3 +318,64 @@ cat ~/watch3-r840x-dbus-focused-default-rule-audit-v2.json
 The new file is private mode 0600; the old audit remains unchanged.
 Official D-Bus policy matching reference:
 https://dbus.freedesktop.org/doc/dbus-daemon.1.html
+
+
+## Runtime boundary after owner's successful v2 offline audit
+
+The owner ran `--offline-focused-report` (PR #141), and the corrected
+report verified all three original source hashes, the matching FOTA
+default subset `deny -> allow`, **15 irrelevant default rules excluded**
+and zero unknown matching attributes or drift. The observed default
+allow is now a firmly supported *file-level* conclusion. The report
+still correctly marks actual `User::Shell` permission UNDETERMINED.
+
+The next useful hardware evidence is **not another D-Bus policy-file
+snapshot** or an attempt to call a privileged update service. It's
+the identity of the currently configured system bus.
+
+The existing `watch3_r840x_dbus_policy_readonly.py` now exposes an
+optional `--runtime-ip` mode for one tightly bounded metadata run:
+
+- Ask the existing systemd manager for selected **read-only**
+  properties of `dbus.service`: ID, load/active state, MainPID
+  presence and configured daemon executable/config-file *category*.
+  This is `systemctl show`, not enable, restart or reload.
+- Reuse the already-supported SDB `ps` snapshot to identify the exact
+  daemon executable name and whether a `--system` /
+  `--config-file` flag is visible. The parser supports only the
+  observed BusyBox `PID USER VSZ STAT COMMAND` layout; any other
+  layout returns an explicit unsupported status.
+
+The report discards all raw process arguments, unrelated process
+names, user names, PIDs, and addresses. It publishes only controlled
+categories: `DBUS_DAEMON`, `DBUS_BROKER_LAUNCH`, or unrecognized;
+config-file classes of the two already-captured system.conf paths,
+other/redacted explicit config, or no visible flag. Maximum reported
+process candidates: four. The preexisting SDB transport is reused,
+and only two fixed shell commands execute. No D-Bus `LaunchFota`,
+FOTA service activation, policy reload, privileged call, root request,
+watch write or firmware change occurs.
+
+After CI-green merge, run in Android/Termux with the **current** watch
+IP (the example address may have changed):
+
+```sh
+cd ~/Galaxy-3 && git switch main && git pull --ff-only
+python tools/watch3_r840x_dbus_policy_readonly.py \
+  --runtime-ip 10.115.12.131 \
+  --report ~/watch3-r840x-dbus-runtime-provenance.json
+cat ~/watch3-r840x-dbus-runtime-provenance.json
+```
+
+This creates a new mode-0600 JSON without overwriting older reports.
+If the unit is absent, the `ps` format differs, or permissions deny
+the read, the outcome is a **specific incomplete observation**,
+not proof that the system has no D-Bus daemon.
+
+**Limit:** a configured unit and a process snapshot do not prove
+which arguments or security labels the running system-bus daemon is
+using, nor establish all loaded policies, client UID/group precedence,
+SMACK/Cynara enforcement or receiver authorization. The report
+therefore *never* evaluates a final D-Bus send-permission verdict.
+Exact signed SM-R840X stock rescue remains a separate prerequisite
+for any experimental firmware/partition write. Issue #47 stays open.

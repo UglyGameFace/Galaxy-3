@@ -164,6 +164,13 @@ FOTA_UNIT_METADATA_PROBES = {
     "fota_unit_properties": "systemctl --system --no-pager --no-ask-password show --all --property=Id --property=LoadState --property=ActiveState --property=SubState --property=Type --property=BusName --property=User --property=Group --property=FragmentPath --property=ExecStart fota-consumer.service",
 }
 ALLOWED_PROBES.update(FOTA_UNIT_METADATA_PROBES)
+# Runtime provenance of the *existing* system bus. Query only the
+# configured unit and a passive process snapshot; never restart the bus.
+DBUS_RUNTIME_PROBES = {
+    "dbus_runtime_unit": "systemctl --system --no-pager --no-ask-password show --property=Id --property=LoadState --property=ActiveState --property=SubState --property=MainPID --property=ExecStart dbus.service",
+}
+ALLOWED_PROBES.update(DBUS_RUNTIME_PROBES)
+
 
 PORT = 26101
 VERSION = 0x00100000
