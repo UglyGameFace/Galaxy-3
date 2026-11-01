@@ -35,7 +35,8 @@ class ThreeOriginalOpcodePairs(unittest.TestCase):
 
     def test_unsigned_length_limit_inclusive_and_overflow(self):
         for length, expected in ((0, False), (0x1FFF, False), (0x2000, False),
-                                 (0x2001, True), (0xFFFFFFFF, True)):
+                                 (0x2001, True), (0xFFFFFFFF, True),
+                                 (0x1_0000_0000, True), (0xFFFFFFFFFFFFFFFF, True)):
             with self.subTest(length=length):
                 r = self.outcome(length=length)
                 self.assertIs(r["observed_guard_branch_taken"][
@@ -47,13 +48,20 @@ class ThreeOriginalOpcodePairs(unittest.TestCase):
         r = self.outcome(status=0x80000000, length=0xFFFFFFFF, header=0)
         self.assertEqual(r["scenario_branch"], "PRECHECK_ERROR_BRANCH")
         self.assertEqual(r["original_branch_file_offsets"]["precheck"], 0x1128)
-        self.assertIs(r["bootloader_executable_run"], False) if "bootloader_executable_run" in r else None
+        self.assertIs(r["real_firmware_external_calls_executed"], False)
 
     def test_wrong_status_bit_rejects_pattern(self):
         blob = bytearray(self.blob)
         # Replace bit 31 with bit 30 in TBNZ, preserving target.
         old = int.from_bytes(blob[0x1020:0x1024], "little")
         put(blob, 0x1020, (old & ~(31 << 19)) | (30 << 19))
+        with self.assertRaises(ValueError):
+            emu.emulate_pairs(bytes(blob), self.anchor, 0, 0x2000, 0)
+
+    def test_32_bit_length_comparison_is_rejected(self):
+        blob = bytearray(self.blob)
+        old = int.from_bytes(blob[0x1024:0x1028], "little")
+        put(blob, 0x1024, old & ~(1 << 31))
         with self.assertRaises(ValueError):
             emu.emulate_pairs(bytes(blob), self.anchor, 0, 0x2000, 0)
 
@@ -76,6 +84,10 @@ class ThreeOriginalOpcodePairs(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaises(ValueError):
                     emu.emulate_pairs(self.blob, self.anchor, value, 0, 0)
+        for value in (True, -1, 0x1_0000_0000_0000_0000, 1.5, "1"):
+            with self.subTest(length=value):
+                with self.assertRaises(ValueError):
+                    emu.emulate_pairs(self.blob, self.anchor, 0, value, 0)
 
     def test_unknown_firmware_is_not_automatically_approved(self):
         with self.assertRaises(ValueError):
