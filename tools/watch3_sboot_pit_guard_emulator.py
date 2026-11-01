@@ -26,6 +26,7 @@ CASES = (
     ("length_at_limit", 0, 0x2000, 0x12349876),
     ("length_above_limit", 0, 0x2001, 0x12349876),
     ("length_unsigned_max", 0, UINT64_MAX, 0x12349876),
+    ("length_high_32_bits_only", 0, 0x1_0000_0000, 0x12349876),
     ("header_mismatch", 0, 0x2000, 0),
 )
 
@@ -59,9 +60,13 @@ def _guard_site(blob: bytes, anchor: int) -> dict:
     mask = 0xFFFF << mk["shift"]
     magic = ((mz["imm"] << mz["shift"]) & ~mask) | (mk["imm"] << mk["shift"])
     length_word = instruction(blob, length["cmp_offset"])
-    if magic != 0x12349876 or length["register"] != 21 or not (length_word & (1 << 31)):
+    if magic != 0x12349876 or length["register"] != 21:
         raise ValueError("UNRECOGNIZED_GUARD_OPERANDS")
-    return {"status": status, "length": length, "header": header, "magic": magic}
+    # Bit 31 is sf in ADD/SUBS immediate encodings. The original opcode,
+    # not a test fixture or a source-code comment, determines W21 vs X21.
+    width = 64 if length_word & (1 << 31) else 32
+    return {"status": status, "length": length, "header": header,
+            "magic": magic, "length_operand_bits": width}
 
 
 def emulate_pairs(blob: bytes, anchor: int, precheck_w0: int,
@@ -88,9 +93,8 @@ def emulate_pairs(blob: bytes, anchor: int, precheck_w0: int,
             or length_compare["imm"] != 0x2000 or not length_branch
             or length_branch["op"] != "B_COND" or length_branch["condition"] != 12):
         raise ValueError("LENGTH_OPCODE_CHANGED")
-    if not (instruction(blob, length["cmp_offset"]) & (1 << 31)):
-        raise ValueError("LENGTH_COMPARISON_NOT_64BIT")
-    too_long = length_x21 > length_compare["imm"]  # AArch64 64-bit unsigned B.HI
+    effective_length = length_x21 & ((1 << site["length_operand_bits"]) - 1)
+    too_long = effective_length > length_compare["imm"]  # AArch64 unsigned B.HI
 
     header_word = instruction(blob, header["cmp_offset"])
     h = branch(instruction(blob, header["branch_offset"]), header["branch_offset"])
@@ -112,6 +116,7 @@ def emulate_pairs(blob: bytes, anchor: int, precheck_w0: int,
         classification = "HEADER_MISMATCH_FALLTHROUGH_UNVERIFIED_FOLLOWUP"
     return {
         "scenario_branch": classification,
+        "original_length_operand_bits": site["length_operand_bits"],
         "observed_guard_branch_taken": {
             "precheck_negative_status": negative,
             "unsigned_length_greater_than_0x2000": too_long,
@@ -151,9 +156,12 @@ def compare(older: bytes, newer: bytes) -> dict:
         "source": "Two SHA-256-pinned public SM-R500 original S-BOOT blobs",
         "source_model": "SM-R500; not owner's SM-R840X",
         "firmware_hashes_sha256": {k: REFERENCES[k][0] for k in REFERENCES},
-        "execution_model": "three original AArch64 guard-opcode semantics, synthetic W0/X21/W2 inputs",
+        "execution_model": "three original AArch64 guard-opcode semantics, synthetic W0/X21/W2 inputs, W21 truncation when encoded",
         "synthetic_scenarios": results,
         "both_donor_builds_same_observed_guard_decisions": same,
+        "donor_length_operand_width_bits": {
+            build: rows[CASES[0][0]]["original_length_operand_bits"]
+            for build, rows in results.items()},
         "recovery_mechanism_equivalence_between_R840_and_R840X": "NOT_TESTED",
         "R840X_original_sboot_available": False,
         "loader_mapping_authenticated": False,
