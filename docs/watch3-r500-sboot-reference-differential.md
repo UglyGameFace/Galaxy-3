@@ -247,24 +247,27 @@ a system-on-chip emulator and does not execute the full Samsung bootloader.
 It loads only the two previously pinned original **SM-R500** S-BOOT blobs,
 checks the original donor dispatch operands and three-guard pattern, then
 interprets these *specific original AArch64 instruction pairs* on synthetic
-register values (W0 and W2 are 32-bit; X21 is 64-bit):
+register values (W0/W2 are 32-bit; the original CMP opcode determines whether length uses W21 or X21):
 
 - TBNZ W0, bit 31: branch on the preceding check's negative-bit status.
-- CMP X21, #0x2000 followed by B.HI: branch for a 64-bit unsigned length above
+- CMP W21/X21, #0x2000 followed by B.HI: branch for an opcode-width unsigned length above
   8192 (the compared register/field does not establish protocol packet size).
 - CMP W2, W3 followed by B.EQ: branch when the header equals a value
   reconstructed from the original MOVZ/MOVK instructions (0x12349876).
 
-The original code's branch **offsets** are retained in the report; the
+The original code's branch **offsets** and the observed W21/X21 comparison width are retained in the report; the
 interpreter does not follow out-of-slice branches, dispatch original calls,
 map hardware, load image data or handle signatures. The branches are exercised
 independently with synthetic register values, not from a real watch session.
+A 32-bit W21 compare sees only X21's low 32 bits; the regression suite
+contrasts that behavior with a 64-bit X21 fixture. A failed real-original
+run exposed why assuming an unverified register width was incorrect.
 
 | Synthetic input condition | Expected observed branch classification |
 | --- | --- |
 | W0 bit 31 set | precheck-error branch |
 | X21 0 or 0x2000; correct header | header-match branch (follow-up unknown) |
-| X21 0x2001 or 0xffffffffffffffff | length-out-of-range branch |
+| X21 0x2001 or 0xffffffffffffffff | length-out-of-range branch after register-width masking |
 | X21 0x2000; W2 != derived PIT magic | header-mismatch fallthrough (follow-up unknown) |
 
 The existing GitHub Actions workflow
