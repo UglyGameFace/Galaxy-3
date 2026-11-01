@@ -1,10 +1,60 @@
 # UgLy|OS Galaxy Watch3 R840X recovery and boot
 
-Updated October 30, 2026. **Open issue #47.** Work is restricted to
+Updated November 1, 2026. **Open issue #47.** Work is restricted to
 the owner's Samsung Galaxy Watch3 **SM-R840X**, NOBLESSE-LARGE-BT R08,
 stock version R840XXXU1AUA2, CSC PAP candidate. Android/Termux only,
 free only, preserve the working watch. The target is a verified
 **exact-variant stock rescue** followed by reproducible UgLy|OS boot.
+
+## Current verified state — November 1, 2026
+
+**Latest main integration:** #143 (pinned original SM-R500 PIT guard opcode
+exercise) merged as \`e285350\`, with original-firmware workflow
+[41354502464](https://github.com/UglyGameFace/Galaxy-3/actions/runs/41354502464)
+**passed**. #142 (bounded read-only live-system-bus provenance collector)
+merged as \`716d0b7\`, after both Ubuntu 22.04/24.04 test jobs passed
+[41122092047](https://github.com/UglyGameFace/Galaxy-3/actions/runs/41122092047).
+GitHub reported zero open PRs at the time of this reconciliation. These
+are separate additive investigations; neither is an authorization bypass.
+
+**Donor opcode result:** Actual SHA-pinned 2019 and 2021 *SM-R500* ARM64
+S-BOOT guard opcodes have matching seven-case synthetic register-input
+branch classifications. The original instruction width is derived from
+the opcode rather than assumed. This does **not** emulate Samsung's full
+firmware/TrustZone/hardware, authenticate exact R840X firmware, verify
+firmware signature policy, or prove R840 and R840X recovery equivalence.
+
+**Target physical evidence:** Real R840X (R840XXXU1AUA2, active CSC PAP)
+did previously prove Wi-Fi SDB reads and ODIN/LOKE four-byte transport,
+21 named kernel partition text records (including boot, recovery, param)
+and read-only FOTA daemon/policy analysis. No working root, unsigned
+image acceptance, original stock rescue package, or recoverable custom boot
+has been demonstrated. The owner's corrected focused D-Bus offline audit
+did pass its **file-level** default-rule checks; actual system-bus loaded
+configuration and User::Shell authorization are still unverified. The newly
+merged \`--runtime-ip\` mode has **not** been physically executed.
+
+**Firmware sourcing (repeat-scan avoided):** Samsung PAP public version
+metadata matches the installed build but does not yield an authenticated
+download. Historic third-party exact-variant \`R840XXXU1ATFA\` repair
+catalog entries require access/payment and no ZIP bytes, OEM signatures,
+manifest or compatible rollback proof are in research custody.
+Retail \`R840XX...\`, engineering \`R840XTXX...\`, and an SM-R500 donor
+are not interchangeable signed R840X recovery packages. Repeating catalog
+searches or constructing more filename-only scanners does not close this
+gap.
+
+**Next evidence gate:** (1) Obtain a legally sourced **actual, unmodified
+SM-R840X** BL/AP/CSC or original S-BOOT/boot/recovery/PIT set and verify
+model/build, source provenance, SHA256, manifest, signatures and rollback
+compatibility **offline** before comparing functions; or (2) independently
+study exact-variant restoration on a sacrificial R840X / qualified repair
+fixture. Separately, the already merged read-only \`--runtime-ip\`
+collector may be run by the owner in Android/Termux to classify the
+actual D-Bus process, but no new tool or privileged watch operation is
+needed for that. Do not mistake a process identification for a privilege
+or recovery grant. **FLASH / PARTITION WRITES / FOTA INVOCATION: NO-GO.**
+Issue #47 stays open.
 
 ## Actual physical evidence
 
@@ -94,8 +144,8 @@ unsupported constraints, and returns explicit uncertainty reasons and
 a count of definitely nonmatching default send rules. Regression tests
 use original reply-only `method_return`/`error` shapes and verify genuine
 unknown FOTA constraints still fail closed. No watch call, root action,
-or firmware write. The new offline v2 report from the owner's already
-saved JSON remains the next user-operated verification step. Branch
+or firmware write. The owner has since executed the corrected offline v2 report successfully;
+see the November 1 current-state section for the verified result. Branch
 `issue-47-fota-audit-nonmatching-rules` is a safe retirement candidate,
 but this connector lacks branch deletion.
 
