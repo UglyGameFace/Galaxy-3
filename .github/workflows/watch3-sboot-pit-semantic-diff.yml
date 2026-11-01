@@ -113,7 +113,7 @@ jobs:
           with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
               f.write("\n## Real SM-R500 PIT guard opcode exercise\n")
               f.write("- Both pinned 2019/2021 donor S-BOOT versions return matching "
-                      "bounded branch decisions for six synthetic register scenarios.\n")
+                      "bounded branch decisions for seven synthetic register scenarios.\n")
               f.write("- Not an R840X bootloader or a proof of signed firmware, "
                       "recoverability, command reachability or custom boot. **NO_GO**.\n")
           PY
