@@ -247,10 +247,10 @@ a system-on-chip emulator and does not execute the full Samsung bootloader.
 It loads only the two previously pinned original **SM-R500** S-BOOT blobs,
 checks the original donor dispatch operands and three-guard pattern, then
 interprets these *specific original AArch64 instruction pairs* on synthetic
-32-bit register values:
+register values (W0 and W2 are 32-bit; X21 is 64-bit):
 
 - TBNZ W0, bit 31: branch on the preceding check's negative-bit status.
-- CMP W21, #0x2000 followed by B.HI: branch for an unsigned length above
+- CMP X21, #0x2000 followed by B.HI: branch for a 64-bit unsigned length above
   8192 (the compared register/field does not establish protocol packet size).
 - CMP W2, W3 followed by B.EQ: branch when the header equals a value
   reconstructed from the original MOVZ/MOVK instructions (0x12349876).
@@ -263,9 +263,9 @@ independently with synthetic register values, not from a real watch session.
 | Synthetic input condition | Expected observed branch classification |
 | --- | --- |
 | W0 bit 31 set | precheck-error branch |
-| W21 0 or 0x2000; correct header | header-match branch (follow-up unknown) |
-| W21 0x2001 or 0xffffffff | length-out-of-range branch |
-| W21 0x2000; W2 != derived PIT magic | header-mismatch fallthrough (follow-up unknown) |
+| X21 0 or 0x2000; correct header | header-match branch (follow-up unknown) |
+| X21 0x2001 or 0xffffffffffffffff | length-out-of-range branch |
+| X21 0x2000; W2 != derived PIT magic | header-mismatch fallthrough (follow-up unknown) |
 
 The existing GitHub Actions workflow
 watch3-sboot-pit-semantic-diff.yml obtains the two original historical
