@@ -1,10 +1,66 @@
 # UgLy|OS Galaxy Watch3 R840X recovery and boot
 
-Updated November 1, 2026. **Open issue #47.** Work is restricted to
+Updated November 15, 2026. **Open issue #47.** Work is restricted to
 the owner's Samsung Galaxy Watch3 **SM-R840X**, NOBLESSE-LARGE-BT R08,
 stock version R840XXXU1AUA2, CSC PAP candidate. Android/Termux only,
 free only, preserve the working watch. The target is a verified
 **exact-variant stock rescue** followed by reproducible UgLy|OS boot.
+
+## November 15, 2026: stock Tizen root is the immediate objective
+
+**Owner request:** Restore progress on obtaining root on the *physical*
+Samsung Galaxy Watch3 SM-R840X (`R840XXXU1AUA2`) using Android/Termux.
+Keep **stock-Tizen UID 0** distinct from a bootloader unlock, arbitrary
+code execution, custom kernel boot, and complete UgLy|OS installation.
+An exploit/handshake, SDB access, archive parser, or offline boot model
+does **not** prove root. A legitimate root milestone requires independent
+on-watch `id -u` / effective UID 0 and a reproducible mechanism.
+
+**Repository and hardware reconciliation:** At this review, `main`'s
+last returned commit before this status-only update was
+[`b41a617`](https://github.com/UglyGameFace/Galaxy-3/commit/b41a617733d473ddcf60945c305599ac446f4b87)
+(2026-11-01). No open PRs were returned. Merged #142's bounded
+`--runtime-ip` system-bus provenance mode remains **not run on the
+watch**. Earlier actual physical `sdb root on` was denied with
+`sdbd_rootperm:disabled`, `rootonoff_support:disabled`, UID/EUID 5001
+and zero effective caps; do not retry it without new evidence.
+The 2026-10-30 corrected original policy-file review matched a later
+`fota.consumer` default allow **within the observed three-file subset**,
+but not the actual runtime sender authorization or consumer checks.
+
+**Exploit research reassessment:** Samsung's primary wearable bulletin
+identifies pre-July-2021 Galaxy Watch3 bootloader param/recovery bugs
+CVE-2021-25434/25435 and FOTA/SAP bugs CVE-2021-25436/25437:
+https://security.samsungmobile.com/serviceWeb.smsb?year=2021&month=7 .
+The original researcher lists these CVEs:
+https://github.com/imssm99 .
+This review did not locate public, exact-R840X code/PoC and recovery proof
+for any of them. The CVEs are credible **research leads**, not a
+working root procedure or permission to upload an arbitrary archive.
+Current AsteroidOS OEM-unlock steps for Wear OS Galaxy Watch4+/FE are
+**inapplicable** to this Tizen Watch3:
+https://wiki.asteroidos.org/index.php/Fresh/wise .
+As of this review the public AsteroidOS supported/experimental catalog
+does not establish a Watch3 port:
+https://flash.asteroidos.org/watches/ .
+Third-party `R840XXXU1ATFA` and engineering `R840XTXXU1ATH1`
+listings do not prove a genuine complete `R840XXXU1AUA2` rescue,
+signature acceptance, safe downgrade, or a recoverable flash route.
+
+**Next one-device evidence action:** On the *already authorized*
+watch SDB connection, run merged
+`tools/watch3_r840x_dbus_policy_readonly.py --runtime-ip <CURRENT_WATCH_IP>
+--report <NEW_PRIVATE_JSON_PATH>` from Termux (see
+`docs/watch3-r840x-dbus-policy-readonly.md`). This reads fixed
+system-bus unit/process metadata only; it does not call any FOTA
+method or test exploitability. The output can determine whether
+further **offline** D-Bus policy work is worthwhile, not deliver root.
+Separately seek an authorized unmodified original exact-R840X
+firmware/S-BOOT set or a *sacrificial* R840X restoration study.
+No synthetic scanners, repeated root-switch calls, blind Odin writes,
+`LaunchFota` requests, recovery overwrites or supposed Wear OS unlocks.
+**Current result: ROOT NOT VERIFIED; STOCK RESCUE NOT VERIFIED;
+LIVE FIRMWARE WRITES NO-GO.** Keep Issue #47 open.
 
 ## Current verified state — November 1, 2026
 
