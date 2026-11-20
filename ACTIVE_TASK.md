@@ -129,6 +129,22 @@ invocation, not a read, and remains a separate owner decision.
 **ROOT NOT VERIFIED; STOCK RESCUE NOT VERIFIED; LIVE FIRMWARE
 WRITES NO-GO.** Keep Issue #47 open.
 
+**November 20 LaunchFota trace preparation:** The owner chose
+the offline handler trace before any invocation question. A desk
+audit of the existing reviews is recorded in
+`docs/watch3-r840x-launchfota-handler-map.md`: the bapd call
+construction and the consumer's shared handler prologue
+(sender/cookie not bound, claimed-PID SMACK classification, PID
+reply) are verified, and the `Install` branch is traced to the
+sync-agent install event — but the `LaunchFota` branch itself
+has never been decoded, so its effect (classification-only vs
+state-setting vs update-reaching) is unknown. The trace needs
+only `watch3-fota-consumer-evidence.zip` re-attached from the
+owner's phone; the decode environment (Capstone 5.0.7) is
+prepared in this workspace, and the outcome reading is
+pre-registered in the map: a state/update-reaching branch makes
+any probe a firmware action under the existing NO-GO.
+
 ## November 15, 2026: stock Tizen root is the immediate objective
 
 **Owner request:** Restore progress on obtaining root on the *physical*
