@@ -743,6 +743,18 @@ def parse_runtime_unit(raw: str) -> dict:
     }
 
 
+RUNTIME_PS_TIME = re.compile(r"(\d+-)?\d+:\d{2}(:\d{2})?\Z")
+
+
+def _runtime_candidate(command: str) -> dict:
+    return {
+        "daemon_family": _daemon_family(command),
+        "explicit_config_class": _config_flag_class(command),
+        "system_flag_observed": bool(re.search(r"(?:^|\s)--system(?:\s|$)", command)),
+        "process_is_system_bus_attested": False,
+    }
+
+
 def parse_runtime_ps(raw: str) -> dict:
     """Inspect one passive bounded ps output, discarding all unrelated argv."""
     if not isinstance(raw, str) or not 1 <= len(raw) <= RUNTIME_RAW_MAX:
@@ -751,30 +763,49 @@ def parse_runtime_ps(raw: str) -> dict:
     if len(lines) > 2000 or len(lines) < 1:
         raise PolicyError("RUNTIME_PROCESS_OUTPUT_INVALID")
     header = lines[0].split()
-    # The previously observed BusyBox ps format is PID USER VSZ STAT COMMAND.
+    # Two layouts are supported, each only on an exact header match.
     # Different layouts must not be misinterpreted as runtime confirmation.
-    if header[:5] != ["PID", "USER", "VSZ", "STAT", "COMMAND"]:
-        return {"status": "PS_LAYOUT_UNSUPPORTED", "candidate_processes": [],
-                "truncated": False}
+    if header[:5] == ["PID", "USER", "VSZ", "STAT", "COMMAND"]:
+        # BusyBox layout assumed by the original parser; never yet
+        # observed on the physical watch, kept for fixture compatibility.
+        layout, split_count, command_index = "BUSYBOX_PID_USER_VSZ_STAT_COMMAND", 4, 4
+
+        def command_of(line):
+            chunks = line.strip().split(None, split_count)
+            if len(chunks) != 5 or not chunks[0].isdigit():
+                return None
+            return chunks[command_index]
+    elif header[:4] == ["PID", "TTY", "TIME", "CMD"]:
+        # procps layout physically observed on the SM-R840X on
+        # November 20, 2026 via the --ps-header-ip capture. The
+        # allowlisted snapshot command is `ps -e`, so rows cover all
+        # processes, not only the SDB shell session.
+        layout = "PROCPS_PID_TTY_TIME_CMD"
+
+        def command_of(line):
+            chunks = line.strip().split(None, 3)
+            if (len(chunks) != 4 or not chunks[0].isdigit()
+                    or not RUNTIME_PS_TIME.fullmatch(chunks[2])):
+                return None
+            return chunks[3]
+    else:
+        return {"status": "PS_LAYOUT_UNSUPPORTED", "layout": "UNRECOGNIZED",
+                "candidate_processes": [], "truncated": False}
     observed = []
     all_count = 0
     for line in lines[1:]:
-        chunks = line.strip().split(None, 4)
-        if len(chunks) != 5 or not chunks[0].isdigit():
+        command = command_of(line)
+        if command is None:
             continue
-        family = _daemon_family(chunks[4])
-        if not family:
+        candidate = _runtime_candidate(command)
+        if not candidate["daemon_family"]:
             continue
         all_count += 1
         if len(observed) < RUNTIME_PROCESS_LIMIT:
-            observed.append({
-                "daemon_family": family,
-                "explicit_config_class": _config_flag_class(chunks[4]),
-                "system_flag_observed": bool(re.search(r"(?:^|\s)--system(?:\s|$)", chunks[4])),
-                "process_is_system_bus_attested": False,
-            })
+            observed.append(candidate)
     return {
         "status": "PS_SNAPSHOT_PARSED",
+        "layout": layout,
         "candidate_processes": observed,
         "truncated": all_count > RUNTIME_PROCESS_LIMIT,
     }
@@ -815,7 +846,8 @@ def collect_runtime_bus(ip: str, key: Path) -> dict:
 
 
 PS_HEADER_TOKEN = re.compile(r"[A-Z%][A-Z0-9_%]{0,15}\Z")
-PS_HEADER_SUPPORTED_PREFIX = ["PID", "USER", "VSZ", "STAT", "COMMAND"]
+PS_HEADER_SUPPORTED_PREFIXES = (["PID", "USER", "VSZ", "STAT", "COMMAND"],
+                                ["PID", "TTY", "TIME", "CMD"])
 
 
 def parse_ps_header(raw: str) -> dict:
@@ -844,7 +876,8 @@ def parse_ps_header(raw: str) -> dict:
         "header_tokens": tokens,
         "data_rows_discarded": sum(1 for line in lines[1:] if line.strip()),
         "header_matches_previously_supported_layout":
-            tokens[:5] == PS_HEADER_SUPPORTED_PREFIX,
+            any(tokens[:len(prefix)] == prefix
+                for prefix in PS_HEADER_SUPPORTED_PREFIXES),
     }
 
 

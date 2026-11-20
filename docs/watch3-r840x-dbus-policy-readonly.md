@@ -433,3 +433,32 @@ provenance work is exhausted: the remaining unknowns (sender UID,
 SMACK/Cynara, consumer checks) are not reachable by these collectors,
 and none of them would by itself grant root or bypass firmware
 signature validation.
+
+
+## November 20, 2026: physical ps header observed; parser corrected
+
+The owner ran `--ps-header-ip` once on the physical watch (after two
+connection failures while the watch's Wi-Fi was unreachable, then a
+successful run with the watch awake). Result: `PS_HEADER_OBSERVED`
+with header tokens **`PID TTY TIME CMD`** — a procps layout, not
+BusyBox — and exactly **one** data row discarded.
+
+That single row is itself evidence: plain `ps` inside the SDB shell
+lists only the calling session, so the previous snapshot could never
+have shown the system-bus daemon (or any update service) regardless
+of parser support. Two corrections follow:
+
+- `parse_runtime_ps` now accepts the exact observed
+  `PID TTY TIME CMD` header alongside the original BusyBox layout,
+  validating the TIME column shape and matching only argv0, exactly
+  as before. Any other header still returns `PS_LAYOUT_UNSUPPORTED`.
+- The allowlisted `service_process_snapshot` command is now the fixed
+  literal `ps -e` (same columns, every process). This also corrects
+  the FOTA service inventory, whose process-name observation shared
+  the same session-scoped command.
+
+Next step is one `--runtime-ip` re-run. A parsed candidate still
+carries `process_is_system_bus_attested: false`: it shows a running
+daemon's argv0 and flags, not its loaded policy, sender credentials,
+or any permission. Permission remains UNDETERMINED and firmware
+writes remain NO-GO.

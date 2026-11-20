@@ -12,7 +12,12 @@ FOTA_PATH_PROBES = {
     "fota_service_path": "ls -ld /usr/apps/com.samsung.fota-consumer/bin/fota-service",
     "update_client_path": "ls -ld /usr/apps/com.samsung.tizen.update-client",
     "oma_dm_socket_path": "ls -ld /tmp/agent_fw_event_omadm",
-    "service_process_snapshot": "ps",
+    # `ps -e`, not plain `ps`: the physical SM-R840X proved on
+    # November 20, 2026 that its procps default lists only the calling
+    # session (one row inside the SDB shell), which can never show a
+    # system daemon or update service. `-e` keeps the same
+    # PID TTY TIME CMD columns and lists every process.
+    "service_process_snapshot": "ps -e",
 }
 FOTA_FILE_PATHS = {
     "fota_service_path": "/usr/apps/com.samsung.fota-consumer/bin/fota-service",

@@ -674,7 +674,7 @@ class RunningBusProvenanceTests(unittest.TestCase):
                          frozenset(("dbus_runtime_unit","service_process_snapshot")))
         self.assertEqual(set(DBUS_RUNTIME_PROBES),{"dbus_runtime_unit"})
         self.assertIn("dbus.service",ALLOWED_PROBES["dbus_runtime_unit"])
-        self.assertEqual(ALLOWED_PROBES["service_process_snapshot"],"ps")
+        self.assertEqual(ALLOWED_PROBES["service_process_snapshot"],"ps -e")
         self.assertNotIn("restart",ALLOWED_PROBES["dbus_runtime_unit"])
         self.assertNotIn("LaunchFota",ALLOWED_PROBES["dbus_runtime_unit"])
 
@@ -720,6 +720,35 @@ class RunningBusProvenanceTests(unittest.TestCase):
                          "CAPTURED_CORE_SYSTEM_CONF")
         self.assertNotIn("247",json.dumps(result))
         self.assertFalse(result["candidate_processes"][0]["process_is_system_bus_attested"])
+
+    def test_procps_layout_observed_on_physical_watch(self):
+        # Header and shape are the owner's November 20, 2026 physical
+        # --ps-header-ip observation: PID TTY TIME CMD.
+        raw = ("PID TTY TIME CMD\n"
+               "1 ? 00:00:03 /usr/lib/systemd/systemd\n"
+               "247 ? 00:00:00 /usr/bin/dbus-daemon --system --nofork "
+               "--config-file=/usr/share/dbus-1/system.conf\n"
+               "309 ? 00:00:00 /bin/sh -c dbus-daemon --system --test\n")
+        result=policy.parse_runtime_ps(raw)
+        self.assertEqual(result["status"],"PS_SNAPSHOT_PARSED")
+        self.assertEqual(result["layout"],"PROCPS_PID_TTY_TIME_CMD")
+        self.assertEqual(len(result["candidate_processes"]),1)
+        candidate=result["candidate_processes"][0]
+        self.assertEqual(candidate["daemon_family"],"DBUS_DAEMON")
+        self.assertTrue(candidate["system_flag_observed"])
+        self.assertEqual(candidate["explicit_config_class"],
+                         "CAPTURED_CORE_SYSTEM_CONF")
+        self.assertFalse(candidate["process_is_system_bus_attested"])
+        self.assertNotIn("247",json.dumps(result))
+
+    def test_procps_malformed_time_rows_are_skipped(self):
+        raw = ("PID TTY TIME CMD\n"
+               "abc ? 00:00:00 /usr/bin/dbus-daemon --system\n"
+               "247 ? not-a-time /usr/bin/dbus-daemon --system\n"
+               "248 ? 1-02:03:04 dbus-daemon --system\n")
+        result=policy.parse_runtime_ps(raw)
+        self.assertEqual(result["status"],"PS_SNAPSHOT_PARSED")
+        self.assertEqual(len(result["candidate_processes"]),1)
 
     def test_unsupported_ps_layout_cannot_claim_active_bus(self):
         result=policy.parse_runtime_ps("USER PID PPID VSZ COMMAND\nroot 247 1 100 dbus-daemon\n")
@@ -796,7 +825,7 @@ class PsHeaderDiagnosticTests(unittest.TestCase):
         self.assertEqual(result["status"],"PS_HEADER_OBSERVED")
         self.assertEqual(result["header_tokens"],["PID","TTY","TIME","CMD"])
         self.assertEqual(result["data_rows_discarded"],2)
-        self.assertFalse(result["header_matches_previously_supported_layout"])
+        self.assertTrue(result["header_matches_previously_supported_layout"])
         self.assertNotIn("SECRET",json.dumps(result))
         self.assertNotIn("dbus-daemon",json.dumps(result))
         self.assertNotIn("247",json.dumps(result))
