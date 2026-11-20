@@ -48,3 +48,25 @@ python tools/watch3_r840x_kernel_gate_readonly.py \
 
 Root, bootloader unlock and stock recovery remain unproven, and
 firmware writes remain NO-GO regardless of this report.
+
+## Result — November 20, 2026 physical run
+
+The owner ran the collector on the physical watch and all four
+probes classified:
+
+- `kernel_machine`: `AARCH64_64BIT`. The watch itself is 64-bit;
+  this corrects the survey's earlier inference from R810 evidence
+  that the stack was almost certainly 32-bit.
+- `binder_node` (`/dev/binder`): `ABSENT`.
+- `binderfs_control_node` (`/dev/binderfs/binder-control`):
+  `ABSENT`.
+- `bpf_unprivileged_disabled`: `SETTING_ABSENT` — the sysctl file
+  is not present, so no 0/1/2 value was observed.
+
+`binder_gate` is therefore `BINDER_NODE_ABSENT_GATE_CLOSED`: the
+CVE-2019-2215 Binder family is closed for this device, and
+kernel-LPE research through this collector stops. A prior partial
+report (Binder and machine probes connection-failed, gate
+`UNDETERMINED`) is superseded by this complete run. This result
+is not root, not an exploit outcome, and changes nothing about
+the firmware-write NO-GO.
