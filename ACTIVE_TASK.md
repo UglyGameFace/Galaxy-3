@@ -170,6 +170,31 @@ remains a separate owner decision. **ROOT NOT VERIFIED;
 STOCK RESCUE NOT VERIFIED; LIVE FIRMWARE WRITES NO-GO.**
 Keep Issue #47 open.
 
+**November 20 sync-agent socket reachability collector:**
+The consumer trace refocused the root question on the one
+execution boundary that matters — the consumer's unsigned
+nested-program execution — whose remaining unknowns are
+placement (POSIX-open, actual write untested) and a trigger.
+A second trigger candidate from the October sync-agent review
+has never had its reachability measured: the `Install` path's
+event 4 travels over the Unix socket
+`/tmp/agent_fw_event_omadm` to the OMA-DM daemon, and the
+library's generic listener chmods its socket 0777 (the
+consumer-side instance is configured client-only,
+`RunEventHandler=0`, so the daemon is the receiver). A new
+read-only collector
+(`tools/watch3_r840x_sync_socket_reachability_readonly.py`,
+doc `docs/watch3-r840x-sync-socket-reachability-readonly.md`)
+runs five fixed metadata/presence probes — shell UID, `/tmp`,
+the socket node, the OMA-DM directory, and the
+`.oma-dm-agent-enabled` marker — and reports categories only.
+It opens no socket, sends no event, and writes nothing. One
+owner run is the next physical step; any later step that
+connects to the socket or sends an event is a separate design
+and a separate owner decision, as is the marker-file write
+proof for the save directory. **ROOT NOT VERIFIED; STOCK
+RESCUE NOT VERIFIED; LIVE FIRMWARE WRITES NO-GO.**
+
 ## November 15, 2026: stock Tizen root is the immediate objective
 
 **Owner request:** Restore progress on obtaining root on the *physical*

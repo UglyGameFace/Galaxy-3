@@ -197,6 +197,20 @@ FOTA_REACHABILITY_PROBES = {
     "vconf_consumer_state": "vconftool get db/fotaconsumer/state",
 }
 ALLOWED_PROBES.update(FOTA_REACHABILITY_PROBES)
+# Sync-agent event-socket reachability facts only: does the OMA-DM
+# event socket node the library derives (/tmp/agent_fw_event_omadm)
+# exist, what permission class would the UID 5001 shell hold on it,
+# is /tmp traversable, and is the OMA-DM directory / enabled-marker
+# visible? Metadata and presence only; no socket is opened, no event
+# is sent, no file is created.
+SYNC_SOCKET_REACHABILITY_PROBES = {
+    "shell_uid": "id -u",
+    "tmp_dir_metadata": "ls -ldn /tmp",
+    "event_socket_metadata": "ls -ldn /tmp/agent_fw_event_omadm",
+    "omadm_dir_metadata": "ls -ldn /opt/usr/data/fota/oma-dm",
+    "omadm_marker_node": "ls /opt/usr/data/fota/oma-dm/.oma-dm-agent-enabled",
+}
+ALLOWED_PROBES.update(SYNC_SOCKET_REACHABILITY_PROBES)
 
 
 PORT = 26101
