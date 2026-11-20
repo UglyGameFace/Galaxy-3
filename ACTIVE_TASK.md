@@ -145,6 +145,31 @@ prepared in this workspace, and the outcome reading is
 pre-registered in the map: a state/update-reaching branch makes
 any probe a firmware action under the existing NO-GO.
 
+**November 20 LaunchFota trace result:** The owner supplied
+the pinned consumer binary (byte-exact: 89,980 bytes, SHA-256
+`19ad8468…c676a1a`; analyzer profile re-verified) and the
+branch was decoded offline with Capstone (PLT/GOT-resolved;
+binary never executed). The `LaunchFota` comparison sits at
+`0xc65e`; its branch (`0xc6f6`) does exactly one thing —
+`g_timeout_add(1000 ms, _do_launch_oma_dm_agent)` — and
+rejoins the handler exit. The callback (`0xadb0`) checks the
+`.oma-dm-agent-enabled` marker file; if absent it D-Bus-calls
+`com.samsung.omadmagent` `Launch` with the consumer's PID;
+then it sets `db/fotaconsumer/fota_enabler` to 10 or 0 from
+`db/retailmode/enabled` and quits the consumer's main loop
+(`_fota_consumer_terminate`). **LaunchFota is a handoff to
+the OMA-DM agent, not an update trigger**: the traced chain
+never calls `do_device_control`, the update wrapper or
+`_pre_update_client`, never touches the save directory,
+DELTA.PATH, the `ui_state`/`state` keys, or any
+`sync_agent_dm_fota_*` import. Still open: bus policy for a
+shell-sent call (UNDETERMINED) and the OMA-DM agent's own
+post-launch behavior (separate binary). Full record:
+`docs/watch3-r840x-launchfota-handler-map.md`. Any probe
+remains a separate owner decision. **ROOT NOT VERIFIED;
+STOCK RESCUE NOT VERIFIED; LIVE FIRMWARE WRITES NO-GO.**
+Keep Issue #47 open.
+
 ## November 15, 2026: stock Tizen root is the immediate objective
 
 **Owner request:** Restore progress on obtaining root on the *physical*
