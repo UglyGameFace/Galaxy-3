@@ -29,6 +29,15 @@ exhausted and the remaining D-Bus unknowns are not reachable by these
 collectors. **ROOT NOT VERIFIED; STOCK RESCUE NOT VERIFIED; LIVE
 FIRMWARE WRITES NO-GO.** Keep Issue #47 open.
 
+**November 20 follow-through:** The owner executed `--ps-header-ip`
+on the physical watch. The real header is `PID TTY TIME CMD`
+(procps), and plain `ps` in the SDB shell returned exactly one row —
+it is session-scoped and could never have shown the system-bus
+daemon. The runtime parser now accepts that exact layout, and the
+allowlisted snapshot command is the fixed literal `ps -e`. One
+`--runtime-ip` re-run remains to attest the running daemon's
+arguments; permission stays UNDETERMINED either way.
+
 ## November 15, 2026: stock Tizen root is the immediate objective
 
 **Owner request:** Restore progress on obtaining root on the *physical*
