@@ -66,6 +66,27 @@ probes (machine class, Binder node presence, BPF switch) decide
 whether the CVE-2019-2215 Binder family exists on this device at
 all. One owner run of that collector is the next physical step.
 
+**November 20 kernel-gate result:** The owner executed the
+kernel-gate collector on the physical watch; all four probes
+classified. Machine class is `AARCH64_64BIT` — the watch itself is
+64-bit, correcting the earlier inference from R810 evidence
+(dzImage/Thumb-2) that the stack was almost certainly 32-bit.
+`/dev/binder` is **ABSENT** and `/dev/binderfs/binder-control` is
+**ABSENT**, so the report's binder gate is
+`BINDER_NODE_ABSENT_GATE_CLOSED`: the CVE-2019-2215 Binder family
+does not exist on this device, regardless of patch state, and
+kernel-LPE research through this collector stops, as the doc
+pre-registered. The BPF probe classified `SETTING_ABSENT` (the
+`unprivileged_bpf_disabled` sysctl file is not present), which is
+a classification, not a 0/1/2 value. An earlier report file under
+the first filename held a partial run (Binder and machine probes
+connection-failed, gate UNDETERMINED) and is superseded by this
+complete run. The remaining live free route is the FOTA consumer
+reverse-engineering line and its open UID 5001 reachability
+question (archive directory and state keys). **ROOT NOT VERIFIED;
+STOCK RESCUE NOT VERIFIED; LIVE FIRMWARE WRITES NO-GO.** Keep
+Issue #47 open.
+
 ## November 15, 2026: stock Tizen root is the immediate objective
 
 **Owner request:** Restore progress on obtaining root on the *physical*
