@@ -102,6 +102,33 @@ step. Separately, the offline consumer RE continuation still
 needs the October evidence ZIPs re-attached from the owner's
 phone (they do not persist in this workspace).
 
+**November 20 reachability result:** The owner executed the
+reachability collector on the physical watch; all eight probes
+classified. Shell UID confirmed 5001. The archive directory
+`/opt/usr/data/fota/save` is **PRESENT** with shell-class access
+`READ_WRITE_TRAVERSE` (owner and group are both other, so the
+world bits apply), and the shell **empirically listed it**
+(`LISTABLE`, 1–5 entries present, names discarded by design);
+its parent `/opt/usr/data/fota` is `READ_TRAVERSE` for the
+shell's class, so the traversal chain is open and read/traverse
+passed the live system, not just the mode bits. The other half
+of the question closed: `/opt/data/recovery` is `NO_ACCESS` for
+the shell's class and the DELTA.PATH node probe returned
+`ACCESS_DENIED`, and **both** vconf gets
+(`db/fotaconsumer/ui_state`, `db/fotaconsumer/state`) returned
+`ACCESS_DENIED` — the shell can neither read nor (by the same
+gate) drive the consumer's state keys, and cannot touch the
+recovery handoff side. Net: archive **placement** is POSIX-open
+and read-proven, but no write was attempted (an actual create
+under SMACK is still untested), and the vconf **trigger** is
+closed to the shell; per the consumer review, state 60 is set
+by the accessory service, not by any shell tool. The only
+trigger door not yet classified is a D-Bus method call to
+`fota.consumer` itself, which is a deliberate service
+invocation, not a read, and remains a separate owner decision.
+**ROOT NOT VERIFIED; STOCK RESCUE NOT VERIFIED; LIVE FIRMWARE
+WRITES NO-GO.** Keep Issue #47 open.
+
 ## November 15, 2026: stock Tizen root is the immediate objective
 
 **Owner request:** Restore progress on obtaining root on the *physical*
