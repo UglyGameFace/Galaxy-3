@@ -783,5 +783,77 @@ class RunningBusProvenanceTests(unittest.TestCase):
             policy.main(["--runtime-ip","10.115.12.131",
                          "--offline-focused-report","/unused/report.json"])
 
+
+PS_HEADER_SAMPLE = """PID TTY TIME CMD
+1 ? 00:00:03 systemd
+247 ? 00:00:00 dbus-daemon --system --private-flag=SECRET
+"""
+
+
+class PsHeaderDiagnosticTests(unittest.TestCase):
+    def test_header_observed_and_all_rows_discarded(self):
+        result=policy.parse_ps_header(PS_HEADER_SAMPLE)
+        self.assertEqual(result["status"],"PS_HEADER_OBSERVED")
+        self.assertEqual(result["header_tokens"],["PID","TTY","TIME","CMD"])
+        self.assertEqual(result["data_rows_discarded"],2)
+        self.assertFalse(result["header_matches_previously_supported_layout"])
+        self.assertNotIn("SECRET",json.dumps(result))
+        self.assertNotIn("dbus-daemon",json.dumps(result))
+        self.assertNotIn("247",json.dumps(result))
+
+    def test_supported_layout_is_recognized_not_relabelled(self):
+        result=policy.parse_ps_header(RUNTIME_PS_SAMPLE)
+        self.assertEqual(result["status"],"PS_HEADER_OBSERVED")
+        self.assertTrue(result["header_matches_previously_supported_layout"])
+
+    def test_unrecognized_header_reports_no_tokens(self):
+        for raw in ("garbage header line\n1 2 3\n",
+                    "PID USER VSZ STAT COMMAND EXTRA1 EXTRA2 EXTRA3 EXTRA4 EXTRA5 EXTRA6 EXTRA7 EXTRA8\n",
+                    "USER TTY TIME CMD\nroot ? 00:00:01 systemd\n"):
+            result=policy.parse_ps_header(raw)
+            self.assertEqual(result["status"],"PS_HEADER_UNRECOGNIZED")
+            self.assertEqual(result["header_tokens"],[])
+
+    def test_invalid_output_rejected(self):
+        with self.assertRaisesRegex(policy.PolicyError,"PS_HEADER_OUTPUT_INVALID"):
+            policy.parse_ps_header("")
+
+    def test_collector_uses_only_existing_snapshot_operation(self):
+        observed=[]
+        def query(ip,key,op):
+            observed.append(op)
+            return PS_HEADER_SAMPLE
+        with patch.object(policy,"runtime_bus_query",side_effect=query):
+            result=policy.collect_ps_header("10.115.12.131",Path("/unused"))
+        self.assertEqual(observed,["service_process_snapshot"])
+        self.assertFalse(result["process_data_retained"])
+        self.assertFalse(result["daemon_process_attested"])
+        self.assertEqual(result["effective_dbus_send_permission_for_shell"],
+                         "UNDETERMINED")
+        self.assertFalse(result["watch_write_performed"])
+        self.assertFalse(result["root_proven"])
+
+    def test_collector_failure_never_claims_layout(self):
+        with patch.object(policy,"runtime_bus_query",side_effect=policy.PolicyError(
+                "RUNTIME_SDB_SHELL_UNAVAILABLE")):
+            result=policy.collect_ps_header("10.115.12.131",Path("/unused"))
+        self.assertEqual(result["source"]["status"],"RUNTIME_SDB_SHELL_UNAVAILABLE")
+        self.assertFalse(result["process_data_retained"])
+
+    def test_header_cli_private_output_and_mode_exclusive(self):
+        with tempfile.TemporaryDirectory() as td:
+            path=Path(td)/"header.json"
+            with patch.object(policy,"collect_ps_header",return_value={
+                    "state":"READONLY_PS_HEADER_ONLY",
+                    "process_data_retained":False}):
+                self.assertEqual(policy.main(["--ps-header-ip","10.115.12.131",
+                                              "--report",str(path)]),0)
+                self.assertEqual(policy.main(["--ps-header-ip","10.115.12.131",
+                                              "--report",str(path)]),1)
+            self.assertEqual(path.stat().st_mode & 0o077,0)
+        with self.assertRaises(SystemExit):
+            policy.main(["--ps-header-ip","10.115.12.131",
+                         "--runtime-ip","10.115.12.131"])
+
 if __name__=="__main__":
     unittest.main()
