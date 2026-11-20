@@ -379,3 +379,57 @@ SMACK/Cynara enforcement or receiver authorization. The report
 therefore *never* evaluates a final D-Bus send-permission verdict.
 Exact signed SM-R840X stock rescue remains a separate prerequisite
 for any experimental firmware/partition write. Issue #47 stays open.
+
+
+## November 19, 2026: physical runtime result
+
+The owner ran `--runtime-ip` once on the physical SM-R840X. The unit
+query succeeded completely:
+
+- `dbus.service` is loaded, active and running, with a MainPID present.
+- The configured daemon family is `DBUS_DAEMON` (classic dbus-daemon,
+  not dbus-broker), so the documented dbus-daemon policy ordering is
+  the semantics of the configured implementation.
+- The configured `ExecStart` carries **no** explicit `--config-file`
+  flag (`NO_EXPLICIT_CONFIG_FLAG_SEEN`).
+
+The process snapshot returned `PS_LAYOUT_UNSUPPORTED`: the watch's
+real `ps` header is **not** the previously assumed BusyBox
+`PID USER VSZ STAT COMMAND` layout, so the parser discarded the raw
+output exactly as designed and no process was attested.
+
+**Established:** the configured system-bus unit and its daemon family.
+**Still unknown:** which configuration file the running daemon
+actually loaded (a configured unit is not a runtime attestation, and
+no process arguments were observed), the complete effective policy,
+the sender's bus UID, SMACK/Cynara enforcement and consumer-side
+authorization. Effective shell send permission remains UNDETERMINED,
+and this result is not root, a FOTA authorization, or a reason to call
+any privileged method.
+
+### One bounded follow-up: the ps header only
+
+The single missing fact is the real `ps` column layout. A new
+`--ps-header-ip` mode reuses the existing allowlisted
+`service_process_snapshot` query (`ps`) and retains **only the first
+line's column titles**; every process row is discarded on the phone
+before the report is written. Column titles contain no PID, user,
+process name or argument.
+
+```sh
+cd ~/Galaxy-3 && git switch main && git pull --ff-only
+python tools/watch3_r840x_dbus_policy_readonly.py \
+  --ps-header-ip <CURRENT_WATCH_IP> \
+  --report ~/watch3-r840x-ps-header.json
+cat ~/watch3-r840x-ps-header.json
+```
+
+With the real header known, the runtime parser can be extended to
+that exact layout in a later change and `--runtime-ip` re-run once to
+attest the running daemon's arguments. If that attestation still
+shows no explicit config flag, the loaded-config question stays an
+inference from the daemon's compiled-in default, and read-only D-Bus
+provenance work is exhausted: the remaining unknowns (sender UID,
+SMACK/Cynara, consumer checks) are not reachable by these collectors,
+and none of them would by itself grant root or bypass firmware
+signature validation.

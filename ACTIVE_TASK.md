@@ -6,6 +6,29 @@ stock version R840XXXU1AUA2, CSC PAP candidate. Android/Termux only,
 free only, preserve the working watch. The target is a verified
 **exact-variant stock rescue** followed by reproducible UgLy|OS boot.
 
+## November 19, 2026: runtime D-Bus capture executed; one header fact left
+
+The owner ran merged #142's `--runtime-ip` collector once on the
+physical watch. The `dbus.service` unit query succeeded: loaded,
+active, running, MainPID present, configured daemon family
+`DBUS_DAEMON` (classic dbus-daemon, not dbus-broker), and **no**
+explicit `--config-file` flag in the configured `ExecStart`. The
+process snapshot returned `PS_LAYOUT_UNSUPPORTED` — the watch's real
+`ps` header is not the previously assumed BusyBox
+`PID USER VSZ STAT COMMAND` layout, the raw output was discarded as
+designed, and no running process was attested. Established: the
+configured unit and daemon family only. Still unknown: the config
+file the running daemon actually loaded, the complete effective
+policy, sender bus UID, SMACK/Cynara and consumer-side checks.
+Effective shell send permission remains **UNDETERMINED**; this is not
+root and not a FOTA authorization. A bounded `--ps-header-ip`
+follow-up (retains only the `ps` column titles, discards every row)
+is prepared so the runtime parser can learn the real layout; after
+that single attestation re-run, read-only D-Bus provenance work is
+exhausted and the remaining D-Bus unknowns are not reachable by these
+collectors. **ROOT NOT VERIFIED; STOCK RESCUE NOT VERIFIED; LIVE
+FIRMWARE WRITES NO-GO.** Keep Issue #47 open.
+
 ## November 15, 2026: stock Tizen root is the immediate objective
 
 **Owner request:** Restore progress on obtaining root on the *physical*

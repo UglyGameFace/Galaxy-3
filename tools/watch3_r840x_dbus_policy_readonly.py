@@ -814,6 +814,73 @@ def collect_runtime_bus(ip: str, key: Path) -> dict:
     }
 
 
+PS_HEADER_TOKEN = re.compile(r"[A-Z%][A-Z0-9_%]{0,15}\Z")
+PS_HEADER_SUPPORTED_PREFIX = ["PID", "USER", "VSZ", "STAT", "COMMAND"]
+
+
+def parse_ps_header(raw: str) -> dict:
+    """Retain only the ps column titles; every data row is discarded here.
+
+    The November 19, 2026 physical ``--runtime-ip`` run proved the watch's
+    ``ps`` header is not the previously assumed BusyBox layout, but the
+    runtime parser correctly discarded the raw output, so the actual
+    layout stayed unknown. Column titles carry no PID, user, process
+    name or argument, so they are the one part of the output that can be
+    reported verbatim without weakening the privacy design.
+    """
+    if not isinstance(raw, str) or not 1 <= len(raw) <= RUNTIME_RAW_MAX:
+        raise PolicyError("PS_HEADER_OUTPUT_INVALID")
+    lines = raw.splitlines()
+    if len(lines) > 2000 or len(lines) < 1:
+        raise PolicyError("PS_HEADER_OUTPUT_INVALID")
+    tokens = lines[0].split()
+    if (not 2 <= len(tokens) <= 12
+            or not all(PS_HEADER_TOKEN.fullmatch(token) for token in tokens)
+            or "PID" not in tokens):
+        return {"status": "PS_HEADER_UNRECOGNIZED", "header_tokens": [],
+                "data_rows_discarded": 0}
+    return {
+        "status": "PS_HEADER_OBSERVED",
+        "header_tokens": tokens,
+        "data_rows_discarded": sum(1 for line in lines[1:] if line.strip()),
+        "header_matches_previously_supported_layout":
+            tokens[:5] == PS_HEADER_SUPPORTED_PREFIX,
+    }
+
+
+def collect_ps_header(ip: str, key: Path) -> dict:
+    """One existing allowlisted ``ps`` query; only its header is kept."""
+    ip = private_watch_ip(ip)
+    try:
+        source = parse_ps_header(
+            runtime_bus_query(ip, key, "service_process_snapshot"))
+    except PolicyError as exc:
+        source = {"status": str(exc)}
+    return {
+        "schema": "uglyos-r840x-ps-header-v1",
+        "state": "READONLY_PS_HEADER_ONLY",
+        "source": source,
+        "process_data_retained": False,
+        "daemon_process_attested": False,
+        "runtime_daemon_config_loaded_verified": False,
+        "complete_effective_dbus_policy_verified": False,
+        "sender_bus_uid_verified": False,
+        "smack_cynara_authorization": "UNDETERMINED",
+        "effective_dbus_send_permission_for_shell": "UNDETERMINED",
+        "fota_consumer_method_authorization": "UNDETERMINED",
+        "fota_method_called": False, "watch_write_performed": False,
+        "root_proven": False, "bootloader_unlocked": False,
+        "stock_recovery_proven": False,
+        "interpretation": (
+            "Only the ps column titles were retained; every process row "
+            "was discarded before this report was written. A header can "
+            "teach a future parser the real column layout. It does not "
+            "identify the running daemon, its arguments, any loaded "
+            "policy, or any sender permission."
+        ),
+    }
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     mode = p.add_mutually_exclusive_group(required=True)
@@ -822,13 +889,15 @@ def main(argv=None) -> int:
     mode.add_argument("--focused-detail-ip", help="Read only three fixed original D-Bus policy XML files")
     mode.add_argument("--offline-focused-report", type=Path, help="Review exact original three-file JSON without watch access")
     mode.add_argument("--runtime-ip", help="Two read-only metadata queries on existing system bus process/unit")
+    mode.add_argument("--ps-header-ip", help="Read only the ps column titles via the existing process snapshot query")
     p.add_argument("--key-path", type=Path, default=Path.home()/".config/galaxy3/watch3-sdbkey")
     p.add_argument("--report", type=Path, default=None)
     args = p.parse_args(argv)
     output_path = args.report or Path.home() / ("watch3-r840x-dbus-policy-static-review.json"
         if args.offline_report else "watch3-r840x-dbus-focused-default-rule-audit.json"
         if args.offline_focused_report else "watch3-r840x-dbus-runtime-provenance.json"
-        if args.runtime_ip else "watch3-r840x-dbus-focused-original-rules.json"
+        if args.runtime_ip else "watch3-r840x-ps-header.json"
+        if args.ps_header_ip else "watch3-r840x-dbus-focused-original-rules.json"
         if args.focused_detail_ip else "watch3-r840x-dbus-policy-evidence.json")
     try:
         if output_path.exists() or output_path.is_symlink():
@@ -845,6 +914,8 @@ def main(argv=None) -> int:
             result = collect_focused(args.focused_detail_ip, args.key_path)
         elif args.runtime_ip:
             result = collect_runtime_bus(args.runtime_ip, args.key_path)
+        elif args.ps_header_ip:
+            result = collect_ps_header(args.ps_header_ip, args.key_path)
         else:
             result = collect(args.watch_ip, args.key_path)
         payload = (json.dumps(result, indent=2)+"\n").encode("utf-8")
@@ -864,6 +935,7 @@ def main(argv=None) -> int:
     print(("OFFLINE_DBUS_POLICY_STATIC_REVIEW: " if args.offline_report else
            "OFFLINE_DBUS_FOCUSED_RULE_AUDIT: " if args.offline_focused_report else
            "READ_ONLY_DBUS_RUNTIME_PROVENANCE: " if args.runtime_ip else
+           "READ_ONLY_PS_HEADER: " if args.ps_header_ip else
            "READ_ONLY_DBUS_FOCUSED_ORIGINAL_RULES: " if args.focused_detail_ip else
            "READ_ONLY_DBUS_POLICY_EVIDENCE: ")+str(output_path))
     print("Partial config evidence only; no service call, execution or watch write.")
