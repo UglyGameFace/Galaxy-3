@@ -87,6 +87,21 @@ question (archive directory and state keys). **ROOT NOT VERIFIED;
 STOCK RESCUE NOT VERIFIED; LIVE FIRMWARE WRITES NO-GO.** Keep
 Issue #47 open.
 
+**November 20 reachability collector prepared:** A read-only
+collector for that reachability question is now built
+(`tools/watch3_r840x_fota_reachability_readonly.py`, doc
+`docs/watch3-r840x-fota-reachability-readonly.md`): eight fixed
+probes covering the shell UID class, metadata and listing classes
+for `/opt/usr/data/fota/save` and its parent, the
+`/opt/data/recovery` directory and DELTA.PATH node presence, and
+read-only gets of the `db/fotaconsumer/ui_state` and
+`db/fotaconsumer/state` vconf keys. It creates no file, sets no
+key, calls no FOTA method; a POSIX write bit would be reported
+as a class only, never tested. One owner run is the next physical
+step. Separately, the offline consumer RE continuation still
+needs the October evidence ZIPs re-attached from the owner's
+phone (they do not persist in this workspace).
+
 ## November 15, 2026: stock Tizen root is the immediate objective
 
 **Owner request:** Restore progress on obtaining root on the *physical*

@@ -181,6 +181,22 @@ KERNEL_GATE_PROBES = {
     "bpf_unprivileged_disabled": "cat /proc/sys/kernel/unprivileged_bpf_disabled",
 }
 ALLOWED_PROBES.update(KERNEL_GATE_PROBES)
+# FOTA reachability facts only: can the UID 5001 shell even see the
+# update archive directory, its parent, the recovery handoff
+# directory/node, and can it read (never set) the two consumer vconf
+# state keys? Metadata, listing and get queries only; no file is
+# created, no key is set, no FOTA method is called.
+FOTA_REACHABILITY_PROBES = {
+    "shell_uid": "id -u",
+    "fota_parent_dir_metadata": "ls -ldn /opt/usr/data/fota",
+    "fota_save_dir_metadata": "ls -ldn /opt/usr/data/fota/save",
+    "fota_save_dir_listing": "ls /opt/usr/data/fota/save",
+    "recovery_dir_metadata": "ls -ldn /opt/data/recovery",
+    "delta_path_node": "ls /opt/data/recovery/DELTA.PATH",
+    "vconf_ui_state": "vconftool get db/fotaconsumer/ui_state",
+    "vconf_consumer_state": "vconftool get db/fotaconsumer/state",
+}
+ALLOWED_PROBES.update(FOTA_REACHABILITY_PROBES)
 
 
 PORT = 26101
