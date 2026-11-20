@@ -63,3 +63,39 @@ python tools/watch3_r840x_fota_reachability_readonly.py \
 
 Root, bootloader unlock and stock recovery remain unproven, and
 firmware writes remain NO-GO regardless of this report.
+
+## Result — November 20, 2026 physical run
+
+The owner ran the collector on the physical watch and all eight
+probes classified:
+
+- `shell_uid`: `SHELL_UID_5001` — the probe chain ran as the
+  expected shell identity.
+- `fota_parent_dir_metadata` (`/opt/usr/data/fota`): PRESENT,
+  owner/group other, shell class `READ_TRAVERSE`.
+- `fota_save_dir_metadata` (`/opt/usr/data/fota/save`): PRESENT,
+  owner/group other, shell class `READ_WRITE_TRAVERSE`.
+- `fota_save_dir_listing`: `LISTABLE`, entry-count class
+  `ONE_TO_FIVE` (names discarded). The shell listed the archive
+  directory on the live system, so read/traverse reachability is
+  empirical, not only a mode-bit reading.
+- `recovery_dir_metadata` (`/opt/data/recovery`): PRESENT,
+  shell class `NO_ACCESS`.
+- `delta_path_node`: `ACCESS_DENIED` — consistent with the
+  recovery directory granting the shell no traversal.
+- `vconf_ui_state` and `vconf_consumer_state`: both
+  `ACCESS_DENIED`; `vconf_get_answered` is false.
+
+Reading: archive placement is POSIX-open for the shell's class
+and its read side is proven live; an actual file creation was
+not attempted, so a SMACK denial at create time is not excluded.
+The trigger side is closed to the shell: it cannot read the
+consumer's vconf state keys, and per the consumer review the
+state-60 transition is performed by the accessory service, not
+by any shell tool; the recovery handoff directory and
+DELTA.PATH are likewise closed. The one trigger door this
+collector deliberately did not touch is a D-Bus method call to
+`fota.consumer` — a service invocation, not a read, whose
+shell-send outcome remains UNDETERMINED from the earlier
+provenance work. This result is not root, not an update
+trigger, and changes nothing about the firmware-write NO-GO.
