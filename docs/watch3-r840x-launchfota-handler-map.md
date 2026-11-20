@@ -121,3 +121,82 @@ Pre-registered reading of the outcome:
   firmware-action NO-GO until an offline-verified exact-R840X
   rescue set exists, and the D-Bus door is then recorded as
   trigger-capable, not as an experiment to run.
+
+## Trace result — November 20, 2026
+
+The owner supplied the pinned consumer binary from the phone;
+it was verified byte-exact before decoding (89,980 bytes,
+SHA-256 `19ad8468…c676a1a`, build ID `bb62b3fe…`, and the repo
+analyzer's pinned profile re-verified against it). The handler
+was decoded with Capstone, resolving calls through the actual
+ARM PLT stubs and GOT relocations (resolver validated against
+the known `sync_agent_dm_fota_install` stub at `0x3a44` and the
+analyzer's verified call sites). The binary was never executed.
+
+**Dispatch.** The handler compares the incoming method name
+with `g_strcmp0` in a chain. The `LaunchFota` comparison is at
+`0xc65e` (candidate literal `0x14428` loaded at `0xc658`); on
+equality control branches to the branch body at `0xc6f6`. (The
+next comparison, `ReadMore` at `0xc66e`, falls through to a
+direct call at `0xc67c` and rejoins the common exit.)
+
+**Branch body (`0xc6f6`, complete).** Three operations only:
+load the timeout interval `0x3e8` (1000 ms), compute the
+callback pointer `0xadb1` (Thumb) by PIC add, and call
+`g_timeout_add` at `0xc6fe` — the user-data register holds the
+zero left by the equal comparison. Control then rejoins the
+handler's common exit at `0xbb36`. The D-Bus reply (the
+consumer's own PID) was already returned in the shared
+prologue at `0xbadc`. **The branch itself touches no state,
+no archive, and no update function.**
+
+**The deferred callback is `_do_launch_oma_dm_agent`
+(`0xadb0`)** — identified by its own debug-log function-name
+string. One second after the method call it:
+
+1. Tests the OMA-DM enabled marker by opening
+   `/opt/usr/data/fota/oma-dm/.oma-dm-agent-enabled` for read
+   (helper at `0xa640`: `fopen`/`fclose` only).
+2. If that check returns 0, calls the helper at `0xa4a0`,
+   which makes a synchronous D-Bus proxy call
+   (`g_dbus_proxy_new_for_bus_sync`,
+   `g_dbus_proxy_call_sync`) to bus name
+   `com.samsung.omadmagent`, object `/com/samsung/omadmagent`,
+   method `Launch`, with argument `(i)` built from the
+   consumer's own `getpid`. A failure result is logged and the
+   flow continues regardless.
+3. Reads `db/retailmode/enabled` with `vconf_get_int`
+   (helper at `0x9ecc`).
+4. Calls `set_fota_context_processing_result` (`0x48f8`,
+   device-ctrl.c), which performs
+   `vconf_set_int(db/fotaconsumer/fota_enabler, 10)` when the
+   retail-mode value is positive, else `…, 0)`.
+5. Calls `_fota_consumer_terminate` (`0xad1c`), which quits
+   the consumer's main loop (`g_main_loop_quit`) when one is
+   running. The callback then returns FALSE, so the timeout
+   is one-shot.
+
+**Bounded conclusion.** Inside this binary, `LaunchFota` is a
+**handoff, not an update trigger**: it wakes the separate
+OMA-DM agent (when the enabled marker is absent), records the
+retail-mode-derived `fota_enabler` value, and the consumer
+exits. The traced chain contains **no** call to
+`do_device_control` (`0x6530`), `device_ctrl_do_firmware_update`
+(`0x61d0`), `_pre_update_client` (`0x437c`), any
+`sync_agent_dm_fota_*` import, and no access to
+`/opt/usr/data/fota/save`, `delta.tar`/`delta.ua`,
+`/opt/data/recovery/DELTA.PATH`, or the vconf keys
+`db/fotaconsumer/ui_state` / `db/fotaconsumer/state`. Under
+the pre-registered reading, a future D-Bus probe of this
+method is therefore **not** a firmware action — but it is not
+a no-op either: its real side effects are an OMA-DM agent
+launch, a vconf write, and the consumer process exiting (it
+is D-Bus-activated and would start again on demand). Two
+questions stay open and are **not** answered by this trace:
+whether the shell's principal may send the method at all
+(bus policy, still UNDETERMINED), and what the OMA-DM agent
+does after being launched with `fota_enabler` set — that
+behavior lives in the separate `oma-dm-agent` binary and
+nothing here establishes it. Any probe remains a separate
+owner decision; root, bootloader unlock and stock rescue
+remain NOT verified, and firmware writes remain NO-GO.
