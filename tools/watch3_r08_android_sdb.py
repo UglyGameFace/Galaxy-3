@@ -170,6 +170,17 @@ DBUS_RUNTIME_PROBES = {
     "dbus_runtime_unit": "systemctl --system --no-pager --no-ask-password show --property=Id --property=LoadState --property=ActiveState --property=SubState --property=MainPID --property=ExecStart dbus.service",
 }
 ALLOWED_PROBES.update(DBUS_RUNTIME_PROBES)
+# Kernel-route gate facts only: machine class, Binder node presence and
+# the unprivileged-BPF switch. These decide whether any public kernel
+# LPE family is even reachable from the shell; they never load a
+# module, open a device, or attempt an exploit.
+KERNEL_GATE_PROBES = {
+    "kernel_machine": "uname -m",
+    "binder_node": "ls /dev/binder",
+    "binderfs_control_node": "ls /dev/binderfs/binder-control",
+    "bpf_unprivileged_disabled": "cat /proc/sys/kernel/unprivileged_bpf_disabled",
+}
+ALLOWED_PROBES.update(KERNEL_GATE_PROBES)
 
 
 PORT = 26101

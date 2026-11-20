@@ -46,6 +46,26 @@ rescue-firmware hunt and CVE-2021-25434–25437 exact-binary
 research. **ROOT NOT VERIFIED; STOCK RESCUE NOT VERIFIED; LIVE
 FIRMWARE WRITES NO-GO.** Keep Issue #47 open.
 
+**November 20 research synthesis (owner directive: free routes
+only, reverse engineer):** Three sweeps closed the literature
+routes. No lawfully obtainable R840X-specific U1 firmware exists in
+any public source; the only real combination artifact is the retail
+SM-R840 FT55 set behind a paywall, and the owner declined paid
+routes. The R810 sibling recipe reduces to that same missing
+combination sboot. The CVE literature contains nothing further
+(researcher Soomin Shin, WatchOver/KITRI BoB; no writeups or PoCs
+exist). The live free routes are therefore: (1) continued offline
+reverse engineering of the already-captured FOTA binaries — the
+consumer's archive-supplied pre-update execution has no observed
+signature gate, while the OMA-DM daemon verifies and its plugin
+continues anyway; the open question is UID 5001 reachability of the
+archive directory and state keys; and (2) the new read-only
+kernel-gate collector (`tools/watch3_r840x_kernel_gate_readonly.py`,
+doc `docs/watch3-r840x-kernel-gate-readonly.md`), whose four fixed
+probes (machine class, Binder node presence, BPF switch) decide
+whether the CVE-2019-2215 Binder family exists on this device at
+all. One owner run of that collector is the next physical step.
+
 ## November 15, 2026: stock Tizen root is the immediate objective
 
 **Owner request:** Restore progress on obtaining root on the *physical*
