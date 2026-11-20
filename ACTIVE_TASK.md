@@ -34,9 +34,17 @@ on the physical watch. The real header is `PID TTY TIME CMD`
 (procps), and plain `ps` in the SDB shell returned exactly one row —
 it is session-scoped and could never have shown the system-bus
 daemon. The runtime parser now accepts that exact layout, and the
-allowlisted snapshot command is the fixed literal `ps -e`. One
-`--runtime-ip` re-run remains to attest the running daemon's
-arguments; permission stays UNDETERMINED either way.
+allowlisted snapshot command is the fixed literal `ps -e`. The
+final `--runtime-ip` re-run was executed the same night: the
+snapshot parsed and returned zero daemon candidates — the running
+daemon's arguments are not visible from the UID 5001 shell even
+with `ps -e` (restricted process visibility is the consistent
+inference). **Read-only D-Bus provenance is closed**: configured
+daemon family and ExecStart known, running arguments unattested,
+effective permission UNDETERMINED. Remaining routes: the authentic
+rescue-firmware hunt and CVE-2021-25434–25437 exact-binary
+research. **ROOT NOT VERIFIED; STOCK RESCUE NOT VERIFIED; LIVE
+FIRMWARE WRITES NO-GO.** Keep Issue #47 open.
 
 ## November 15, 2026: stock Tizen root is the immediate objective
 

@@ -462,3 +462,41 @@ carries `process_is_system_bus_attested: false`: it shows a running
 daemon's argv0 and flags, not its loaded policy, sender credentials,
 or any permission. Permission remains UNDETERMINED and firmware
 writes remain NO-GO.
+
+
+## November 20, 2026: final runtime re-run — provenance route closed
+
+The owner executed the final `--runtime-ip` re-run on the physical
+watch (report `watch3-dbus-runtime-20261120.json`, state
+`PARTIAL_READONLY_RUNTIME_PROVENANCE`):
+
+- `dbus_runtime_unit` reconfirmed the configured facts:
+  `dbus.service` loaded, active, running, MainPID present,
+  configured family `DBUS_DAEMON`, no explicit `--config-file` in
+  the configured ExecStart.
+- `service_process_snapshot` now parsed successfully
+  (`PS_SNAPSHOT_PARSED`, layout `PROCPS_PID_TTY_TIME_CMD`) — and
+  returned **zero** candidate processes, not truncated.
+
+Zero candidates under `ps -e` is the closing evidence for this
+route. The unit proves a `dbus-daemon` system bus is running, yet
+no daemon-family argv0 is visible from the UID 5001 SDB shell even
+with an all-processes listing. The most consistent explanation is
+that process visibility from this shell is restricted (for example
+`/proc` hidepid or SMACK-mediated `/proc` access); that mechanism
+is an inference, not proven, and distinguishing it would require
+exactly the privileged visibility the shell lacks. Either way, the
+running daemon's arguments are **not** independently attested and
+cannot be attested by these collectors.
+
+**Read-only D-Bus provenance work is therefore exhausted.** Final
+state of the line: configured daemon family known (dbus-daemon),
+configured ExecStart known (no explicit config flag, consistent
+with the compiled-in default path), running arguments unattested,
+effective shell send permission UNDETERMINED, SMACK/Cynara
+UNDETERMINED. No further collector in this family can change those
+verdicts, and none of them would by itself grant root or bypass
+firmware signature validation. Remaining routes are unchanged: the
+authentic exact-variant rescue firmware hunt and the
+CVE-2021-25434–25437 exact-binary research. Firmware writes remain
+NO-GO; root remains NOT VERIFIED.
